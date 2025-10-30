@@ -38,7 +38,7 @@ with tab1:
             # Rename columns for display
             display_df.columns = ['Name', 'Email', 'Department', 'Role', 'Hourly Rate', 'FTE', 'Utilization', 'Hire Date', 'Skills']
 
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            st.dataframe(display_df, width='stretch', hide_index=True)
 
         else:
             # Card view with filters
@@ -136,7 +136,7 @@ with tab2:
             yaxis_title="Utilization %",
             height=400
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
         
         # Detailed metrics
         col1, col2 = st.columns(2)
@@ -163,7 +163,7 @@ with tab2:
         }).round(2)
         
         st.markdown("##### Department Performance")
-        st.dataframe(dept_util, use_container_width=True)
+        st.dataframe(dept_util, width='stretch')
 
 with tab3:
     st.markdown("#### Add New Employee")

@@ -40,9 +40,9 @@ if [ $? -eq 0 ]; then
     echo ""
     echo "Press Ctrl+C to stop the server"
     echo ""
-    
+
     # Run the application
-    streamlit run app.py
+    streamlit run app.py --server.headless true
 else
     echo ""
     echo "❌ Failed to install packages. Please check the error messages above."

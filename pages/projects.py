@@ -3,6 +3,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
 from datetime import datetime
+from components.burn_rate_editor import show_burn_rate_editor
 
 
 db = st.session_state.db_manager
@@ -17,13 +18,13 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(["Project List", "Project Details", "Add 
 with tab1:
     # Load projects
     projects_df = db.get_projects()
-    
+
     # Apply filters
     if filters['projects']:
         projects_df = projects_df[projects_df['name'].isin(filters['projects'])]
     if filters['status']:
         projects_df = projects_df[projects_df['status'].isin(filters['status'])]
-    
+
     if not projects_df.empty:
         # Display options
         col1, col2 = st.columns([3, 1])
@@ -31,7 +32,7 @@ with tab1:
             st.markdown("#### All Projects")
         with col2:
             view_mode = st.selectbox("View", ["Table", "Cards"], label_visibility="collapsed")
-        
+
         if view_mode == "Table":
             # Table view
             display_df = projects_df[[
@@ -39,13 +40,13 @@ with tab1:
                 'start_date', 'end_date', 'budget_allocated', 'budget_used',
                 'revenue_projected', 'revenue_actual'
             ]].copy()
-            
+
             # Format currency columns
             for col in ['budget_allocated', 'budget_used', 'revenue_projected', 'revenue_actual']:
                 display_df[col] = display_df[col].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "-")
-            
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
-            
+
+            st.dataframe(display_df, width='stretch', hide_index=True)
+
         else:
             # Card view
             cols = st.columns(3)
@@ -59,23 +60,23 @@ with tab1:
                             'On Hold': '🟡',
                             'Cancelled': '🔴'
                         }.get(project['status'], '⚪')
-                        
+
                         st.markdown(f"### {status_color} {project['name']}")
                         st.write(f"**Client:** {project['client']}")
                         st.write(f"**PM:** {project['project_manager']}")
                         st.write(f"**Status:** {project['status']}")
-                        
+
                         # Progress bars
                         if project['budget_allocated']:
                             budget_used_pct = (project['budget_used'] / project['budget_allocated'] * 100)
                             st.progress(min(budget_used_pct / 100, 1.0))
                             st.caption(f"Budget: ${project['budget_used']:,.0f} / ${project['budget_allocated']:,.0f}")
-                        
+
                         if project['revenue_projected']:
                             revenue_pct = (project['revenue_actual'] / project['revenue_projected'] * 100)
                             st.progress(min(revenue_pct / 100, 1.0))
                             st.caption(f"Revenue: ${project['revenue_actual']:,.0f} / ${project['revenue_projected']:,.0f}")
-                        
+
                         st.write(f"**Duration:** {project['start_date']} to {project['end_date']}")
                         st.markdown("---")
     else:
@@ -84,66 +85,67 @@ with tab1:
 with tab2:
     # Project details view
     projects_df = db.get_projects()
-    
+
     if not projects_df.empty:
         selected_project = st.selectbox(
             "Select Project",
-            options=projects_df['name'].tolist()
+            options=projects_df['name'].tolist(),
+            index=5,
         )
-        
+
         if selected_project:
             project = projects_df[projects_df['name'] == selected_project].iloc[0]
             project_id = project['id']
-            
+
             # Project header
             col1, col2, col3 = st.columns([2, 1, 1])
-            
+
             with col1:
                 st.markdown(f"## {project['name']}")
                 st.write(project['description'])
-            
+
             with col2:
                 st.metric("Status", project['status'])
                 st.metric("Client", project['client'])
-            
+
             with col3:
                 st.metric("Project Manager", project['project_manager'])
                 profit = project['revenue_actual'] - project['budget_used']
                 st.metric("Profit/Loss", f"${profit:,.0f}")
-            
+
             # Tabs for project details
-            detail_tab1, detail_tab2, detail_tab3, detail_tab4 = st.tabs(
-                ["Financial", "Team", "Timeline", "Expenses"]
+            detail_tab1, detail_tab2, detail_tab3, detail_tab4, detail_tab5 = st.tabs(
+                ["Financial", "Team", "Timeline", "Expenses", "Burn Rate"]
             )
-            
+
             with detail_tab1:
                 # Financial metrics
                 col1, col2 = st.columns(2)
-                
+
                 with col1:
                     st.markdown("#### Budget")
                     st.metric("Allocated", f"${project['budget_allocated']:,.0f}")
                     st.metric("Used", f"${project['budget_used']:,.0f}")
                     remaining = project['budget_allocated'] - project['budget_used']
                     st.metric("Remaining", f"${remaining:,.0f}")
-                    
+
                     if project['budget_allocated'] > 0:
                         budget_pct = project['budget_used'] / project['budget_allocated'] * 100
                         st.progress(min(budget_pct / 100, 1.0))
                         st.caption(f"Budget Utilization: {budget_pct:.1f}%")
-                
+
                 with col2:
                     st.markdown("#### Revenue")
                     st.metric("Projected", f"${project['revenue_projected']:,.0f}")
                     st.metric("Actual", f"${project['revenue_actual']:,.0f}")
                     variance = project['revenue_actual'] - project['revenue_projected']
                     st.metric("Variance", f"${variance:,.0f}")
-                    
+
                     if project['revenue_projected'] > 0:
                         revenue_pct = project['revenue_actual'] / project['revenue_projected'] * 100
                         st.progress(min(revenue_pct / 100, 1.0))
                         st.caption(f"Revenue Achievement: {revenue_pct:.1f}%")
-                
+
                 # Cost breakdown
                 costs = processor.calculate_project_costs(
                     project_id,
@@ -151,7 +153,7 @@ with tab2:
                     db.get_expenses(project_id=project_id),
                     db.get_time_entries(project_id=project_id)
                 )
-                
+
                 st.markdown("#### Cost Breakdown")
                 col1, col2, col3 = st.columns(3)
                 with col1:
@@ -160,11 +162,11 @@ with tab2:
                     st.metric("Expense Cost", f"${costs['expense_cost']:,.0f}")
                 with col3:
                     st.metric("Total Cost", f"${costs['total_cost']:,.0f}")
-                
+
                 # Cost charts
                 if costs['cost_breakdown']:
                     col1, col2 = st.columns(2)
-                    
+
                     with col1:
                         if 'by_employee' in costs['cost_breakdown'] and costs['cost_breakdown']['by_employee']:
                             fig = px.pie(
@@ -172,8 +174,8 @@ with tab2:
                                 names=list(costs['cost_breakdown']['by_employee'].keys()),
                                 title="Cost by Employee"
                             )
-                            st.plotly_chart(fig, use_container_width=True)
-                    
+                            st.plotly_chart(fig, width='stretch')
+
                     with col2:
                         if 'by_category' in costs['cost_breakdown'] and costs['cost_breakdown']['by_category']:
                             fig = px.pie(
@@ -181,39 +183,39 @@ with tab2:
                                 names=list(costs['cost_breakdown']['by_category'].keys()),
                                 title="Cost by Category"
                             )
-                            st.plotly_chart(fig, use_container_width=True)
-            
+                            st.plotly_chart(fig, width='stretch')
+
             with detail_tab2:
                 # Team allocation
                 allocations_df = db.get_allocations(project_id=project_id)
-                
+
                 if not allocations_df.empty:
                     st.markdown("#### Team Members")
-                    
+
                     for _, allocation in allocations_df.iterrows():
                         col1, col2, col3, col4 = st.columns(4)
-                        
+
                         with col1:
                             st.write(f"**{allocation['employee_name']}**")
                             st.caption(allocation['department'])
-                        
+
                         with col2:
                             st.write(f"Role: {allocation['role']}")
                             st.write(f"Allocation: {allocation['allocation_percent']:.0f}%")
-                        
+
                         with col3:
                             st.write(f"Hours Projected: {allocation['hours_projected']:.0f}")
                             st.write(f"Hours Actual: {allocation['hours_actual']:.0f}")
-                        
+
                         with col4:
                             variance = allocation['hours_actual'] - allocation['hours_projected']
                             if variance > 0:
                                 st.error(f"Over by {variance:.0f} hours")
                             else:
                                 st.success(f"Under by {abs(variance):.0f} hours")
-                        
+
                         st.markdown("---")
-                    
+
                     # Team utilization chart
                     fig = go.Figure(data=[
                         go.Bar(
@@ -232,14 +234,14 @@ with tab2:
                         barmode='group',
                         height=400
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width='stretch')
                 else:
                     st.info("No team members allocated to this project")
-            
+
             with detail_tab3:
                 # Timeline
                 st.markdown("#### Project Timeline")
-                
+
                 col1, col2, col3 = st.columns(3)
                 with col1:
                     st.write(f"**Start Date:** {project['start_date']}")
@@ -248,13 +250,13 @@ with tab2:
                 with col3:
                     days_total = (pd.to_datetime(project['end_date']) - pd.to_datetime(project['start_date'])).days
                     st.write(f"**Duration:** {days_total} days")
-                
+
                 # Progress
                 if project['status'] == 'Active':
                     today = pd.Timestamp.now()
                     start = pd.to_datetime(project['start_date'])
                     end = pd.to_datetime(project['end_date'])
-                    
+
                     if today >= start and today <= end:
                         days_elapsed = (today - start).days
                         progress = days_elapsed / days_total * 100
@@ -264,13 +266,13 @@ with tab2:
                         st.info("Project not started yet")
                     else:
                         st.warning("Project past scheduled end date")
-                
+
                 # Time entries over time
                 time_entries = db.get_time_entries(project_id=project_id)
                 if not time_entries.empty:
                     time_entries['date'] = pd.to_datetime(time_entries['date'])
                     daily_hours = time_entries.groupby('date')['hours'].sum().reset_index()
-                    
+
                     fig = px.line(
                         daily_hours,
                         x='date',
@@ -279,27 +281,27 @@ with tab2:
                         markers=True
                     )
                     fig.update_layout(height=400)
-                    st.plotly_chart(fig, use_container_width=True)
-            
+                    st.plotly_chart(fig, width='stretch')
+
             with detail_tab4:
                 # Expenses
                 expenses_df = db.get_expenses(project_id=project_id)
-                
+
                 if not expenses_df.empty:
                     st.markdown("#### Project Expenses")
-                    
+
                     # Summary by category
                     category_summary = expenses_df.groupby('category')['amount'].sum().reset_index()
-                    
+
                     col1, col2 = st.columns(2)
-                    
+
                     with col1:
                         st.dataframe(
                             category_summary.rename(columns={'amount': 'Total Amount'}),
-                            use_container_width=True,
+                            width='stretch',
                             hide_index=True
                         )
-                    
+
                     with col2:
                         fig = px.pie(
                             category_summary,
@@ -307,8 +309,8 @@ with tab2:
                             names='category',
                             title="Expenses by Category"
                         )
-                        st.plotly_chart(fig, use_container_width=True)
-                    
+                        st.plotly_chart(fig, width='stretch')
+
                     # Detailed expense list
                     st.markdown("##### Expense Details")
                     expense_display = expenses_df[[
@@ -316,43 +318,47 @@ with tab2:
                     ]].copy()
                     expense_display['approved'] = expense_display['approved'].map({0: '❌', 1: '✅'})
                     expense_display['amount'] = expense_display['amount'].apply(lambda x: f"${x:,.2f}")
-                    
-                    st.dataframe(expense_display, use_container_width=True, hide_index=True)
+
+                    st.dataframe(expense_display, width='stretch', hide_index=True)
                 else:
                     st.info("No expenses recorded for this project")
+
+            with detail_tab5:
+                # Burn Rate Analysis
+                show_burn_rate_editor(project, db, processor)
     else:
         st.info("No projects available")
 
 with tab3:
     # Add new project
     st.markdown("#### Add New Project")
-    
+
     with st.form("add_project_form"):
         col1, col2 = st.columns(2)
-        
+
         with col1:
             name = st.text_input("Project Name*")
             description = st.text_area("Description")
             client = st.text_input("Client*")
             project_manager = st.text_input("Project Manager*")
-        
+
         with col2:
             status = st.selectbox("Status", ["Active", "On Hold", "Completed", "Cancelled"])
             start_date = st.date_input("Start Date")
             end_date = st.date_input("End Date")
             budget_allocated = st.number_input("Budget Allocated", min_value=0.0, step=1000.0)
-        
+
         col1, col2 = st.columns(2)
-        
+
         with col1:
             revenue_projected = st.number_input("Revenue Projected", min_value=0.0, step=1000.0)
-        
+
         with col2:
             budget_used = st.number_input("Budget Used", min_value=0.0, step=1000.0, value=0.0)
             revenue_actual = st.number_input("Revenue Actual", min_value=0.0, step=1000.0, value=0.0)
-        
+
         submitted = st.form_submit_button("Add Project")
-        
+
         if submitted:
             if name and client and project_manager:
                 project_data = {
@@ -368,7 +374,7 @@ with tab3:
                     'revenue_projected': revenue_projected,
                     'revenue_actual': revenue_actual
                 }
-                
+
                 try:
                     db.add_project(project_data)
                     st.success(f"Project '{name}' added successfully!")
@@ -564,19 +570,19 @@ with tab5:
     if not projects_df.empty:
         # Project comparison
         st.markdown("#### Project Comparison")
-        
+
         selected_projects = st.multiselect(
             "Select projects to compare",
             options=projects_df['name'].tolist(),
             default=projects_df['name'].tolist()[:5]
         )
-        
+
         if selected_projects:
-            comparison_df = projects_df[projects_df['name'].isin(selected_projects)]
-            
+            comparison_df = projects_df[projects_df['name'].isin(selected_projects)].copy()
+
             # Comparison charts
             col1, col2 = st.columns(2)
-            
+
             with col1:
                 # Budget comparison
                 fig = go.Figure()
@@ -595,8 +601,8 @@ with tab5:
                     barmode='group',
                     height=400
                 )
-                st.plotly_chart(fig, use_container_width=True)
-            
+                st.plotly_chart(fig, width='stretch')
+
             with col2:
                 # Revenue comparison
                 fig = go.Figure()
@@ -615,14 +621,14 @@ with tab5:
                     barmode='group',
                     height=400
                 )
-                st.plotly_chart(fig, use_container_width=True)
-            
+                st.plotly_chart(fig, width='stretch')
+
             # Profitability analysis
             st.markdown("#### Profitability Analysis")
-            
+
             comparison_df['profit'] = comparison_df['revenue_actual'] - comparison_df['budget_used']
             comparison_df['profit_margin'] = (comparison_df['profit'] / comparison_df['revenue_actual'] * 100).fillna(0)
-            
+
             fig = go.Figure()
             fig.add_trace(go.Scatter(
                 x=comparison_df['revenue_actual'],
@@ -644,6 +650,6 @@ with tab5:
                 yaxis_title="Profit",
                 height=500
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
     else:
         st.info("No projects available for analysis")

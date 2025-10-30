@@ -47,9 +47,9 @@ def generate_executive_summary(db, processor):
 
         # Project summary
         st.markdown("#### Project Summary")
-        summary_df = projects_df[['name', 'status', 'budget_allocated', 'budget_used', 'revenue_actual']]
+        summary_df = projects_df[['name', 'status', 'budget_allocated', 'budget_used', 'revenue_actual']].copy()
         summary_df['Budget Variance'] = summary_df['budget_allocated'] - summary_df['budget_used']
-        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+        st.dataframe(summary_df, width='stretch', hide_index=True)
 
         # Download option
         if st.button("Download Report"):
@@ -105,7 +105,7 @@ def generate_project_status_report(db, processor):
                 st.markdown("#### Team Allocation")
                 st.dataframe(
                     allocations_df[['employee_name', 'role', 'allocation_percent', 'hours_projected', 'hours_actual']],
-                    use_container_width=True,
+                    width='stretch',
                     hide_index=True
                 )
 
@@ -138,7 +138,7 @@ def generate_resource_report(db, processor):
             # Detailed table
             st.markdown("#### Employee Details")
             display_df = utilization_df[['name', 'department', 'utilization_rate', 'billable_hours', 'revenue_generated']]
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            st.dataframe(display_df, width='stretch', hide_index=True)
 
             # Utilization chart
             fig = px.bar(
@@ -148,7 +148,7 @@ def generate_resource_report(db, processor):
                 color='department',
                 title="Utilization by Employee"
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
 def generate_financial_report(db, processor):
     st.markdown("#### Financial Report")
@@ -185,7 +185,7 @@ def generate_financial_report(db, processor):
         financial_df = projects_df[['name', 'revenue_actual', 'budget_used']].copy()
         financial_df['Profit'] = financial_df['revenue_actual'] - financial_df['budget_used']
         financial_df['Margin %'] = (financial_df['Profit'] / financial_df['revenue_actual'] * 100).round(1)
-        st.dataframe(financial_df, use_container_width=True, hide_index=True)
+        st.dataframe(financial_df, width='stretch', hide_index=True)
 
         # Expense breakdown
         if not expenses_df.empty:
@@ -198,7 +198,7 @@ def generate_financial_report(db, processor):
                 names='category',
                 title="Expenses by Category"
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
 def generate_custom_report(db, processor):
     st.markdown("#### Custom Report Builder")
@@ -260,7 +260,7 @@ def generate_custom_report(db, processor):
         for section, data in report_data.items():
             if not data.empty:
                 st.markdown(f"#### {section}")
-                st.dataframe(data, use_container_width=True, hide_index=True)
+                st.dataframe(data, width='stretch', hide_index=True)
 
                 # Download option for each section
                 csv = data.to_csv(index=False)

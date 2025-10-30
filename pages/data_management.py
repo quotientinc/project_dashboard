@@ -38,7 +38,7 @@ with tab1:
         try:
             df = pd.read_csv(uploaded_file)
             st.markdown("##### Data Preview")
-            st.dataframe(df.head(), use_container_width=True)
+            st.dataframe(df.head(), width='stretch')
             
             # Data validation
             st.markdown("##### Data Validation")
@@ -140,7 +140,7 @@ with tab2:
                 
                 # Preview
                 st.markdown("##### Export Preview")
-                st.dataframe(export_df.head(), use_container_width=True)
+                st.dataframe(export_df.head(), width='stretch')
                 st.info(f"Export contains {len(export_df)} records")
             else:
                 st.warning(f"No data found for {export_type}")

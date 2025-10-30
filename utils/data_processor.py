@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
+from dateutil.relativedelta import relativedelta
+import calendar
 
 class DataProcessor:
     """Process and analyze project management data"""
@@ -159,9 +161,10 @@ class DataProcessor:
                 costs['labor_cost'] = labor_cost
                 
                 # Breakdown by employee
-                employee_costs = project_time.groupby('employee_name').apply(
-                    lambda x: (x['hours'] * x['hourly_rate']).sum()
-                ).to_dict()
+                # Calculate cost per row first, then group and sum
+                project_time_copy = project_time.copy()
+                project_time_copy['cost'] = project_time_copy['hours'] * project_time_copy['hourly_rate']
+                employee_costs = project_time_copy.groupby('employee_name')['cost'].sum().to_dict()
                 costs['cost_breakdown']['by_employee'] = employee_costs
         
         # Expense costs
@@ -196,10 +199,10 @@ class DataProcessor:
                 continue
             
             # Get recent time entries
-            project_time = time_entries_df[time_entries_df['project_id'] == project['id']]
+            project_time = time_entries_df[time_entries_df['project_id'] == project['id']].copy()
             if project_time.empty:
                 continue
-            
+
             project_time['date'] = pd.to_datetime(project_time['date'])
             recent_time = project_time[
                 project_time['date'] >= (pd.Timestamp.now() - timedelta(days=lookback_days))
@@ -337,5 +340,280 @@ class DataProcessor:
 
             fte_summary = fte_df.groupby(['period', 'project'])['fte_required'].mean().reset_index()
             return fte_summary
-        
+
         return pd.DataFrame()
+
+    @staticmethod
+    def calculate_working_days(year: int, month: int, project_working_days: Dict = None) -> Dict:
+        """Calculate working days for a given month
+
+        Args:
+            year: Year of the month
+            month: Month (1-12)
+            project_working_days: Optional dict mapping (year, month) tuples to working days
+                                 Useful for projects that started mid-month or have custom schedules
+        """
+        # Use project-specific working days if provided
+        if project_working_days and (year, month) in project_working_days:
+            working_days = project_working_days[(year, month)]
+        else:
+            # Get the number of days in the month
+            days_in_month = calendar.monthrange(year, month)[1]
+
+            # Count weekdays (Monday=0, Sunday=6)
+            working_days = 0
+            for day in range(1, days_in_month + 1):
+                if datetime(year, month, day).weekday() < 5:  # Monday-Friday
+                    working_days += 1
+
+        # Calculate elapsed and remaining days based on current date
+        today = datetime.now()
+        if year == today.year and month == today.month:
+            # Current month - calculate worked and remaining days
+            days_in_month = calendar.monthrange(year, month)[1]
+            worked_days = sum(1 for day in range(1, min(today.day, days_in_month) + 1)
+                            if datetime(year, month, day).weekday() < 5)
+            remaining_days = working_days - worked_days
+        elif datetime(year, month, 1) > today:
+            # Future month - all days are remaining
+            worked_days = 0
+            remaining_days = working_days
+        else:
+            # Past month - all days are worked
+            worked_days = working_days
+            remaining_days = 0
+
+        return {
+            'working_days': working_days,
+            'worked_days': worked_days,
+            'remaining_days': remaining_days
+        }
+
+    @staticmethod
+    def build_hours_sheet_data(
+        project: pd.Series,
+        allocations_df: pd.DataFrame,
+        time_entries_by_month: pd.DataFrame
+    ) -> pd.DataFrame:
+        """Build Hours sheet data structure from database data"""
+        if allocations_df.empty:
+            return pd.DataFrame()
+
+        # Parse project dates
+        start_date = pd.to_datetime(project['start_date'])
+        end_date = pd.to_datetime(project['end_date'])
+
+        # Generate month range
+        months = pd.date_range(
+            start=start_date.replace(day=1),
+            end=end_date + pd.DateOffset(months=1),
+            freq='MS'
+        )[:-1]  # Remove the extra month
+
+        # Get unique employees (group allocations by employee)
+        unique_employees = allocations_df.drop_duplicates(subset=['employee_id'])[
+            ['employee_id', 'employee_name', 'role', 'effective_rate']
+        ].to_dict('records')
+
+        # Initialize data structure
+        rows = []
+
+        for emp in unique_employees:
+            row_data = {
+                'employee_id': emp['employee_id'],
+                'employee_name': emp['employee_name'],
+                'role': emp.get('role', ''),
+                'rate': emp['effective_rate'],
+                'total_projected_hours': 0
+            }
+
+            # Add columns for each month
+            for month_date in months:
+                month_key = month_date.strftime('%Y-%m')
+                year = month_date.year
+                month = month_date.month
+
+                # Get FTE and working_days for this specific month from allocations
+                # Look for allocation with matching allocation_date
+                month_alloc = allocations_df[
+                    (allocations_df['employee_id'] == emp['employee_id']) &
+                    (allocations_df['allocation_date'] == month_date.strftime('%Y-%m-%d'))
+                ]
+
+                if not month_alloc.empty:
+                    fte = month_alloc['allocation_percent'].iloc[0] / 100
+                    # Use stored working_days if available, otherwise calculate
+                    if 'working_days' in month_alloc.columns and pd.notna(month_alloc['working_days'].iloc[0]):
+                        working_days = int(month_alloc['working_days'].iloc[0])
+                        days_info = DataProcessor.calculate_working_days(year, month,
+                            project_working_days={(year, month): working_days})
+                    else:
+                        days_info = DataProcessor.calculate_working_days(year, month)
+
+                    # Use stored remaining_days if available, otherwise use calculated
+                    if 'remaining_days' in month_alloc.columns and pd.notna(month_alloc['remaining_days'].iloc[0]):
+                        remaining_days = int(month_alloc['remaining_days'].iloc[0])
+                    else:
+                        remaining_days = days_info['remaining_days']
+                else:
+                    # Fallback to any allocation for this employee
+                    emp_allocs = allocations_df[allocations_df['employee_id'] == emp['employee_id']]
+                    fte = emp_allocs['allocation_percent'].iloc[0] / 100 if not emp_allocs.empty else 0
+                    # Calculate working days normally if no specific allocation
+                    days_info = DataProcessor.calculate_working_days(year, month)
+                    remaining_days = days_info['remaining_days']
+
+                # Calculate Possible hours
+                possible_hours = days_info['working_days'] * 8 * fte if fte <= 1 else fte
+
+                # Get actual hours from time_entries
+                actual_hours = 0
+                if not time_entries_by_month.empty:
+                    time_entry = time_entries_by_month[
+                        (time_entries_by_month['employee_id'] == emp['employee_id']) &
+                        (time_entries_by_month['month'] == month_key)
+                    ]
+                    if not time_entry.empty:
+                        actual_hours = time_entry['actual_hours'].iloc[0]
+
+                # Calculate Projected hours - use custom remaining_days if available
+                projected_hours = remaining_days * 8 * fte if fte <= 1 else 0
+
+                # Total hours
+                total_hours = actual_hours + projected_hours
+
+                # Store month data
+                row_data[f'fte_{month_key}'] = fte
+                row_data[f'possible_{month_key}'] = possible_hours
+                row_data[f'actual_{month_key}'] = actual_hours
+                row_data[f'projected_{month_key}'] = projected_hours
+                row_data[f'total_{month_key}'] = total_hours
+                row_data[f'working_days_{month_key}'] = days_info['working_days']
+                row_data[f'remaining_days_{month_key}'] = days_info['remaining_days']
+
+                row_data['total_projected_hours'] += total_hours
+
+            rows.append(row_data)
+
+        return pd.DataFrame(rows)
+
+    @staticmethod
+    def build_hours_by_month_data(
+        hours_df: pd.DataFrame,
+        project: pd.Series,
+        employees_df: pd.DataFrame = None
+    ) -> pd.DataFrame:
+        """Build Hours By Month sheet from Hours sheet data"""
+        if hours_df.empty:
+            return pd.DataFrame()
+
+        # Get all months that exist in the hours_df (including planning months)
+        # Find all month columns (those with format YYYY-MM in column names)
+        month_cols = [col for col in hours_df.columns if '-' in col and col.split('_')[-1].count('-') == 1]
+
+        # Extract unique month keys (YYYY-MM format)
+        month_keys = set()
+        for col in month_cols:
+            parts = col.split('_')
+            if len(parts) >= 2:
+                month_key = parts[-1]  # Get YYYY-MM part
+                month_keys.add(month_key)
+
+        # Convert to datetime objects and sort
+        months = sorted([pd.to_datetime(mk + '-01') for mk in month_keys])
+
+        num_months = len(months)
+
+        # Initialize data structure
+        rows = []
+
+        # Check for edited target hours in session state
+        import streamlit as st
+        fte_edits = st.session_state.get('burn_rate_fte_edits', {})
+
+        for _, emp_data in hours_df.iterrows():
+            # Get employee FTE from employees table
+            employee_name = emp_data['employee_name']
+            nominal_fte = 0.0
+
+            if employees_df is not None and not employees_df.empty:
+                emp_record = employees_df[employees_df['name'] == employee_name]
+                if not emp_record.empty:
+                    nominal_fte = emp_record.iloc[0]['fte']
+
+            # Calculate target hours: FTE × 160 hours/month × number of months
+            # Check if user edited the target hours for this employee
+            if employee_name in fte_edits and 'target_hours' in fte_edits[employee_name]:
+                target_hours = fte_edits[employee_name]['target_hours']
+            else:
+                target_hours = nominal_fte * 160 * num_months
+
+            row = {
+                'employee_name': employee_name,
+                'role': emp_data['role'],
+                'nominal_fte_target': nominal_fte,
+                'target_hours': target_hours,
+                'rate': emp_data['rate'],
+                'total_hours': 0,
+                'total_cost': 0
+            }
+
+            # Add monthly hours and costs
+            for month_date in months:
+                month_key = month_date.strftime('%Y-%m')
+                total_col = f'total_{month_key}'
+
+                if total_col in emp_data:
+                    hours = emp_data[total_col]
+                    cost = hours * emp_data['rate']
+
+                    row[f'hours_{month_key}'] = hours
+                    row[f'cost_{month_key}'] = cost
+                    row['total_hours'] += hours
+                    row['total_cost'] += cost
+
+            # Calculate over/under
+            row['over_under'] = row['total_hours'] - row['target_hours']
+
+            rows.append(row)
+
+        # Create DataFrame
+        hbm_df = pd.DataFrame(rows)
+
+        # Add summary rows
+        if not hbm_df.empty:
+            # Calculate project totals
+            actual_cost = hbm_df['total_cost'].sum()
+            current_funding = project.get('budget_allocated', 0)
+            balance = current_funding - actual_cost
+
+            return hbm_df, {
+                'actual_cost': actual_cost,
+                'current_funding': current_funding,
+                'balance': balance
+            }
+
+        return hbm_df, {}
+
+    @staticmethod
+    def apply_conditional_formatting_rules(value, column_name: str, threshold_values: Dict) -> str:
+        """Apply conditional formatting rules and return CSS style string"""
+        styles = []
+
+        # Negative costs (red font)
+        if 'cost_' in column_name and value < 0:
+            styles.append('color: #FF0000')
+
+        # Hours over 176 (light red background)
+        if 'hours_' in column_name and value > 176:
+            styles.append('background-color: #F4C7C3')
+
+        # Hours over 160 (light red background)
+        elif 'hours_' in column_name and value > 160:
+            styles.append('background-color: #F4C7C3')
+
+        # Total hours over annual target (light red background)
+        if column_name == 'total_hours' and value > threshold_values.get('annual_target', 2000):
+            styles.append('background-color: #F4C7C3')
+
+        return '; '.join(styles) if styles else ''

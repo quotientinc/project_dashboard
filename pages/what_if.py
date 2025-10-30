@@ -110,7 +110,7 @@ def project_cost_scenarios(db, processor):
                     'Margin %': [margin]
                 })])
 
-            st.dataframe(results_df, use_container_width=True, hide_index=True)
+            st.dataframe(results_df, width='stretch', hide_index=True)
 
             # Visualization
             fig = go.Figure()
@@ -132,7 +132,7 @@ def project_cost_scenarios(db, processor):
                 yaxis2=dict(title="Profit ($)", overlaying='y', side='right'),
                 height=400
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
 def resource_allocation_scenarios(db, processor):
     st.markdown("#### Resource Allocation Scenarios")
@@ -154,7 +154,7 @@ def resource_allocation_scenarios(db, processor):
                 color='project',
                 title="Current FTE Requirements by Project"
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
         st.markdown("##### Scenario Builder")
 
@@ -217,7 +217,7 @@ def resource_allocation_scenarios(db, processor):
 
             # Display results
             scenarios_df = pd.DataFrame(scenarios_data)
-            st.dataframe(scenarios_df, use_container_width=True, hide_index=True)
+            st.dataframe(scenarios_df, width='stretch', hide_index=True)
 
             # Impact visualization
             fig = go.Figure()
@@ -243,7 +243,7 @@ def resource_allocation_scenarios(db, processor):
                 yaxis2=dict(title="Monthly Cost ($)", overlaying='y', side='right'),
                 height=400
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
 def revenue_projection_scenarios(db, processor):
     st.markdown("#### Revenue Projection Scenarios")
@@ -333,7 +333,7 @@ def revenue_projection_scenarios(db, processor):
                 yaxis2=dict(title="Cumulative ($)", overlaying='y', side='right'),
                 height=400
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
             # Summary metrics
             col1, col2, col3 = st.columns(3)
@@ -415,7 +415,7 @@ def burn_rate_scenarios(db, processor):
 
                 # Display results
                 scenarios_df = pd.DataFrame(scenarios_data)
-                st.dataframe(scenarios_df, use_container_width=True, hide_index=True)
+                st.dataframe(scenarios_df, width='stretch', hide_index=True)
 
                 # Runway visualization
                 fig = go.Figure()
@@ -437,7 +437,7 @@ def burn_rate_scenarios(db, processor):
                     yaxis_title="Cash Balance ($)",
                     height=400
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
 
 # Scenario type selection
 scenario_type = st.selectbox(

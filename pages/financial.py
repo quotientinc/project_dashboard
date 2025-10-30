@@ -44,7 +44,7 @@ tab1, tab2, tab3, tab4 = st.tabs(["Revenue Analysis", "Cost Analysis", "Burn Rat
 
 with tab1:
     st.markdown("#### Revenue Analysis")
-    
+
     if not projects_df.empty:
         # Revenue by project
         fig = go.Figure()
@@ -66,8 +66,8 @@ with tab1:
             height=400,
             xaxis_tickangle=-45
         )
-        st.plotly_chart(fig, use_container_width=True)
-        
+        st.plotly_chart(fig, width='stretch')
+
         # Revenue by client
         client_revenue = projects_df.groupby('client')['revenue_actual'].sum().reset_index()
         fig = px.pie(
@@ -76,8 +76,8 @@ with tab1:
             names='client',
             title="Revenue by Client"
         )
-        st.plotly_chart(fig, use_container_width=True)
-        
+        st.plotly_chart(fig, width='stretch')
+
         # Revenue trends
         if not time_entries_df.empty:
             time_entries_df['date'] = pd.to_datetime(time_entries_df['date'])
@@ -95,40 +95,40 @@ with tab1:
                 markers=True
             )
             fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
 with tab2:
     st.markdown("#### Cost Analysis")
-    
+
     # Cost breakdown
     col1, col2 = st.columns(2)
-    
+
     with col1:
         if not time_entries_df.empty:
             labor_costs = (time_entries_df['hours'] * time_entries_df['hourly_rate']).sum()
         else:
             labor_costs = 0
-        
+
         if not expenses_df.empty:
             expense_costs = expenses_df['amount'].sum()
         else:
             expense_costs = 0
-        
+
         total_costs = labor_costs + expense_costs
-        
+
         cost_data = pd.DataFrame({
             'Category': ['Labor', 'Expenses'],
             'Amount': [labor_costs, expense_costs]
         })
-        
+
         fig = px.pie(
             cost_data,
             values='Amount',
             names='Category',
             title="Cost Distribution"
         )
-        st.plotly_chart(fig, use_container_width=True)
-    
+        st.plotly_chart(fig, width='stretch')
+
     with col2:
         if not expenses_df.empty:
             category_costs = expenses_df.groupby('category')['amount'].sum().reset_index()
@@ -139,8 +139,8 @@ with tab2:
                 title="Expenses by Category"
             )
             fig.update_layout(xaxis_tickangle=-45)
-            st.plotly_chart(fig, use_container_width=True)
-    
+            st.plotly_chart(fig, width='stretch')
+
     # Project costs comparison
     if not projects_df.empty:
         project_costs = []
@@ -157,9 +157,9 @@ with tab2:
                 'Expense Cost': costs['expense_cost'],
                 'Total Cost': costs['total_cost']
             })
-        
+
         costs_df = pd.DataFrame(project_costs)
-        
+
         fig = go.Figure()
         fig.add_trace(go.Bar(name='Labor', x=costs_df['Project'], y=costs_df['Labor Cost']))
         fig.add_trace(go.Bar(name='Expenses', x=costs_df['Project'], y=costs_df['Expense Cost']))
@@ -169,18 +169,18 @@ with tab2:
             height=400,
             xaxis_tickangle=-45
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
 with tab3:
     st.markdown("#### Burn Rate Analysis")
-    
+
     if not expenses_df.empty:
         # Calculate burn rate
         time_period = st.selectbox("Time Period", ["Daily", "Weekly", "Monthly"])
         period_map = {"Daily": "daily", "Weekly": "weekly", "Monthly": "monthly"}
-        
+
         burn_rate_df = processor.calculate_burn_rate(expenses_df, period_map[time_period])
-        
+
         if not burn_rate_df.empty:
             # Burn rate chart
             fig = go.Figure()
@@ -205,8 +205,8 @@ with tab3:
                 yaxis=dict(title="Burn Rate ($)"),
                 yaxis2=dict(title="Cumulative ($)", overlaying='y', side='right')
             )
-            st.plotly_chart(fig, use_container_width=True)
-            
+            st.plotly_chart(fig, width='stretch')
+
             # Burn rate metrics
             col1, col2, col3 = st.columns(3)
             with col1:
@@ -223,46 +223,46 @@ with tab3:
 
 with tab4:
     st.markdown("#### Cash Flow Analysis")
-    
+
     # Create cash flow data
     if not projects_df.empty and not expenses_df.empty:
         # Simplified cash flow calculation
         projects_df['start_date'] = pd.to_datetime(projects_df['start_date'])
         expenses_df['date'] = pd.to_datetime(expenses_df['date'])
-        
+
         # Monthly cash flow
         date_range = pd.date_range(
             start=projects_df['start_date'].min(),
             end=datetime.now(),
             freq='M'
         )
-        
+
         cash_flow_data = []
         for date in date_range:
             month_start = date.replace(day=1)
             month_end = (month_start + pd.DateOffset(months=1)) - pd.DateOffset(days=1)
-            
+
             # Income (simplified - distributed evenly)
             monthly_income = projects_df['revenue_actual'].sum() / len(date_range)
-            
+
             # Expenses
             month_expenses = expenses_df[
                 (expenses_df['date'] >= month_start) &
                 (expenses_df['date'] <= month_end)
             ]['amount'].sum()
-            
+
             net_cash_flow = monthly_income - month_expenses
-            
+
             cash_flow_data.append({
                 'Month': date.strftime('%Y-%m'),
                 'Income': monthly_income,
                 'Expenses': month_expenses,
                 'Net Cash Flow': net_cash_flow
             })
-        
+
         cash_flow_df = pd.DataFrame(cash_flow_data)
         cash_flow_df['Cumulative'] = cash_flow_df['Net Cash Flow'].cumsum()
-        
+
         # Cash flow chart
         fig = go.Figure()
         fig.add_trace(go.Bar(
@@ -292,8 +292,8 @@ with tab4:
             yaxis=dict(title="Amount ($)"),
             yaxis2=dict(title="Cumulative ($)", overlaying='y', side='right')
         )
-        st.plotly_chart(fig, use_container_width=True)
-        
+        st.plotly_chart(fig, width='stretch')
+
         # Cash flow metrics
         col1, col2, col3, col4 = st.columns(4)
         with col1:

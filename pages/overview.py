@@ -76,7 +76,7 @@ with col1:
             xaxis_tickangle=-45,
             showlegend=True
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
     else:
         st.info("No project data available")
 
@@ -95,7 +95,7 @@ with col2:
             }
         )
         fig.update_layout(height=400)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
     else:
         st.info("No project data available")
 
@@ -130,7 +130,7 @@ with col1:
             yaxis_title="Utilization %",
             showlegend=False
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
     else:
         st.info("No employee data available")
 
@@ -160,7 +160,7 @@ with col2:
             yaxis_title="Amount ($)",
             showlegend=True
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
     else:
         st.info("No expense data available")
 
@@ -245,6 +245,6 @@ if not time_entries_df.empty:
     ].copy()
     # Format date back to string for display
     recent_entries['date'] = recent_entries['date'].dt.strftime('%Y-%m-%d')
-    st.dataframe(recent_entries, use_container_width=True, hide_index=True)
+    st.dataframe(recent_entries, width='stretch', hide_index=True)
 else:
     st.info("No recent time entries")

@@ -66,6 +66,10 @@ class DatabaseManager:
                 start_date TEXT,
                 end_date TEXT,
                 role TEXT,
+                project_rate REAL,
+                allocation_date TEXT,
+                working_days INTEGER,
+                remaining_days INTEGER,
                 created_at TEXT,
                 updated_at TEXT,
                 FOREIGN KEY (project_id) REFERENCES projects (id),
@@ -83,6 +87,7 @@ class DatabaseManager:
                 hours REAL,
                 description TEXT,
                 billable INTEGER,
+                is_projected INTEGER DEFAULT 0,
                 created_at TEXT,
                 FOREIGN KEY (employee_id) REFERENCES employees (id),
                 FOREIGN KEY (project_id) REFERENCES projects (id)
@@ -210,7 +215,8 @@ class DatabaseManager:
         """Get allocations filtered by project or employee"""
         query = """
             SELECT a.*, p.name as project_name, e.name as employee_name,
-                   e.hourly_rate, e.department
+                   e.hourly_rate, e.department,
+                   COALESCE(a.project_rate, e.hourly_rate) as effective_rate
             FROM allocations a
             JOIN projects p ON a.project_id = p.id
             JOIN employees e ON a.employee_id = e.id
@@ -307,12 +313,46 @@ class DatabaseManager:
         columns = list(time_data.keys())
         placeholders = ','.join('?' * len(columns))
         query = f"INSERT INTO time_entries ({','.join(columns)}) VALUES ({placeholders})"
-        
+
         cursor = self.conn.cursor()
         cursor.execute(query, list(time_data.values()))
         self.conn.commit()
         return cursor.lastrowid
-    
+
+    def get_time_entries_by_month(self, project_id, start_date=None, end_date=None):
+        """Get time entries grouped by employee and month for a project"""
+        query = """
+            SELECT
+                t.employee_id,
+                e.name as employee_name,
+                e.role,
+                COALESCE(
+                    (SELECT a.project_rate
+                     FROM allocations a
+                     WHERE a.project_id = t.project_id
+                     AND a.employee_id = t.employee_id
+                     LIMIT 1),
+                    e.hourly_rate
+                ) as rate,
+                strftime('%Y-%m', t.date) as month,
+                SUM(t.hours) as actual_hours
+            FROM time_entries t
+            JOIN employees e ON t.employee_id = e.id
+            WHERE t.project_id = ?
+        """
+        params = [int(project_id) if hasattr(project_id, 'item') else project_id]
+
+        if start_date:
+            query += " AND t.date >= ?"
+            params.append(start_date)
+        if end_date:
+            query += " AND t.date <= ?"
+            params.append(end_date)
+
+        query += " GROUP BY t.employee_id, e.name, e.role, rate, month ORDER BY e.name, month"
+
+        return pd.read_sql_query(query, self.conn, params=params)
+
     # Expense methods
     def get_expenses(self, project_id=None):
         """Get expenses"""
