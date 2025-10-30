@@ -8,6 +8,9 @@ import pandas as pd
 from datetime import datetime
 from io import BytesIO
 from openpyxl import Workbook
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 from openpyxl.styles import Font, Fill, PatternFill, Alignment
 from openpyxl.utils.dataframe import dataframe_to_rows
 

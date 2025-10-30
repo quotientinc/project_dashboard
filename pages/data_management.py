@@ -2,7 +2,9 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import io
+from utils.logger import get_logger
 
+logger = get_logger(__name__)
 
 db = st.session_state.db_manager
 

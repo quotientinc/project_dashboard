@@ -3,6 +3,9 @@ import pandas as pd
 from pathlib import Path
 import json
 from datetime import datetime
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 class DatabaseManager:
     def __init__(self, db_path='data/project_dashboard.db'):
@@ -11,11 +14,11 @@ class DatabaseManager:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False, isolation_level=None)
         self.create_tables()
-    
+
     def create_tables(self):
         """Create all necessary tables"""
         cursor = self.conn.cursor()
-        
+
         # Projects table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS projects (
@@ -35,7 +38,7 @@ class DatabaseManager:
                 updated_at TEXT
             )
         ''')
-        
+
         # Employees table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS employees (
@@ -53,7 +56,7 @@ class DatabaseManager:
                 updated_at TEXT
             )
         ''')
-        
+
         # Project allocations table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS allocations (
@@ -76,7 +79,7 @@ class DatabaseManager:
                 FOREIGN KEY (employee_id) REFERENCES employees (id)
             )
         ''')
-        
+
         # Time tracking table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS time_entries (
@@ -93,7 +96,7 @@ class DatabaseManager:
                 FOREIGN KEY (project_id) REFERENCES projects (id)
             )
         ''')
-        
+
         # Expenses table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS expenses (
@@ -108,9 +111,9 @@ class DatabaseManager:
                 FOREIGN KEY (project_id) REFERENCES projects (id)
             )
         ''')
-        
+
         self.conn.commit()
-    
+
     def is_empty(self):
         """Check if database is empty"""
         cursor = self.conn.cursor()
@@ -119,13 +122,13 @@ class DatabaseManager:
         cursor.execute("SELECT COUNT(*) FROM employees")
         employee_count = cursor.fetchone()[0]
         return project_count == 0 and employee_count == 0
-    
+
     # Project methods
     def get_projects(self, filters=None):
         """Get all projects or filtered projects"""
         query = "SELECT * FROM projects"
         params = []
-        
+
         if filters:
             conditions = []
             if 'status' in filters and filters['status']:
@@ -138,12 +141,12 @@ class DatabaseManager:
             if 'end_date' in filters:
                 conditions.append("end_date <= ?")
                 params.append(filters['end_date'])
-            
+
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
-        
+
         return pd.read_sql_query(query, self.conn, params=params)
-    
+
     def add_project(self, project_data):
         """Add a new project"""
         project_data['created_at'] = datetime.now().isoformat()
@@ -152,40 +155,59 @@ class DatabaseManager:
         columns = list(project_data.keys())
         placeholders = ','.join('?' * len(columns))
         query = f"INSERT INTO projects ({','.join(columns)}) VALUES ({placeholders})"
-        
+
         cursor = self.conn.cursor()
         cursor.execute(query, list(project_data.values()))
         self.conn.commit()
         return cursor.lastrowid
-    
+
     def update_project(self, project_id, updates):
         """Update a project"""
         updates['updated_at'] = datetime.now().isoformat()
         set_clause = ','.join([f"{k}=?" for k in updates.keys()])
         query = f"UPDATE projects SET {set_clause} WHERE id=?"
-        
+
+        # Convert numpy types to Python types
+        project_id = int(project_id) if hasattr(project_id, 'item') else project_id
+
         cursor = self.conn.cursor()
-        cursor.execute(query, list(updates.values()) + [project_id])
+        params = list(updates.values()) + [project_id]
+
+        # Debug logging
+        logger.info(f"update_project called with project_id={project_id}")
+        logger.info(f"SQL: {query}")
+        logger.info(f"Params: {params}")
+
+        cursor.execute(query, params)
+        rows_affected = cursor.rowcount
+
+        logger.info(f"Rows affected: {rows_affected}")
+
+        if rows_affected == 0:
+            raise ValueError(f"No project found with id={project_id}. Update failed.")
+
         self.conn.commit()
-    
+        logger.info("Commit successful")
+        return rows_affected
+
     # Employee methods
     def get_employees(self, filters=None):
         """Get all employees or filtered employees"""
         query = "SELECT * FROM employees"
         params = []
-        
+
         if filters:
             conditions = []
             if 'departments' in filters and filters['departments']:
                 placeholders = ','.join('?' * len(filters['departments']))
                 conditions.append(f"department IN ({placeholders})")
                 params.extend(filters['departments'])
-            
+
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
-        
+
         return pd.read_sql_query(query, self.conn, params=params)
-    
+
     def add_employee(self, employee_data):
         """Add a new employee"""
         employee_data['created_at'] = datetime.now().isoformat()
@@ -194,7 +216,7 @@ class DatabaseManager:
         columns = list(employee_data.keys())
         placeholders = ','.join('?' * len(columns))
         query = f"INSERT INTO employees ({','.join(columns)}) VALUES ({placeholders})"
-        
+
         cursor = self.conn.cursor()
         cursor.execute(query, list(employee_data.values()))
         self.conn.commit()
@@ -205,6 +227,9 @@ class DatabaseManager:
         updates['updated_at'] = datetime.now().isoformat()
         set_clause = ','.join([f"{k}=?" for k in updates.keys()])
         query = f"UPDATE employees SET {set_clause} WHERE id=?"
+
+        # Convert numpy types to Python types
+        employee_id = int(employee_id) if hasattr(employee_id, 'item') else employee_id
 
         cursor = self.conn.cursor()
         cursor.execute(query, list(updates.values()) + [employee_id])
@@ -237,7 +262,7 @@ class DatabaseManager:
             query += " WHERE " + " AND ".join(conditions)
 
         return pd.read_sql_query(query, self.conn, params=params)
-    
+
     def add_allocation(self, allocation_data):
         """Add a new allocation"""
         allocation_data['created_at'] = datetime.now().isoformat()
@@ -268,6 +293,9 @@ class DatabaseManager:
         updates['updated_at'] = datetime.now().isoformat()
         set_clause = ','.join([f"{k}=?" for k in updates.keys()])
         query = f"UPDATE allocations SET {set_clause} WHERE id=?"
+
+        # Convert numpy types to Python types
+        allocation_id = int(allocation_id) if hasattr(allocation_id, 'item') else allocation_id
 
         cursor = self.conn.cursor()
         cursor.execute(query, list(updates.values()) + [allocation_id])
@@ -305,7 +333,7 @@ class DatabaseManager:
             query += " WHERE " + " AND ".join(conditions)
 
         return pd.read_sql_query(query, self.conn, params=params)
-    
+
     def add_time_entry(self, time_data):
         """Add a time entry"""
         time_data['created_at'] = datetime.now().isoformat()
@@ -369,7 +397,7 @@ class DatabaseManager:
             params.append(int(project_id) if hasattr(project_id, 'item') else project_id)
 
         return pd.read_sql_query(query, self.conn, params=params)
-    
+
     def add_expense(self, expense_data):
         """Add an expense"""
         expense_data['created_at'] = datetime.now().isoformat()
@@ -377,25 +405,25 @@ class DatabaseManager:
         columns = list(expense_data.keys())
         placeholders = ','.join('?' * len(columns))
         query = f"INSERT INTO expenses ({','.join(columns)}) VALUES ({placeholders})"
-        
+
         cursor = self.conn.cursor()
         cursor.execute(query, list(expense_data.values()))
         self.conn.commit()
         return cursor.lastrowid
-    
+
     # Import/Export methods
     def import_csv(self, file, table_name):
         """Import data from CSV file"""
         df = pd.read_csv(file)
         df.to_sql(table_name, self.conn, if_exists='append', index=False)
         self.conn.commit()
-    
+
     def export_to_csv(self, table_name, file_path):
         """Export table to CSV"""
         df = pd.read_sql_query(f"SELECT * FROM {table_name}", self.conn)
         df.to_csv(file_path, index=False)
         return df
-    
+
     def close(self):
         """Close database connection"""
         self.conn.close()

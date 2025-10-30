@@ -1,6 +1,9 @@
 import random
 from datetime import datetime, timedelta
 import pandas as pd
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def generate_sample_data(db_manager):
@@ -311,7 +314,7 @@ def generate_sample_data(db_manager):
             db_manager.add_expense(expense)
 
     # Add NIA (OY2) project data
-    print("Adding NIA project data...")
+    logger.info("Adding NIA project data...")
 
     # NIA Project
     nia_project = {
@@ -460,6 +463,6 @@ def generate_sample_data(db_manager):
                 }
                 db_manager.add_time_entry(time_entry)
 
-    print(f"Added NIA project with {len(nia_employees)} employees and monthly allocations")
+    logger.info(f"Added NIA project with {len(nia_employees)} employees and monthly allocations")
 
-    print("Sample data generated successfully!")
+    logger.info("Sample data generated successfully!")

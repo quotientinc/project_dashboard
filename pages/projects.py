@@ -4,7 +4,9 @@ import plotly.express as px
 import pandas as pd
 from datetime import datetime
 from components.burn_rate_editor import show_burn_rate_editor
+from utils.logger import get_logger
 
+logger = get_logger(__name__)
 
 db = st.session_state.db_manager
 processor = st.session_state.data_processor
@@ -498,7 +500,7 @@ with tab4:
 
             # Add new allocation
             st.markdown("##### Add Team Member")
-            print(f"DEBUG: Page loaded, project_id={project_id}")
+            logger.info(f"Page loaded, project_id={project_id}")
 
             employees_df = db.get_employees()
 
@@ -532,9 +534,9 @@ with tab4:
 
                     if st.form_submit_button("Add Team Member"):
                         try:
-                            print(f"DEBUG: Form submitted for project_id={project_id}, employee_name={employee_name}")
+                            logger.info(f"Form submitted for project_id={project_id}, employee_name={employee_name}")
                             selected_emp = available_employees[available_employees['name'] == employee_name].iloc[0]
-                            print(f"DEBUG: Selected employee: {selected_emp['id']}, {selected_emp['name']}")
+                            logger.info(f"Selected employee: {selected_emp['id']}, {selected_emp['name']}")
 
                             allocation_data = {
                                 'project_id': project_id,
@@ -546,16 +548,14 @@ with tab4:
                                 'end_date': alloc_end.strftime('%Y-%m-%d'),
                                 'role': role_in_project
                             }
-                            print(f"DEBUG: Allocation data: {allocation_data}")
+                            logger.info(f"Allocation data: {allocation_data}")
 
                             result = db.add_allocation(allocation_data)
-                            print(f"DEBUG: add_allocation returned: {result}")
+                            logger.info(f"add_allocation returned: {result}")
                             st.success(f"Added {employee_name} to project!")
                             st.rerun()
                         except Exception as e:
-                            print(f"DEBUG: Exception occurred: {str(e)}")
-                            import traceback
-                            traceback.print_exc()
+                            logger.error(f"Exception occurred while adding team member: {str(e)}", exc_info=True)
                             st.error(f"Error adding team member: {str(e)}")
             else:
                 st.info("All employees are already allocated to this project")

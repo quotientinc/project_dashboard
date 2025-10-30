@@ -2,7 +2,9 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
+from utils.logger import get_logger
 
+logger = get_logger(__name__)
 
 db = st.session_state.db_manager
 processor = st.session_state.data_processor

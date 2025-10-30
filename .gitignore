@@ -88,3 +88,5 @@ site/
 # Package files
 *.tar.gz
 *.zip
+/CLAUDE.md
+/docs/

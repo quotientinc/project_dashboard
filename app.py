@@ -1,6 +1,14 @@
+import logging
+from datetime import datetime, timedelta
+
+# Setup logging FIRST, before any Streamlit imports
+from utils.logger import setup_logging, get_logger
+setup_logging(log_level=logging.INFO)
+logger = get_logger(__name__)
+
+# Now import Streamlit and other dependencies
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
 
 # Page configuration - must be first Streamlit command
 st.set_page_config(
@@ -36,15 +44,32 @@ st.markdown("""
 from utils.database import DatabaseManager
 from utils.data_processor import DataProcessor
 
-# Initialize session state
+# Initialize session state BEFORE defining pages
+# This ensures session state exists when page modules are imported
 if 'db_manager' not in st.session_state:
+    logger.info("Initializing database manager and data processor")
     st.session_state.db_manager = DatabaseManager()
     st.session_state.data_processor = DataProcessor()
 
     # Initialize with sample data if database is empty
     if st.session_state.db_manager.is_empty():
+        logger.info("Database is empty, generating sample data")
         from utils.sample_data import generate_sample_data
         generate_sample_data(st.session_state.db_manager)
+        logger.info("Sample data generation completed")
+    else:
+        logger.info("Database already populated, skipping sample data generation")
+
+# Initialize filters in session state if not present
+if 'filters' not in st.session_state:
+    st.session_state.filters = {
+        'start_date': datetime.now() - timedelta(days=180),
+        'end_date': datetime.now() + timedelta(days=180),
+        'projects': [],
+        'employees': [],
+        'departments': [],
+        'status': ['Active']
+    }
 
 # Define pages using st.Page
 overview_page = st.Page(

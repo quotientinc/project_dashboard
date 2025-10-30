@@ -3,6 +3,9 @@ import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
 from datetime import datetime, timedelta
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 db = st.session_state.db_manager
 processor = st.session_state.data_processor

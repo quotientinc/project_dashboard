@@ -4,6 +4,9 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from dateutil.relativedelta import relativedelta
 import calendar
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 class DataProcessor:
     """Process and analyze project management data"""
