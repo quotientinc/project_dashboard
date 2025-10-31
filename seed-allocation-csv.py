@@ -31,14 +31,24 @@ unique_combos = unique_combos[unique_combos['Allocation'] > 0]
 # Drop the intermediate 'Entered Hours' column as we only need the Allocation
 unique_combos = unique_combos.drop(columns=['Entered Hours'])
 
+# Rename columns to match the allocations table schema
+unique_combos = unique_combos.rename(columns={
+    'Employee ID': 'employee_id',
+    'Project ID': 'project_id',
+    'Month': 'allocation_date',
+    ' Billing Rate ': 'employee_rate',
+    'PLC Desc': 'role',
+    'Allocation': 'allocated_fte'
+})
+
 # Display the results
 print(f"Total unique Employee-Project-Month combinations: {len(unique_combos)}")
 print("\nFirst 10 combinations:")
 print(unique_combos.head(10))
 
-# If you want to see combinations where Billing Rate is not null
-combos_with_rate = unique_combos[unique_combos[' Billing Rate '].notna()]
-print(f"\nCombinations with billing rate: {len(combos_with_rate)}")
+# If you want to see combinations where employee_rate is not null
+combos_with_rate = unique_combos[unique_combos['employee_rate'].notna()]
+print(f"\nCombinations with employee_rate: {len(combos_with_rate)}")
 print(combos_with_rate.head(10))
 
 # Write the dataframe to CSV
