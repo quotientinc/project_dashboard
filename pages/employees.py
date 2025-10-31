@@ -27,13 +27,7 @@ with tab1:
         if view_mode == "Table":
             # Table view - no filters, just display all data
             # The dataframe itself has built-in sorting and filtering
-            display_df = employees_df[[
-            ]].copy()
-
-            # Format columns
-
-            # Rename columns for display
-            display_df.columns = ['Name', 'Email', 'Department', 'Role', 'Hourly Rate', 'FTE', 'Utilization', 'Hire Date', 'Skills']
+            display_df = employees_df.copy()
 
             st.dataframe(display_df, width='stretch', hide_index=True)
 
@@ -53,7 +47,6 @@ with tab1:
             # Sort
             sort_map = {
                 "Name": "name",
-                "Department": "department",
                 "Role": "role",
                 "Utilization": "utilization",
             }
@@ -137,16 +130,6 @@ with tab2:
                 ['name', 'utilization_rate', 'allocation_percent']
             ]
             st.dataframe(under_utilized, hide_index=True)
-        
-        # Department utilization
-        dept_util = utilization_df.groupby('department').agg({
-            'utilization_rate': 'mean',
-            'billable_hours': 'sum',
-            'revenue_generated': 'sum'
-        }).round(2)
-        
-        st.markdown("##### Department Performance")
-        st.dataframe(dept_util, width='stretch')
 
 with tab3:
     st.markdown("#### Add New Employee")
