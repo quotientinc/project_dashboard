@@ -84,113 +84,43 @@ def generate_sample_data(db_manager):
     # Sample employees
     employees = [
         {
-            'name': 'John Smith',
-            'email': 'john.smith@company.com',
-            'department': 'Management',
-            'role': 'Project Manager',
-            'hourly_rate': 150,
-            'fte': 1.0,
-            'utilization': 85,
-            'skills': 'Project Management, Agile, Scrum',
+            'name': 'John Smith',            'role': 'Project Manager',            'skills': 'Project Management, Agile, Scrum',
             'hire_date': '2020-01-15'
         },
         {
-            'name': 'Jane Doe',
-            'email': 'jane.doe@company.com',
-            'department': 'Management',
-            'role': 'Senior Project Manager',
-            'hourly_rate': 175,
-            'fte': 1.0,
-            'utilization': 90,
-            'skills': 'Project Management, Risk Management, Stakeholder Management',
+            'name': 'Jane Doe',            'role': 'Senior Project Manager',            'skills': 'Project Management, Risk Management, Stakeholder Management',
             'hire_date': '2019-03-20'
         },
         {
-            'name': 'Bob Wilson',
-            'email': 'bob.wilson@company.com',
-            'department': 'Engineering',
-            'role': 'Senior Developer',
-            'hourly_rate': 140,
-            'fte': 1.0,
-            'utilization': 75,
-            'skills': 'Python, JavaScript, React, Node.js',
+            'name': 'Bob Wilson',            'role': 'Senior Developer',            'skills': 'Python, JavaScript, React, Node.js',
             'hire_date': '2021-06-01'
         },
         {
-            'name': 'Alice Johnson',
-            'email': 'alice.johnson@company.com',
-            'department': 'Engineering',
-            'role': 'Full Stack Developer',
-            'hourly_rate': 120,
-            'fte': 1.0,
-            'utilization': 80,
-            'skills': 'Java, Spring, Angular, PostgreSQL',
+            'name': 'Alice Johnson',            'role': 'Full Stack Developer',            'skills': 'Java, Spring, Angular, PostgreSQL',
             'hire_date': '2022-02-15'
         },
         {
-            'name': 'Charlie Brown',
-            'email': 'charlie.brown@company.com',
-            'department': 'Engineering',
-            'role': 'DevOps Engineer',
-            'hourly_rate': 130,
-            'fte': 1.0,
-            'utilization': 70,
-            'skills': 'AWS, Docker, Kubernetes, CI/CD',
+            'name': 'Charlie Brown',            'role': 'DevOps Engineer',            'skills': 'AWS, Docker, Kubernetes, CI/CD',
             'hire_date': '2021-09-01'
         },
         {
-            'name': 'Emma Davis',
-            'email': 'emma.davis@company.com',
-            'department': 'Design',
-            'role': 'UX Designer',
-            'hourly_rate': 110,
-            'fte': 1.0,
-            'utilization': 65,
-            'skills': 'Figma, Sketch, User Research, Prototyping',
+            'name': 'Emma Davis',            'role': 'UX Designer',            'skills': 'Figma, Sketch, User Research, Prototyping',
             'hire_date': '2022-11-15'
         },
         {
-            'name': 'Frank Miller',
-            'email': 'frank.miller@company.com',
-            'department': 'Engineering',
-            'role': 'Backend Developer',
-            'hourly_rate': 125,
-            'fte': 0.8,
-            'utilization': 85,
-            'skills': 'Python, Django, Redis, MongoDB',
+            'name': 'Frank Miller',            'role': 'Backend Developer',            'skills': 'Python, Django, Redis, MongoDB',
             'hire_date': '2023-01-10'
         },
         {
-            'name': 'Grace Lee',
-            'email': 'grace.lee@company.com',
-            'department': 'QA',
-            'role': 'QA Engineer',
-            'hourly_rate': 100,
-            'fte': 1.0,
-            'utilization': 75,
-            'skills': 'Selenium, Jest, Cypress, Test Automation',
+            'name': 'Grace Lee',            'role': 'QA Engineer',            'skills': 'Selenium, Jest, Cypress, Test Automation',
             'hire_date': '2023-04-20'
         },
         {
-            'name': 'Henry Taylor',
-            'email': 'henry.taylor@company.com',
-            'department': 'Data',
-            'role': 'Data Analyst',
-            'hourly_rate': 115,
-            'fte': 1.0,
-            'utilization': 70,
-            'skills': 'SQL, Python, Tableau, Power BI',
+            'name': 'Henry Taylor',            'role': 'Data Analyst',            'skills': 'SQL, Python, Tableau, Power BI',
             'hire_date': '2022-08-01'
         },
         {
-            'name': 'Iris Wang',
-            'email': 'iris.wang@company.com',
-            'department': 'Engineering',
-            'role': 'Frontend Developer',
-            'hourly_rate': 115,
-            'fte': 1.0,
-            'utilization': 78,
-            'skills': 'React, TypeScript, CSS, Redux',
+            'name': 'Iris Wang',            'role': 'Frontend Developer',            'skills': 'React, TypeScript, CSS, Redux',
             'hire_date': '2023-06-15'
         }
     ]
@@ -337,47 +267,19 @@ def generate_sample_data(db_manager):
     # NIA Employees
     nia_employees = [
         {
-            'name': 'Jennifer Johns',
-            'email': 'jennifer.johns@nia.gov',
-            'department': 'Web Development',
-            'role': 'Web Project Manager',
-            'hourly_rate': 115.57,
-            'fte': 0.15,
-            'utilization': 15,
-            'skills': 'Project Management, Agile, Web Development',
+            'name': 'Jennifer Johns',            'role': 'Web Project Manager',            'skills': 'Project Management, Agile, Web Development',
             'hire_date': '2023-01-15'
         },
         {
-            'name': 'Matt Canton',
-            'email': 'matt.canton@nia.gov',
-            'department': 'Web Development',
-            'role': 'Web Software Developer',
-            'hourly_rate': 108.21,
-            'fte': 0.5,
-            'utilization': 50,
-            'skills': 'Full Stack Development, JavaScript, Python, React',
+            'name': 'Matt Canton',            'role': 'Web Software Developer',            'skills': 'Full Stack Development, JavaScript, Python, React',
             'hire_date': '2023-02-01'
         },
         {
-            'name': 'Jacob Coleman',
-            'email': 'jacob.coleman@nia.gov',
-            'department': 'Web Development',
-            'role': 'Web Software Developer',
-            'hourly_rate': 108.21,
-            'fte': 1.0,
-            'utilization': 100,
-            'skills': 'Full Stack Development, Node.js, Database Design',
+            'name': 'Jacob Coleman',            'role': 'Web Software Developer',            'skills': 'Full Stack Development, Node.js, Database Design',
             'hire_date': '2022-09-15'
         },
         {
-            'name': 'Caleb Andree',
-            'email': 'caleb.andree@nia.gov',
-            'department': 'Web Development',
-            'role': 'Application Specialist 1',
-            'hourly_rate': 79.85,
-            'fte': 0.125,
-            'utilization': 12.5,
-            'skills': 'Application Support, Testing, Documentation',
+            'name': 'Caleb Andree',            'role': 'Application Specialist 1',            'skills': 'Application Support, Testing, Documentation',
             'hire_date': '2024-01-10'
         }
     ]

@@ -144,8 +144,8 @@ with tab1:
     st.markdown("""
     **CSV Format Requirements:**
     - **Projects**: name, description, status, start_date, end_date, budget_allocated, budget_used, revenue_projected, revenue_actual, client, project_manager
-    - **Employees**: name, email, department, role, hourly_rate, fte, utilization, skills, hire_date
-    - **Allocations**: project_id, employee_id, allocation_percent, hours_projected, hours_actual, start_date, end_date, role
+    - **Employees**: name, role, skills, hire_date
+    - **Allocations**: project_id, employee_id, allocation_percent, hours_projected, hours_actual, start_date, end_date, role, project_rate, employee_rate, allocated_fte
     - **Time Entries**: employee_id, project_id, date, hours, description, billable
     - **Expenses**: project_id, category, description, amount, date, approved
     """)

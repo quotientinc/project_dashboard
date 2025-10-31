@@ -80,33 +80,39 @@ class DataProcessor:
     
     @staticmethod
     def calculate_employee_utilization(
-        employees_df: pd.DataFrame, 
+        employees_df: pd.DataFrame,
         allocations_df: pd.DataFrame,
         time_entries_df: pd.DataFrame
     ) -> pd.DataFrame:
         """Calculate employee utilization metrics"""
         if employees_df.empty:
             return pd.DataFrame()
-        
+
         utilization = employees_df.copy()
-        
-        # Calculate allocated hours
+
+        # Calculate allocated hours and get rates/FTE from allocations
         if not allocations_df.empty:
             allocated = allocations_df.groupby('employee_id').agg({
                 'allocation_percent': 'sum',
                 'hours_projected': 'sum',
-                'hours_actual': 'sum'
+                'hours_actual': 'sum',
+                'employee_rate': 'mean',  # Average rate across allocations
+                'allocated_fte': 'sum'    # Sum FTE across all allocations
             }).reset_index()
-            
+
             utilization = utilization.merge(allocated, left_on='id', right_on='employee_id', how='left')
             utilization['allocation_percent'] = utilization['allocation_percent'].fillna(0)
             utilization['hours_projected'] = utilization['hours_projected'].fillna(0)
             utilization['hours_actual'] = utilization['hours_actual'].fillna(0)
+            utilization['employee_rate'] = utilization['employee_rate'].fillna(0)
+            utilization['allocated_fte'] = utilization['allocated_fte'].fillna(0)
         else:
             utilization['allocation_percent'] = 0
             utilization['hours_projected'] = 0
             utilization['hours_actual'] = 0
-        
+            utilization['employee_rate'] = 0
+            utilization['allocated_fte'] = 0
+
         # Calculate billable vs non-billable hours
         if not time_entries_df.empty:
             billable = time_entries_df.groupby(['employee_id', 'billable'])['hours'].sum().unstack(fill_value=0)
@@ -117,7 +123,7 @@ class DataProcessor:
                 utilization['billable_hours'] = utilization['billable_hours'].fillna(0)
             else:
                 utilization['billable_hours'] = 0
-            
+
             total_hours = time_entries_df.groupby('employee_id')['hours'].sum().reset_index()
             total_hours.columns = ['employee_id', 'total_hours']
             utilization = utilization.merge(total_hours, left_on='id', right_on='employee_id', how='left')
@@ -125,7 +131,7 @@ class DataProcessor:
         else:
             utilization['billable_hours'] = 0
             utilization['total_hours'] = 0
-        
+
         # Calculate utilization rate
         standard_hours = 160  # Monthly standard hours
         utilization['utilization_rate'] = (utilization['total_hours'] / standard_hours * 100).clip(0, 100)
@@ -134,11 +140,11 @@ class DataProcessor:
             utilization['billable_hours'] / utilization['total_hours'] * 100,
             0
         )
-        
-        # Cost calculations
-        utilization['monthly_cost'] = utilization['hourly_rate'] * utilization['fte'] * standard_hours
-        utilization['revenue_generated'] = utilization['billable_hours'] * utilization['hourly_rate']
-        
+
+        # Cost calculations using allocation data
+        utilization['monthly_cost'] = utilization['employee_rate'] * utilization['allocated_fte'] * standard_hours
+        utilization['revenue_generated'] = utilization['billable_hours'] * utilization['employee_rate']
+
         return utilization
     
     @staticmethod
@@ -535,14 +541,14 @@ class DataProcessor:
         fte_edits = st.session_state.get('burn_rate_fte_edits', {})
 
         for _, emp_data in hours_df.iterrows():
-            # Get employee FTE from employees table
+            # Get employee FTE from allocations (stored in emp_data from hours_df)
             employee_name = emp_data['employee_name']
-            nominal_fte = 0.0
-
-            if employees_df is not None and not employees_df.empty:
-                emp_record = employees_df[employees_df['name'] == employee_name]
-                if not emp_record.empty:
-                    nominal_fte = emp_record.iloc[0]['fte']
+            # Calculate average FTE across all months for this employee
+            fte_cols = [col for col in emp_data.index if col.startswith('fte_')]
+            if fte_cols:
+                nominal_fte = sum(emp_data[col] for col in fte_cols) / len(fte_cols)
+            else:
+                nominal_fte = 0.0
 
             # Calculate target hours: FTE × 160 hours/month × number of months
             # Check if user edited the target hours for this employee

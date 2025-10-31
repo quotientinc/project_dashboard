@@ -111,8 +111,7 @@ class TimesheetCSVImporter:
         """Extract unique employees from CSV"""
         unique_employees = self.df.groupby('Employee ID').agg({
             'Employee Name': 'first',
-            'PLC Desc': 'first',
-            'Billing Rate': 'first'
+            'PLC Desc': 'first'
         }).reset_index()
 
         now = datetime.now().isoformat()
@@ -123,11 +122,6 @@ class TimesheetCSVImporter:
             first_name, last_name = self._parse_employee_name(row['Employee Name'])
             full_name = f"{first_name} {last_name}".strip() or row['Employee Name']
 
-            # Use billing rate if available
-            hourly_rate = None
-            if pd.notna(row['Billing Rate']) and row['Billing Rate'] > 0:
-                hourly_rate = float(row['Billing Rate'])
-
             # Use PLC Desc as role if available
             role = None
             if pd.notna(row['PLC Desc']) and row['PLC Desc']:
@@ -136,12 +130,7 @@ class TimesheetCSVImporter:
             employee = {
                 'id': employee_id,
                 'name': full_name,
-                'email': None,
-                'department': None,
                 'role': role,
-                'hourly_rate': hourly_rate,
-                'fte': None,
-                'utilization': None,
                 'skills': None,
                 'hire_date': None,
                 'created_at': now,

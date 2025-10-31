@@ -28,14 +28,9 @@ with tab1:
             # Table view - no filters, just display all data
             # The dataframe itself has built-in sorting and filtering
             display_df = employees_df[[
-                'name', 'email', 'department', 'role',
-                'hourly_rate', 'fte', 'utilization', 'hire_date', 'skills'
             ]].copy()
 
             # Format columns
-            display_df['hourly_rate'] = display_df['hourly_rate'].apply(lambda x: f"${x:.2f}" if pd.notna(x) else "-")
-            display_df['fte'] = display_df['fte'].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "-")
-            display_df['utilization'] = display_df['utilization'].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else "-")
 
             # Rename columns for display
             display_df.columns = ['Name', 'Email', 'Department', 'Role', 'Hourly Rate', 'FTE', 'Utilization', 'Hire Date', 'Skills']
@@ -44,18 +39,14 @@ with tab1:
 
         else:
             # Card view with filters
-            col1, col2, col3 = st.columns(3)
+            col1, col2 = st.columns(2)
             with col1:
                 dept_filter = st.selectbox("Department", ["All"] + sorted(employees_df['department'].unique().tolist()), key="card_dept_filter")
             with col2:
                 role_filter = st.selectbox("Role", ["All"] + sorted(employees_df['role'].unique().tolist()), key="card_role_filter")
-            with col3:
-                sort_by = st.selectbox("Sort By", ["Name", "Department", "Role", "Utilization", "Hourly Rate"], key="card_sort")
 
             # Apply filters
             filtered_df = employees_df.copy()
-            if dept_filter != "All":
-                filtered_df = filtered_df[filtered_df['department'] == dept_filter]
             if role_filter != "All":
                 filtered_df = filtered_df[filtered_df['role'] == role_filter]
 
@@ -65,7 +56,6 @@ with tab1:
                 "Department": "department",
                 "Role": "role",
                 "Utilization": "utilization",
-                "Hourly Rate": "hourly_rate"
             }
             filtered_df = filtered_df.sort_values(sort_map[sort_by])
 
@@ -82,16 +72,7 @@ with tab1:
                         st.write(f"**Department:** {emp['department']}")
                         st.write(f"**Email:** {emp['email']}")
 
-                        # Metrics
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.metric("Hourly Rate", f"${emp['hourly_rate']:.2f}")
-                        with col2:
-                            st.metric("FTE", f"{emp['fte']:.2f}")
-
                         # Utilization bar
-                        st.progress(min(emp['utilization'] / 100, 1.0))
-                        st.caption(f"Utilization: {emp['utilization']:.1f}%")
 
                         st.write(f"**Hire Date:** {emp['hire_date']}")
                         st.write(f"**Skills:** {emp['skills']}")
@@ -175,14 +156,9 @@ with tab3:
         
         with col1:
             name = st.text_input("Name*")
-            email = st.text_input("Email*")
-            department = st.text_input("Department*")
             role = st.text_input("Role*")
         
         with col2:
-            hourly_rate = st.number_input("Hourly Rate", min_value=0.0, step=10.0)
-            fte = st.number_input("FTE", min_value=0.0, max_value=1.0, step=0.1, value=1.0)
-            utilization = st.number_input("Target Utilization %", min_value=0.0, max_value=100.0, value=80.0)
             hire_date = st.date_input("Hire Date")
         
         skills = st.text_area("Skills (comma-separated)")
@@ -193,12 +169,7 @@ with tab3:
             if name and email and department and role:
                 employee_data = {
                     'name': name,
-                    'email': email,
-                    'department': department,
                     'role': role,
-                    'hourly_rate': hourly_rate,
-                    'fte': fte,
-                    'utilization': utilization,
                     'skills': skills,
                     'hire_date': hire_date.strftime('%Y-%m-%d')
                 }
@@ -236,14 +207,9 @@ with tab4:
 
                 with col1:
                     name = st.text_input("Name*", value=employee['name'])
-                    email = st.text_input("Email*", value=employee['email'])
-                    department = st.text_input("Department*", value=employee['department'])
                     role = st.text_input("Role*", value=employee['role'])
 
                 with col2:
-                    hourly_rate = st.number_input("Hourly Rate", min_value=0.0, step=10.0, value=float(employee['hourly_rate']))
-                    fte = st.number_input("FTE", min_value=0.0, max_value=1.0, step=0.1, value=float(employee['fte']))
-                    utilization = st.number_input("Target Utilization %", min_value=0.0, max_value=100.0, value=float(employee['utilization']))
                     hire_date = st.date_input("Hire Date", value=pd.to_datetime(employee['hire_date']))
 
                 skills = st.text_area("Skills (comma-separated)", value=employee['skills'])
@@ -258,12 +224,7 @@ with tab4:
                     if name and email and department and role:
                         updates = {
                             'name': name,
-                            'email': email,
-                            'department': department,
                             'role': role,
-                            'hourly_rate': hourly_rate,
-                            'fte': fte,
-                            'utilization': utilization,
                             'skills': skills,
                             'hire_date': hire_date.strftime('%Y-%m-%d')
                         }

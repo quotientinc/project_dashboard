@@ -173,8 +173,14 @@ def resource_allocation_scenarios(db, processor):
 
         if st.button("Analyze Impact"):
             total_employees = len(employees_df)
-            current_avg_rate = employees_df['hourly_rate'].mean()
-            current_total_fte = employees_df['fte'].sum()
+
+            # Calculate current average rate and total FTE from allocations
+            if not allocations_df.empty:
+                current_avg_rate = allocations_df['employee_rate'].mean()
+                current_total_fte = allocations_df['allocated_fte'].sum()
+            else:
+                current_avg_rate = 120.0  # Default fallback
+                current_total_fte = 0.0
 
             # Calculate scenarios
             scenarios_data = []

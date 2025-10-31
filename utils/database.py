@@ -40,16 +40,12 @@ class DatabaseManager:
         ''')
 
         # Employees table - id is now INTEGER (not autoincrement) to store CSV Employee IDs like 100482
+        # Removed: email, department, hourly_rate, fte, utilization (moved to allocations or removed)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS employees (
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL,
-                email TEXT,
-                department TEXT,
                 role TEXT,
-                hourly_rate REAL,
-                fte REAL,
-                utilization REAL,
                 skills TEXT,
                 hire_date TEXT,
                 created_at TEXT,
@@ -58,6 +54,7 @@ class DatabaseManager:
         ''')
 
         # Project allocations table
+        # Added: employee_rate (moved from employees.hourly_rate), allocated_fte (moved from employees.fte)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS allocations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,6 +67,8 @@ class DatabaseManager:
                 end_date TEXT,
                 role TEXT,
                 project_rate REAL,
+                employee_rate REAL,
+                allocated_fte REAL,
                 allocation_date TEXT,
                 working_days INTEGER,
                 remaining_days INTEGER,
@@ -246,15 +245,8 @@ class DatabaseManager:
         query = "SELECT * FROM employees"
         params = []
 
-        if filters:
-            conditions = []
-            if 'departments' in filters and filters['departments']:
-                placeholders = ','.join('?' * len(filters['departments']))
-                conditions.append(f"department IN ({placeholders})")
-                params.extend(filters['departments'])
-
-            if conditions:
-                query += " WHERE " + " AND ".join(conditions)
+        # Note: department filter removed as department column no longer exists
+        # filters parameter kept for future extensibility
 
         return pd.read_sql_query(query, self.conn, params=params)
 
@@ -290,8 +282,7 @@ class DatabaseManager:
         """Get allocations filtered by project or employee"""
         query = """
             SELECT a.*, p.name as project_name, e.name as employee_name,
-                   e.hourly_rate, e.department,
-                   COALESCE(a.project_rate, e.hourly_rate) as effective_rate
+                   COALESCE(a.project_rate, a.employee_rate) as effective_rate
             FROM allocations a
             JOIN projects p ON a.project_id = p.id
             JOIN employees e ON a.employee_id = e.id
@@ -356,7 +347,18 @@ class DatabaseManager:
         """Get time entries with filters"""
         query = """
             SELECT t.*, e.name as employee_name, p.name as project_name,
-                   e.hourly_rate
+                   COALESCE(
+                       (SELECT a.project_rate
+                        FROM allocations a
+                        WHERE a.project_id = t.project_id
+                        AND a.employee_id = t.employee_id
+                        LIMIT 1),
+                       (SELECT a.employee_rate
+                        FROM allocations a
+                        WHERE a.project_id = t.project_id
+                        AND a.employee_id = t.employee_id
+                        LIMIT 1)
+                   ) as hourly_rate
             FROM time_entries t
             JOIN employees e ON t.employee_id = e.id
             JOIN projects p ON t.project_id = p.id
@@ -410,7 +412,11 @@ class DatabaseManager:
                      WHERE a.project_id = t.project_id
                      AND a.employee_id = t.employee_id
                      LIMIT 1),
-                    e.hourly_rate
+                    (SELECT a.employee_rate
+                     FROM allocations a
+                     WHERE a.project_id = t.project_id
+                     AND a.employee_id = t.employee_id
+                     LIMIT 1)
                 ) as rate,
                 strftime('%Y-%m', t.date) as month,
                 SUM(t.hours) as actual_hours

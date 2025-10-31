@@ -83,6 +83,7 @@ with tab1:
         # Revenue trends
         if not time_entries_df.empty:
             time_entries_df['date'] = pd.to_datetime(time_entries_df['date'])
+            # hourly_rate now comes from allocations table via get_time_entries()
             time_entries_df['revenue'] = time_entries_df['hours'] * time_entries_df['hourly_rate']
             # Group by month using to_timestamp to avoid Period serialization issues
             time_entries_df['month'] = time_entries_df['date'].dt.to_period('M').dt.to_timestamp()
@@ -107,6 +108,7 @@ with tab2:
 
     with col1:
         if not time_entries_df.empty:
+            # hourly_rate now comes from allocations table via get_time_entries()
             labor_costs = (time_entries_df['hours'] * time_entries_df['hourly_rate']).sum()
         else:
             labor_costs = 0

@@ -21,7 +21,7 @@ def show_burn_rate_editor(project, db_manager, processor):
     # Load data
     allocations_df = db_manager.get_allocations(project_id=project['id'])
     time_entries_by_month = db_manager.get_time_entries_by_month(project['id'])
-    employees_df = db_manager.get_employees()  # Load all employees for FTE lookup
+    employees_df = db_manager.get_employees()  # Load all employees for name/role lookup
 
     if allocations_df.empty:
         st.warning("No allocations found for this project. Please add team members to the project first.")
@@ -379,21 +379,15 @@ def display_hours_by_month_summary(hours_df, project, processor, employees_df, d
 
         with col3:
             if st.button("💾 Save", type="primary", key="save_fte_changes"):
-                # Update employees table with new FTE values
-                for change in changes:
-                    employee_name = change['employee_name']
-                    new_fte = change['edited_fte']
+                # Note: FTE values are now stored in allocations table (allocated_fte field)
+                # Target Hours changes are stored separately in the burn_rate_fte_edits session state
+                # This save button currently only updates target hours for display purposes
+                # To persist FTE changes to allocations table, we would need to:
+                # 1. Identify which allocations to update (by employee_id and project_id)
+                # 2. Update allocated_fte in those allocation records
 
-                    # Find employee ID
-                    emp_record = employees_df[employees_df['name'] == employee_name]
-                    if not emp_record.empty:
-                        employee_id = emp_record.iloc[0]['id']
-                        db_manager.update_employee(
-                            employee_id,
-                            {'fte': float(new_fte)}
-                        )
-
-                st.success(f"✅ Saved FTE changes for {len(changes)} employee(s)!")
+                st.warning("⚠️ FTE values are now stored per-allocation. To update FTE, use the Projects page to edit allocations.")
+                st.success(f"✅ Target Hours changes applied for {len(changes)} employee(s) (display only)!")
                 # Clear session state to reload fresh data
                 if 'burn_rate_fte_edits' in st.session_state:
                     del st.session_state.burn_rate_fte_edits

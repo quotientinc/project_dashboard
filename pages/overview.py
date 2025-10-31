@@ -29,7 +29,7 @@ if filters['status']:
 
 # Key Metrics Row
 st.markdown("### 📊 Key Performance Indicators")
-col1, col2, col3, col4, col5 = st.columns(5)
+col1, col2, col3, col4 = st.columns(4)
 
 with col1:
     total_revenue = projects_df['revenue_actual'].sum() if not projects_df.empty else 0
@@ -45,10 +45,6 @@ with col3:
     st.metric("Profit Margin", f"{profit_margin:.1f}%", f"${profit:,.0f}")
 
 with col4:
-    avg_utilization = employees_df['utilization'].mean() if not employees_df.empty else 0
-    st.metric("Avg Utilization", f"{avg_utilization:.1f}%")
-
-with col5:
     active_projects = len(projects_df[projects_df['status'] == 'Active']) if not projects_df.empty else 0
     total_projects = len(projects_df) if not projects_df.empty else 0
     st.metric("Active Projects", active_projects, f"of {total_projects}")

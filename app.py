@@ -160,15 +160,6 @@ with st.sidebar:
         key="global_employee_filter"
     )
 
-    # Department filter
-    departments = employees_df['department'].unique().tolist() if not employees_df.empty else []
-    selected_departments = st.multiselect(
-        "Filter by Department",
-        options=departments,
-        default=None,
-        key="global_department_filter"
-    )
-
     # Status filter
     status_options = ["Active", "Completed", "On Hold", "Cancelled"]
     selected_status = st.multiselect(
@@ -187,7 +178,6 @@ with st.sidebar:
         st.metric("Active Projects", len(projects_df[projects_df['status'] == 'Active']))
     if not employees_df.empty:
         st.metric("Total Employees", len(employees_df))
-        st.metric("Avg Utilization", f"{employees_df['utilization'].mean():.1f}%")
 
 # Store filters in session state for access by pages
 st.session_state.filters = {
@@ -195,7 +185,6 @@ st.session_state.filters = {
     'end_date': end_date,
     'projects': selected_projects,
     'employees': selected_employees,
-    'departments': selected_departments,
     'status': selected_status
 }
 

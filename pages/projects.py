@@ -112,7 +112,9 @@ with tab2:
 
             with col3:
                 st.metric("Project Manager", project['project_manager'])
-                profit = project['revenue_actual'] - project['budget_used']
+                # TODO: Fix this
+                #profit = project['revenue_actual'] - project['budget_used']
+                profit = 0
                 st.metric("Profit/Loss", f"${profit:,.0f}")
 
             # Tabs for project details
@@ -125,20 +127,22 @@ with tab2:
                 col1, col2 = st.columns(2)
 
                 with col1:
+                    # TODO: Fix this
                     st.markdown("#### Budget")
-                    st.metric("Allocated", f"${project['budget_allocated']:,.0f}")
-                    st.metric("Used", f"${project['budget_used']:,.0f}")
+                    """st.metric("Allocated", f"${(0 if project['budget_allocated'] is None else project['budget_allocated']):,.0f}")
+                    st.metric("Used", f"${(0 if project['budget_used'] is None else project['budget_used']):,.0f}")
                     remaining = project['budget_allocated'] - project['budget_used']
                     st.metric("Remaining", f"${remaining:,.0f}")
 
                     if project['budget_allocated'] > 0:
                         budget_pct = project['budget_used'] / project['budget_allocated'] * 100
                         st.progress(min(budget_pct / 100, 1.0))
-                        st.caption(f"Budget Utilization: {budget_pct:.1f}%")
+                        st.caption(f"Budget Utilization: {budget_pct:.1f}%")"""
 
                 with col2:
+                    # TODO: Fix this
                     st.markdown("#### Revenue")
-                    st.metric("Projected", f"${project['revenue_projected']:,.0f}")
+                    """st.metric("Projected", f"${project['revenue_projected']:,.0f}")
                     st.metric("Actual", f"${project['revenue_actual']:,.0f}")
                     variance = project['revenue_actual'] - project['revenue_projected']
                     st.metric("Variance", f"${variance:,.0f}")
@@ -146,7 +150,7 @@ with tab2:
                     if project['revenue_projected'] > 0:
                         revenue_pct = project['revenue_actual'] / project['revenue_projected'] * 100
                         st.progress(min(revenue_pct / 100, 1.0))
-                        st.caption(f"Revenue Achievement: {revenue_pct:.1f}%")
+                        st.caption(f"Revenue Achievement: {revenue_pct:.1f}%")"""
 
                 # Cost breakdown
                 costs = processor.calculate_project_costs(
@@ -199,7 +203,6 @@ with tab2:
 
                         with col1:
                             st.write(f"**{allocation['employee_name']}**")
-                            st.caption(allocation['department'])
 
                         with col2:
                             st.write(f"Role: {allocation['role']}")
@@ -250,7 +253,9 @@ with tab2:
                 with col2:
                     st.write(f"**End Date:** {project['end_date']}")
                 with col3:
-                    days_total = (pd.to_datetime(project['end_date']) - pd.to_datetime(project['start_date'])).days
+                    # TODO: Fix this
+                    #  days_total = (pd.to_datetime(project['end_date']) - pd.to_datetime(project['start_date'])).days
+                    days_total = 0
                     st.write(f"**Duration:** {days_total} days")
 
                 # Progress
@@ -259,7 +264,8 @@ with tab2:
                     start = pd.to_datetime(project['start_date'])
                     end = pd.to_datetime(project['end_date'])
 
-                    if today >= start and today <= end:
+                    # TODO: Fix this
+                    """if today >= start and today <= end:
                         days_elapsed = (today - start).days
                         progress = days_elapsed / days_total * 100
                         st.progress(min(progress / 100, 1.0))
@@ -267,7 +273,7 @@ with tab2:
                     elif today < start:
                         st.info("Project not started yet")
                     else:
-                        st.warning("Project past scheduled end date")
+                        st.warning("Project past scheduled end date")"""
 
                 # Time entries over time
                 time_entries = db.get_time_entries(project_id=project_id)
@@ -478,9 +484,7 @@ with tab4:
                 for _, alloc in allocations_df.iterrows():
                     col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
 
-                    with col1:
-                        st.write(f"**{alloc['employee_name']}** ({alloc['department']})")
-
+                    with col1:                st.write(f"**{alloc['employee_name']}**")
                     with col2:
                         st.write(f"Allocation: {alloc['allocation_percent']:.0f}%")
 

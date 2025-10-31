@@ -139,18 +139,18 @@ def generate_resource_report(db, processor):
 
             # Detailed table
             st.markdown("#### Employee Details")
-            display_df = utilization_df[['name', 'department', 'utilization_rate', 'billable_hours', 'revenue_generated']]
+            display_df = utilization_df[['name', 'utilization_rate', 'billable_hours', 'revenue_generated']]
             st.dataframe(display_df, width='stretch', hide_index=True)
 
             # Utilization chart
-            fig = px.bar(
+            # TODO: Resolve and come back to this
+            """fig = px.bar(
                 utilization_df,
                 x='name',
                 y='utilization_rate',
-                color='department',
-                title="Utilization by Employee"
+                color=title="Utilization by Employee"
             )
-            st.plotly_chart(fig, width='stretch')
+            st.plotly_chart(fig, width='stretch')"""
 
 def generate_financial_report(db, processor):
     st.markdown("#### Financial Report")
