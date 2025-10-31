@@ -52,13 +52,13 @@ if 'db_manager' not in st.session_state:
     st.session_state.data_processor = DataProcessor()
 
     # Initialize with sample data if database is empty
-    if st.session_state.db_manager.is_empty():
-        logger.info("Database is empty, generating sample data")
-        from utils.sample_data import generate_sample_data
-        generate_sample_data(st.session_state.db_manager)
-        logger.info("Sample data generation completed")
-    else:
-        logger.info("Database already populated, skipping sample data generation")
+    # if st.session_state.db_manager.is_empty():
+    #     logger.info("Database is empty, generating sample data")
+    #     from utils.sample_data import generate_sample_data
+    #     generate_sample_data(st.session_state.db_manager)
+    #     logger.info("Sample data generation completed")
+    # else:
+    #     logger.info("Database already populated, skipping sample data generation")
 
 # Initialize filters in session state if not present
 if 'filters' not in st.session_state:
