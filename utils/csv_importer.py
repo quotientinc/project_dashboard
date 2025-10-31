@@ -133,6 +133,12 @@ class TimesheetCSVImporter:
                 'role': role,
                 'skills': None,
                 'hire_date': None,
+                'term_date': None,
+                'pay_type': None,
+                'cost_rate': None,
+                'annual_salary': None,
+                'pto_accrual': None,
+                'holidays': None,
                 'created_at': now,
                 'updated_at': now
             }
@@ -150,13 +156,25 @@ class TimesheetCSVImporter:
             if not row['date_parsed'] or row['Entered Hours'] <= 0:
                 continue
 
+            # Determine billable status based on project ID pattern
+            project_id = row['Project ID']
+            is_billable = 1  # Default to billable
+
+            # Check for non-billable project patterns
+            if (project_id.startswith('FRINGE.') or
+                project_id.startswith('GENADM.') or
+                project_id.startswith('OVHDGS.') or
+                project_id.endswith('.99') or
+                not project_id[0].isdigit()):
+                is_billable = 0
+
             time_entry = {
                 'employee_id': int(row['Employee ID']),
                 'project_id': row['Project ID'],
                 'date': row['date_parsed'],
                 'hours': float(row['Entered Hours']),
                 'description': row['Comments'] if pd.notna(row['Comments']) else None,
-                'billable': 1,  # Default to billable
+                'billable': is_billable,
                 'is_projected': 0,
                 'created_at': now
             }
@@ -195,3 +213,77 @@ class TimesheetCSVImporter:
         self.extract_time_entries()
 
         return self.projects, self.employees, self.time_entries, self.get_summary()
+
+
+class EmployeeMasterCSVImporter:
+    """
+    Imports employee master data from CSV files with format:
+    id, name, hire_date, term_date, pay_type, cost_rate, annual_salary, pto_accrual, holidays
+    """
+
+    def __init__(self, csv_path):
+        """Initialize importer with CSV file path"""
+        self.csv_path = csv_path
+        self.df = None
+        self.employees = []
+
+    def parse_csv(self):
+        """Parse the CSV file"""
+        self.df = pd.read_csv(self.csv_path)
+
+        # Validate required columns
+        required_columns = ['id', 'name']
+        missing_columns = [col for col in required_columns if col not in self.df.columns]
+        if missing_columns:
+            raise ValueError(f"Missing required columns: {missing_columns}")
+
+        # Clean up data
+        self.df['id'] = self.df['id'].astype(int)
+        self.df['name'] = self.df['name'].astype(str).str.strip()
+
+        return self
+
+    def extract_employees(self):
+        """Extract employee data from CSV"""
+        now = datetime.now().isoformat()
+        self.employees = []
+
+        for _, row in self.df.iterrows():
+            employee = {
+                'id': int(row['id']),
+                'name': str(row['name']),
+                'hire_date': str(row['hire_date']) if pd.notna(row.get('hire_date')) else None,
+                'term_date': str(row['term_date']) if pd.notna(row.get('term_date')) else None,
+                'pay_type': str(row['pay_type']) if pd.notna(row.get('pay_type')) else None,
+                'cost_rate': float(row['cost_rate']) if pd.notna(row.get('cost_rate')) else None,
+                'annual_salary': float(row['annual_salary']) if pd.notna(row.get('annual_salary')) else None,
+                'pto_accrual': float(row['pto_accrual']) if pd.notna(row.get('pto_accrual')) else None,
+                'holidays': float(row['holidays']) if pd.notna(row.get('holidays')) else None,
+                'updated_at': now
+            }
+            self.employees.append(employee)
+
+        return self
+
+    def get_summary(self):
+        """Get summary statistics of the import"""
+        if self.df is None:
+            return {}
+
+        return {
+            'total_employees': len(self.employees),
+            'with_hire_date': sum(1 for e in self.employees if e['hire_date']),
+            'with_term_date': sum(1 for e in self.employees if e['term_date']),
+            'hourly_employees': sum(1 for e in self.employees if e['pay_type'] == 'Hourly'),
+            'salaried_employees': sum(1 for e in self.employees if e['pay_type'] == 'Salary')
+        }
+
+    def import_all(self):
+        """
+        Parse CSV and extract all employee data
+        Returns: (employees, summary)
+        """
+        self.parse_csv()
+        self.extract_employees()
+
+        return self.employees, self.get_summary()

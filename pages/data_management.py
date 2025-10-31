@@ -138,16 +138,17 @@ with tab1:
     st.markdown("##### 📁 Standard CSV Import")
     data_type = st.selectbox(
         "Select Data Type to Import",
-        ["Projects", "Employees", "Allocations", "Time Entries", "Expenses"]
+        ["Projects", "Employees", "Allocations", "Expenses"]
     )
 
     st.markdown("""
     **CSV Format Requirements:**
-    - **Projects**: name, description, status, start_date, end_date, budget_allocated, budget_used, revenue_projected, revenue_actual, client, project_manager
-    - **Employees**: name, role, skills, hire_date
+    - **Projects**: name, description, status, start_date, end_date, budget_allocated, budget_used, revenue_projected, revenue_actual, client, project_manager, billable
+    - **Employees**: name, role, skills, hire_date, term_date, pay_type, cost_rate, annual_salary, pto_accrual, holidays
     - **Allocations**: project_id, employee_id, allocation_percent, hours_projected, hours_actual, start_date, end_date, role, project_rate, employee_rate, allocated_fte
-    - **Time Entries**: employee_id, project_id, date, hours, description, billable
     - **Expenses**: project_id, category, description, amount, date, approved
+
+    **Note:** For time entries, use the Timesheet CSV Import above.
     """)
 
     uploaded_file = st.file_uploader(

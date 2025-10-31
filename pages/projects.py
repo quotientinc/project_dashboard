@@ -365,6 +365,8 @@ with tab3:
             budget_used = st.number_input("Budget Used", min_value=0.0, step=1000.0, value=0.0)
             revenue_actual = st.number_input("Revenue Actual", min_value=0.0, step=1000.0, value=0.0)
 
+        billable = st.checkbox("Billable Project", value=False, help="Check if this is a billable client project")
+
         submitted = st.form_submit_button("Add Project")
 
         if submitted:
@@ -380,7 +382,8 @@ with tab3:
                     'budget_allocated': budget_allocated,
                     'budget_used': budget_used,
                     'revenue_projected': revenue_projected,
-                    'revenue_actual': revenue_actual
+                    'revenue_actual': revenue_actual,
+                    'billable': 1 if billable else 0
                 }
 
                 try:
@@ -437,6 +440,8 @@ with tab4:
                 with col2:
                     revenue_actual = st.number_input("Revenue Actual", min_value=0.0, step=1000.0, value=float(project['revenue_actual']))
 
+                billable = st.checkbox("Billable Project", value=bool(project.get('billable', 0)), help="Check if this is a billable client project")
+
                 col1, col2 = st.columns(2)
                 with col1:
                     update_button = st.form_submit_button("Update Project", type="primary")
@@ -456,7 +461,8 @@ with tab4:
                             'budget_allocated': budget_allocated,
                             'budget_used': budget_used,
                             'revenue_projected': revenue_projected,
-                            'revenue_actual': revenue_actual
+                            'revenue_actual': revenue_actual,
+                            'billable': 1 if billable else 0
                         }
 
                         try:

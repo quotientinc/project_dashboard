@@ -34,6 +34,7 @@ class DatabaseManager:
                 revenue_actual REAL,
                 client TEXT,
                 project_manager TEXT,
+                billable INTEGER DEFAULT 0,
                 created_at TEXT,
                 updated_at TEXT
             )
@@ -41,6 +42,7 @@ class DatabaseManager:
 
         # Employees table - id is now INTEGER (not autoincrement) to store CSV Employee IDs like 100482
         # Removed: email, department, hourly_rate, fte, utilization (moved to allocations or removed)
+        # Added: term_date, pay_type, cost_rate, annual_salary, pto_accrual, holidays (HR fields)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS employees (
                 id INTEGER PRIMARY KEY,
@@ -48,6 +50,12 @@ class DatabaseManager:
                 role TEXT,
                 skills TEXT,
                 hire_date TEXT,
+                term_date TEXT,
+                pay_type TEXT,
+                cost_rate REAL,
+                annual_salary REAL,
+                pto_accrual REAL,
+                holidays REAL,
                 created_at TEXT,
                 updated_at TEXT
             )

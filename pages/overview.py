@@ -240,10 +240,12 @@ if not time_entries_df.empty:
     # Convert date to datetime for proper sorting
     time_entries_df['date'] = pd.to_datetime(time_entries_df['date'])
     recent_entries = time_entries_df.nlargest(10, 'date')[
-        ['date', 'employee_name', 'project_name', 'hours', 'description']
+        ['date', 'employee_name', 'project_name', 'hours', 'billable', 'description']
     ].copy()
     # Format date back to string for display
     recent_entries['date'] = recent_entries['date'].dt.strftime('%Y-%m-%d')
+    # Add visual indicator for billable status
+    recent_entries['billable'] = recent_entries['billable'].apply(lambda x: '✓ Billable' if x == 1 else '✗ Non-billable')
     st.dataframe(recent_entries, width='stretch', hide_index=True)
 else:
     st.info("No recent time entries")
