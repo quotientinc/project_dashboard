@@ -25,12 +25,19 @@ A comprehensive Streamlit-based project management dashboard for tracking projec
 ### Prerequisites
 - Python 3.8 or higher
 - pip package manager
+- Optional venv
 
 ### Setup Instructions
 
 1. **Clone or download the project**
 ```bash
 cd project_dashboard
+```
+
+Optional venv
+```bash
+python -m vene myenv
+source myenve/bin/activate
 ```
 
 2. **Install required packages**

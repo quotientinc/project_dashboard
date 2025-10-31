@@ -88,5 +88,8 @@ site/
 # Package files
 *.tar.gz
 *.zip
+
+# Project-specific
+sample-data/
 /CLAUDE.md
 /docs/

@@ -19,10 +19,10 @@ class DatabaseManager:
         """Create all necessary tables"""
         cursor = self.conn.cursor()
 
-        # Projects table
+        # Projects table - id is now TEXT to store CSV Project IDs like "202800.Y2.000.00"
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS projects (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 description TEXT,
                 status TEXT,
@@ -39,10 +39,10 @@ class DatabaseManager:
             )
         ''')
 
-        # Employees table
+        # Employees table - id is now INTEGER (not autoincrement) to store CSV Employee IDs like 100482
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS employees (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL,
                 email TEXT,
                 department TEXT,
@@ -61,7 +61,7 @@ class DatabaseManager:
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS allocations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id INTEGER,
+                project_id TEXT,
                 employee_id INTEGER,
                 allocation_percent REAL,
                 hours_projected REAL,
@@ -85,7 +85,7 @@ class DatabaseManager:
             CREATE TABLE IF NOT EXISTS time_entries (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 employee_id INTEGER,
-                project_id INTEGER,
+                project_id TEXT,
                 date TEXT,
                 hours REAL,
                 description TEXT,
@@ -101,7 +101,7 @@ class DatabaseManager:
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS expenses (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id INTEGER,
+                project_id TEXT,
                 category TEXT,
                 description TEXT,
                 amount REAL,
@@ -113,6 +113,56 @@ class DatabaseManager:
         ''')
 
         self.conn.commit()
+
+    def migrate_schema_for_csv_import(self):
+        """
+        Migrate database schema to support CSV timesheet import.
+        Changes:
+        - projects.id: INTEGER AUTOINCREMENT -> TEXT (to store CSV Project IDs)
+        - employees.id: INTEGER AUTOINCREMENT -> INTEGER (to store CSV Employee IDs)
+        - Updates foreign keys in allocations, time_entries, and expenses
+
+        WARNING: This will delete all data except allocations (which may have orphaned references)
+        """
+        cursor = self.conn.cursor()
+
+        # Check if migration is needed
+        cursor.execute("PRAGMA table_info(projects)")
+        columns = cursor.fetchall()
+        project_id_type = [col for col in columns if col[1] == 'id'][0][2]  # Get type of id column
+
+        if project_id_type == 'TEXT':
+            print("Schema already migrated for CSV import")
+            return
+
+        print("Starting schema migration for CSV import...")
+
+        # Step 1: Save allocations data
+        cursor.execute("SELECT * FROM allocations")
+        allocations_backup = cursor.fetchall()
+        cursor.execute("PRAGMA table_info(allocations)")
+        allocations_columns = [col[1] for col in cursor.fetchall()]
+
+        # Step 2: Drop all tables
+        cursor.execute("DROP TABLE IF EXISTS time_entries")
+        cursor.execute("DROP TABLE IF EXISTS expenses")
+        cursor.execute("DROP TABLE IF EXISTS allocations")
+        cursor.execute("DROP TABLE IF EXISTS projects")
+        cursor.execute("DROP TABLE IF EXISTS employees")
+
+        # Step 3: Recreate tables with new schema
+        self.create_tables()
+
+        # Step 4: Restore allocations (may have orphaned references until CSV import)
+        if allocations_backup:
+            print(f"Restoring {len(allocations_backup)} allocations (note: references may be orphaned until CSV import)")
+            placeholders = ','.join('?' * len(allocations_columns))
+            query = f"INSERT INTO allocations ({','.join(allocations_columns)}) VALUES ({placeholders})"
+            cursor.executemany(query, allocations_backup)
+
+        self.conn.commit()
+        print("Schema migration complete. Allocations preserved, all other data cleared.")
+        print("Note: Allocation foreign keys may be orphaned until CSV data is imported.")
 
     def is_empty(self):
         """Check if database is empty"""
@@ -251,8 +301,8 @@ class DatabaseManager:
 
         if project_id:
             conditions.append("a.project_id = ?")
-            # Convert numpy types to Python types
-            params.append(int(project_id) if hasattr(project_id, 'item') else project_id)
+            # Convert numpy types to Python types (project_id is TEXT)
+            params.append(str(project_id) if hasattr(project_id, 'item') else project_id)
         if employee_id:
             conditions.append("a.employee_id = ?")
             # Convert numpy types to Python types
@@ -326,8 +376,8 @@ class DatabaseManager:
             params.append(int(employee_id) if hasattr(employee_id, 'item') else employee_id)
         if project_id:
             conditions.append("t.project_id = ?")
-            # Convert numpy types to Python types
-            params.append(int(project_id) if hasattr(project_id, 'item') else project_id)
+            # Convert numpy types to Python types (project_id is TEXT)
+            params.append(str(project_id) if hasattr(project_id, 'item') else project_id)
 
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
@@ -368,7 +418,8 @@ class DatabaseManager:
             JOIN employees e ON t.employee_id = e.id
             WHERE t.project_id = ?
         """
-        params = [int(project_id) if hasattr(project_id, 'item') else project_id]
+        # Convert numpy types to Python types (project_id is TEXT)
+        params = [str(project_id) if hasattr(project_id, 'item') else project_id]
 
         if start_date:
             query += " AND t.date >= ?"
@@ -393,8 +444,8 @@ class DatabaseManager:
 
         if project_id:
             query += " WHERE e.project_id = ?"
-            # Convert numpy types to Python types
-            params.append(int(project_id) if hasattr(project_id, 'item') else project_id)
+            # Convert numpy types to Python types (project_id is TEXT)
+            params.append(str(project_id) if hasattr(project_id, 'item') else project_id)
 
         return pd.read_sql_query(query, self.conn, params=params)
 
@@ -411,6 +462,48 @@ class DatabaseManager:
         self.conn.commit()
         return cursor.lastrowid
 
+    # Bulk insert methods for CSV import
+    def bulk_insert_projects(self, projects_data):
+        """Bulk insert projects from list of dicts"""
+        if not projects_data:
+            return
+
+        cursor = self.conn.cursor()
+        columns = list(projects_data[0].keys())
+        placeholders = ','.join('?' * len(columns))
+        query = f"INSERT OR IGNORE INTO projects ({','.join(columns)}) VALUES ({placeholders})"
+
+        values = [tuple(p[col] for col in columns) for p in projects_data]
+        cursor.executemany(query, values)
+        self.conn.commit()
+
+    def bulk_insert_employees(self, employees_data):
+        """Bulk insert employees from list of dicts"""
+        if not employees_data:
+            return
+
+        cursor = self.conn.cursor()
+        columns = list(employees_data[0].keys())
+        placeholders = ','.join('?' * len(columns))
+        query = f"INSERT OR IGNORE INTO employees ({','.join(columns)}) VALUES ({placeholders})"
+
+        values = [tuple(e[col] for col in columns) for e in employees_data]
+        cursor.executemany(query, values)
+        self.conn.commit()
+
+    def bulk_insert_time_entries(self, time_entries_data):
+        """Bulk insert time entries from list of dicts"""
+        if not time_entries_data:
+            return
+
+        cursor = self.conn.cursor()
+        columns = list(time_entries_data[0].keys())
+        placeholders = ','.join('?' * len(columns))
+        query = f"INSERT INTO time_entries ({','.join(columns)}) VALUES ({placeholders})"
+
+        values = [tuple(t[col] for col in columns) for t in time_entries_data]
+        cursor.executemany(query, values)
+        self.conn.commit()
     # Import/Export methods
     def import_csv(self, file, table_name):
         """Import data from CSV file"""

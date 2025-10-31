@@ -15,6 +15,127 @@ tab1, tab2, tab3, tab4 = st.tabs(["Import Data", "Export Data", "Data Backup", "
 with tab1:
     st.markdown("#### Import Data")
 
+    # Timesheet CSV Import Section
+    st.markdown("##### 📋 Import Timesheet CSV")
+    st.info("Import timesheet data from TimesheetData.csv format. This will migrate the database schema and replace all time entries.")
+
+    with st.expander("Timesheet CSV Import", expanded=False):
+        st.markdown("""
+        **Timesheet CSV Format:**
+        - Columns: Employee ID, Employee Name, Project ID, Hours Date, Entered Hours, Comments, PLC ID, PLC Desc, Billing Rate, Amount
+        - Date Format: DD-MMM-YY (e.g., "25-Dec-24")
+        - Automatically creates projects and employees from CSV data
+
+        **⚠️ Warning:**
+        - This will migrate the database to use CSV ID formats
+        - Projects will use string IDs (e.g., "202800.Y2.000.00")
+        - Employees will use CSV Employee IDs (e.g., 100482)
+        - All existing time entries and expenses will be deleted
+        - Allocations will be preserved but may have orphaned references
+        """)
+
+        timesheet_file = st.file_uploader(
+            "Choose Timesheet CSV file",
+            type=['csv'],
+            key="timesheet_upload",
+            help="Upload a CSV file in TimesheetData.csv format"
+        )
+
+        if timesheet_file is not None:
+            try:
+                from utils.csv_importer import TimesheetCSVImporter
+
+                # Parse and preview
+                importer = TimesheetCSVImporter(timesheet_file)
+                projects, employees, time_entries, summary = importer.import_all()
+
+                # Show summary
+                st.markdown("##### Import Preview")
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Total Rows", summary['total_rows'])
+                with col2:
+                    st.metric("Projects", summary['unique_projects'])
+                with col3:
+                    st.metric("Employees", summary['unique_employees'])
+                with col4:
+                    st.metric("Time Entries", summary['time_entries'])
+
+                if summary['date_range']:
+                    st.write(f"**Date Range:** {summary['date_range'][0]} to {summary['date_range'][1]}")
+                st.write(f"**Total Hours:** {summary['total_hours']:,.1f}")
+
+                # Show sample data
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown("**Sample Projects:**")
+                    st.dataframe(
+                        pd.DataFrame(projects[:5])[['id', 'name']],
+                        height=150,
+                        hide_index=True
+                    )
+                with col2:
+                    st.markdown("**Sample Employees:**")
+                    st.dataframe(
+                        pd.DataFrame(employees[:5])[['id', 'name', 'role']],
+                        height=150,
+                        hide_index=True
+                    )
+
+                # Confirmation checkbox
+                confirm_import = st.checkbox(
+                    "I understand this will delete existing time entries and expenses, and migrate the database schema",
+                    key="confirm_timesheet_import"
+                )
+
+                if st.button("Import Timesheet Data", type="primary", disabled=not confirm_import):
+                    try:
+                        progress_bar = st.progress(0, text="Starting import...")
+
+                        # Step 1: Migrate schema
+                        progress_bar.progress(10, text="Migrating database schema...")
+                        db.migrate_schema_for_csv_import()
+
+                        # Step 2: Import projects
+                        progress_bar.progress(30, text=f"Importing {len(projects)} projects...")
+                        db.bulk_insert_projects(projects)
+
+                        # Step 3: Import employees
+                        progress_bar.progress(50, text=f"Importing {len(employees)} employees...")
+                        db.bulk_insert_employees(employees)
+
+                        # Step 4: Import time entries
+                        progress_bar.progress(70, text=f"Importing {len(time_entries)} time entries...")
+                        db.bulk_insert_time_entries(time_entries)
+
+                        progress_bar.progress(100, text="Import complete!")
+
+                        st.success(f"""
+                        ✅ Timesheet import completed successfully!
+                        - Imported {len(projects)} projects
+                        - Imported {len(employees)} employees
+                        - Imported {len(time_entries)} time entries
+                        - Total hours: {summary['total_hours']:,.1f}
+                        """)
+                        st.balloons()
+
+                        # Wait a moment before reloading
+                        import time
+                        time.sleep(2)
+                        st.rerun()
+
+                    except Exception as e:
+                        st.error(f"Error importing timesheet data: {str(e)}")
+                        st.exception(e)
+
+            except Exception as e:
+                st.error(f"Error parsing timesheet CSV: {str(e)}")
+                st.exception(e)
+
+    st.divider()
+
+    # Standard Import Section
+    st.markdown("##### 📁 Standard CSV Import")
     data_type = st.selectbox(
         "Select Data Type to Import",
         ["Projects", "Employees", "Allocations", "Time Entries", "Expenses"]
