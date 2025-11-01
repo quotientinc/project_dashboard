@@ -11,7 +11,7 @@ processor = st.session_state.data_processor
 
 st.markdown("### 👥 Employee Management")
 
-tab1, tab2, tab3, tab4 = st.tabs(["Employee List", "Utilization", "Add Employee", "Edit Employee"])
+tab1, tab2, tab3 = st.tabs(["Employee List", "Utilization", "Edit Employee"])
 
 with tab1:
     employees_df = db.get_employees()
@@ -123,41 +123,6 @@ with tab2:
             st.dataframe(under_utilized, hide_index=True)
 
 with tab3:
-    st.markdown("#### Add New Employee")
-    
-    with st.form("add_employee_form"):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            name = st.text_input("Name*")
-            role = st.text_input("Role*")
-        
-        with col2:
-            hire_date = st.date_input("Hire Date")
-        
-        skills = st.text_area("Skills (comma-separated)")
-        
-        submitted = st.form_submit_button("Add Employee")
-
-        if submitted:
-            if name and role:
-                employee_data = {
-                    'name': name,
-                    'role': role,
-                    'skills': skills if skills else None,
-                    'hire_date': hire_date.strftime('%Y-%m-%d')
-                }
-                
-                try:
-                    db.add_employee(employee_data)
-                    st.success(f"Employee '{name}' added successfully!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error adding employee: {str(e)}")
-            else:
-                st.error("Please fill in all required fields marked with *")
-
-with tab4:
     st.markdown("#### Edit Employee")
 
     employees_df = db.get_employees()
