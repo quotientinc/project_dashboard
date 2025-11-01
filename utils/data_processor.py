@@ -90,26 +90,17 @@ class DataProcessor:
 
         utilization = employees_df.copy()
 
-        # Calculate allocated hours and get rates/FTE from allocations
+        # Calculate allocated FTE and get rates from allocations
         if not allocations_df.empty:
             allocated = allocations_df.groupby('employee_id').agg({
-                'allocation_percent': 'sum',
-                'hours_projected': 'sum',
-                'hours_actual': 'sum',
                 'employee_rate': 'mean',  # Average rate across allocations
                 'allocated_fte': 'sum'    # Sum FTE across all allocations
             }).reset_index()
 
             utilization = utilization.merge(allocated, left_on='id', right_on='employee_id', how='left')
-            utilization['allocation_percent'] = utilization['allocation_percent'].fillna(0)
-            utilization['hours_projected'] = utilization['hours_projected'].fillna(0)
-            utilization['hours_actual'] = utilization['hours_actual'].fillna(0)
             utilization['employee_rate'] = utilization['employee_rate'].fillna(0)
             utilization['allocated_fte'] = utilization['allocated_fte'].fillna(0)
         else:
-            utilization['allocation_percent'] = 0
-            utilization['hours_projected'] = 0
-            utilization['hours_actual'] = 0
             utilization['employee_rate'] = 0
             utilization['allocated_fte'] = 0
 
@@ -327,8 +318,8 @@ class DataProcessor:
             
             if not active.empty:
                 # Calculate FTE by project
-                project_fte = active.groupby('project_name')['allocation_percent'].sum() / 100
-                
+                project_fte = active.groupby('project_name')['allocated_fte'].sum()
+
                 for project, fte in project_fte.items():
                     fte_requirements.append({
                         'date': date,
@@ -450,7 +441,7 @@ class DataProcessor:
                 ]
 
                 if not month_alloc.empty:
-                    fte = month_alloc['allocation_percent'].iloc[0] / 100
+                    fte = month_alloc['allocated_fte'].iloc[0]
                     # Use stored working_days if available, otherwise calculate
                     if 'working_days' in month_alloc.columns and pd.notna(month_alloc['working_days'].iloc[0]):
                         working_days = int(month_alloc['working_days'].iloc[0])
@@ -467,7 +458,7 @@ class DataProcessor:
                 else:
                     # Fallback to any allocation for this employee
                     emp_allocs = allocations_df[allocations_df['employee_id'] == emp['employee_id']]
-                    fte = emp_allocs['allocation_percent'].iloc[0] / 100 if not emp_allocs.empty else 0
+                    fte = emp_allocs['allocated_fte'].iloc[0] if not emp_allocs.empty else 0
                     # Calculate working days normally if no specific allocation
                     days_info = DataProcessor.calculate_working_days(year, month)
                     remaining_days = days_info['remaining_days']

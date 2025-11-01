@@ -206,37 +206,22 @@ with tab2:
 
                         with col2:
                             st.write(f"Role: {allocation['role']}")
-                            st.write(f"Allocation: {allocation['allocation_percent']:.0f}%")
-
-                        with col3:
-                            st.write(f"Hours Projected: {allocation['hours_projected']:.0f}")
-                            st.write(f"Hours Actual: {allocation['hours_actual']:.0f}")
-
-                        with col4:
-                            variance = allocation['hours_actual'] - allocation['hours_projected']
-                            if variance > 0:
-                                st.error(f"Over by {variance:.0f} hours")
-                            else:
-                                st.success(f"Under by {abs(variance):.0f} hours")
+                            fte = allocation.get('allocated_fte', 0)
+                            st.write(f"Allocation: {fte * 100:.0f}%")
 
                         st.markdown("---")
 
-                    # Team utilization chart
+                    # Team allocation chart
                     fig = go.Figure(data=[
                         go.Bar(
-                            name='Projected',
+                            name='Allocated FTE',
                             x=allocations_df['employee_name'],
-                            y=allocations_df['hours_projected']
-                        ),
-                        go.Bar(
-                            name='Actual',
-                            x=allocations_df['employee_name'],
-                            y=allocations_df['hours_actual']
+                            y=allocations_df['allocated_fte'] * 100  # Convert to percentage
                         )
                     ])
                     fig.update_layout(
-                        title="Hours: Projected vs Actual",
-                        barmode='group',
+                        title="Team Allocation (% of Full-Time)",
+                        yaxis_title="Allocation %",
                         height=400
                     )
                     st.plotly_chart(fig, width='stretch')
@@ -488,16 +473,16 @@ with tab4:
                 st.markdown("##### Current Team Members")
 
                 for _, alloc in allocations_df.iterrows():
-                    col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
+                    col1, col2, col3 = st.columns([4, 2, 1])
 
-                    with col1:                st.write(f"**{alloc['employee_name']}**")
+                    with col1:
+                        st.write(f"**{alloc['employee_name']}**")
+
                     with col2:
-                        st.write(f"Allocation: {alloc['allocation_percent']:.0f}%")
+                        fte = alloc.get('allocated_fte', 0)
+                        st.write(f"Allocation: {fte * 100:.0f}%")
 
                     with col3:
-                        st.write(f"Hours: {alloc['hours_projected']:.0f} proj / {alloc['hours_actual']:.0f} actual")
-
-                    with col4:
                         if st.button("Remove", key=f"remove_alloc_{alloc['id']}"):
                             try:
                                 db.delete_allocation(alloc['id'])
@@ -530,11 +515,10 @@ with tab4:
                             "Select Employee",
                             options=available_employees['name'].tolist()
                         )
-                        allocation_percent = st.number_input("Allocation %", min_value=0.0, max_value=100.0, step=5.0, value=50.0)
+                        allocated_fte = st.number_input("Allocation (FTE)", min_value=0.0, max_value=1.0, step=0.05, value=0.5, help="0.5 = 50% of full-time, 1.0 = 100% full-time")
 
                     with col2:
                         role_in_project = st.text_input("Role in Project")
-                        hours_projected = st.number_input("Hours Projected", min_value=0.0, step=10.0, value=80.0)
 
                     col1, col2 = st.columns(2)
                     with col1:
@@ -548,15 +532,17 @@ with tab4:
                             selected_emp = available_employees[available_employees['name'] == employee_name].iloc[0]
                             logger.info(f"Selected employee: {selected_emp['id']}, {selected_emp['name']}")
 
+                            # Get employee's cost_rate to use as employee_rate
+                            employee_rate = selected_emp.get('cost_rate', None)
+
                             allocation_data = {
                                 'project_id': project_id,
                                 'employee_id': selected_emp['id'],
-                                'allocation_percent': allocation_percent,
-                                'hours_projected': hours_projected,
-                                'hours_actual': 0.0,
+                                'allocated_fte': allocated_fte,
                                 'start_date': alloc_start.strftime('%Y-%m-%d'),
                                 'end_date': alloc_end.strftime('%Y-%m-%d'),
-                                'role': role_in_project
+                                'role': role_in_project,
+                                'employee_rate': employee_rate
                             }
                             logger.info(f"Allocation data: {allocation_data}")
 

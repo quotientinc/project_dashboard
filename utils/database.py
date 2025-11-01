@@ -62,21 +62,18 @@ class DatabaseManager:
         ''')
 
         # Project allocations table
-        # Added: employee_rate (moved from employees.hourly_rate), allocated_fte (moved from employees.fte)
+        # Simplified schema: removed allocation_percent (use allocated_fte only), removed hours_projected/hours_actual
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS allocations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id TEXT,
                 employee_id INTEGER,
-                allocation_percent REAL,
-                hours_projected REAL,
-                hours_actual REAL,
+                allocated_fte REAL,
                 start_date TEXT,
                 end_date TEXT,
                 role TEXT,
                 project_rate REAL,
                 employee_rate REAL,
-                allocated_fte REAL,
                 allocation_date TEXT,
                 working_days INTEGER,
                 remaining_days INTEGER,

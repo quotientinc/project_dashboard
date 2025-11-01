@@ -32,50 +32,39 @@ with tab1:
             st.dataframe(display_df, width='stretch', hide_index=True)
 
         else:
-            # Card view with filters
-            col1, col2 = st.columns(2)
-            with col1:
-                dept_filter = st.selectbox("Department", ["All"] + sorted(employees_df['department'].unique().tolist()), key="card_dept_filter")
-            with col2:
-                role_filter = st.selectbox("Role", ["All"] + sorted(employees_df['role'].unique().tolist()), key="card_role_filter")
+            # Card view with role filter only
+            role_filter = st.selectbox("Filter by Role", ["All"] + sorted(employees_df['role'].dropna().unique().tolist()), key="card_role_filter")
 
-            # Apply filters
+            # Apply filter
             filtered_df = employees_df.copy()
             if role_filter != "All":
                 filtered_df = filtered_df[filtered_df['role'] == role_filter]
 
-            # Sort
-            sort_map = {
-                "Name": "name",
-                "Role": "role",
-                "Utilization": "utilization",
-            }
-            filtered_df = filtered_df.sort_values(sort_map[sort_by])
+            # Sort by name
+            filtered_df = filtered_df.sort_values('name')
 
             # Display cards
             cols = st.columns(3)
             for idx, (_, emp) in enumerate(filtered_df.iterrows()):
                 with cols[idx % 3]:
                     with st.container():
-                        # Utilization color indicator
-                        util_indicator = '🟢' if emp['utilization'] >= 80 else ('🟡' if emp['utilization'] >= 60 else '🔴')
+                        st.markdown(f"### 👤 {emp['name']}")
+                        st.write(f"**Role:** {emp['role'] if pd.notna(emp['role']) else 'N/A'}")
+                        st.write(f"**Hire Date:** {emp['hire_date'] if pd.notna(emp['hire_date']) else 'N/A'}")
 
-                        st.markdown(f"### {util_indicator} {emp['name']}")
-                        st.write(f"**Role:** {emp['role']}")
-                        st.write(f"**Department:** {emp['department']}")
-                        st.write(f"**Email:** {emp['email']}")
+                        if pd.notna(emp.get('skills')) and emp['skills']:
+                            st.write(f"**Skills:** {emp['skills']}")
 
-                        # Utilization bar
-
-                        st.write(f"**Hire Date:** {emp['hire_date']}")
-                        st.write(f"**Skills:** {emp['skills']}")
-
-                        # Show current allocations
+                        # Show current allocations with FTE
                         allocations = db.get_allocations(employee_id=emp['id'])
                         if not allocations.empty:
+                            total_fte = allocations['allocated_fte'].sum() if 'allocated_fte' in allocations.columns else 0
+                            st.write(f"**Total FTE:** {total_fte:.2f}")
+
                             with st.expander("Current Projects"):
                                 for _, alloc in allocations.iterrows():
-                                    st.write(f"• {alloc['project_name']} ({alloc['allocation_percent']:.0f}%)")
+                                    fte = alloc.get('allocated_fte', 0)
+                                    st.write(f"• {alloc['project_name']} ({fte * 100:.0f}%)")
 
                         st.markdown("---")
     else:
@@ -126,9 +115,11 @@ with tab2:
         
         with col2:
             st.markdown("##### Under-utilized Employees")
-            under_utilized = utilization_df.nsmallest(5, 'utilization_rate')[
-                ['name', 'utilization_rate', 'allocation_percent']
-            ]
+            # Select columns that exist in the utilization_df
+            display_cols = ['name', 'utilization_rate']
+            if 'allocated_fte' in utilization_df.columns:
+                display_cols.append('allocated_fte')
+            under_utilized = utilization_df.nsmallest(5, 'utilization_rate')[display_cols]
             st.dataframe(under_utilized, hide_index=True)
 
 with tab3:
@@ -147,13 +138,13 @@ with tab3:
         skills = st.text_area("Skills (comma-separated)")
         
         submitted = st.form_submit_button("Add Employee")
-        
+
         if submitted:
-            if name and email and department and role:
+            if name and role:
                 employee_data = {
                     'name': name,
                     'role': role,
-                    'skills': skills,
+                    'skills': skills if skills else None,
                     'hire_date': hire_date.strftime('%Y-%m-%d')
                 }
                 
@@ -204,11 +195,11 @@ with tab4:
                     delete_button = st.form_submit_button("Delete Employee", type="secondary")
 
                 if update_button:
-                    if name and email and department and role:
+                    if name and role:
                         updates = {
                             'name': name,
                             'role': role,
-                            'skills': skills,
+                            'skills': skills if skills else None,
                             'hire_date': hire_date.strftime('%Y-%m-%d')
                         }
 
@@ -235,18 +226,16 @@ with tab4:
                 st.markdown("##### Current Projects")
 
                 for _, alloc in allocations_df.iterrows():
-                    col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
+                    col1, col2, col3 = st.columns([4, 2, 1])
 
                     with col1:
                         st.write(f"**{alloc['project_name']}**")
 
                     with col2:
-                        st.write(f"Allocation: {alloc['allocation_percent']:.0f}%")
+                        fte = alloc.get('allocated_fte', 0)
+                        st.write(f"Allocation: {fte * 100:.0f}%")
 
                     with col3:
-                        st.write(f"Hours: {alloc['hours_projected']:.0f} proj / {alloc['hours_actual']:.0f} actual")
-
-                    with col4:
                         if st.button("Remove", key=f"remove_emp_alloc_{alloc['id']}"):
                             try:
                                 db.delete_allocation(alloc['id'])
@@ -279,11 +268,10 @@ with tab4:
                             options=available_projects['name'].tolist(),
                             key=f"new_proj_select_{employee_id}"
                         )
-                        allocation_percent = st.number_input("Allocation %", min_value=0.0, max_value=100.0, step=5.0, value=50.0, key=f"emp_alloc_{employee_id}")
+                        allocated_fte = st.number_input("Allocation (FTE)", min_value=0.0, max_value=1.0, step=0.05, value=0.5, key=f"emp_alloc_{employee_id}", help="0.5 = 50% of full-time, 1.0 = 100% full-time")
 
                     with col2:
                         role_in_project = st.text_input("Role in Project", key=f"emp_role_{employee_id}")
-                        hours_projected = st.number_input("Hours Projected", min_value=0.0, step=10.0, value=80.0, key=f"emp_hours_{employee_id}")
 
                     selected_proj = available_projects[available_projects['name'] == project_name].iloc[0]
 
@@ -295,15 +283,17 @@ with tab4:
 
                     if st.form_submit_button("Add to Project"):
                         try:
+                            # Get employee's cost_rate to use as employee_rate
+                            employee_rate = employee.get('cost_rate', None)
+
                             allocation_data = {
                                 'project_id': selected_proj['id'],
                                 'employee_id': employee_id,
-                                'allocation_percent': allocation_percent,
-                                'hours_projected': hours_projected,
-                                'hours_actual': 0.0,
+                                'allocated_fte': allocated_fte,
                                 'start_date': alloc_start.strftime('%Y-%m-%d'),
                                 'end_date': alloc_end.strftime('%Y-%m-%d'),
-                                'role': role_in_project
+                                'role': role_in_project,
+                                'employee_rate': employee_rate
                             }
 
                             db.add_allocation(allocation_data)

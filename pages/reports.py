@@ -106,7 +106,7 @@ def generate_project_status_report(db, processor):
             if not allocations_df.empty:
                 st.markdown("#### Team Allocation")
                 st.dataframe(
-                    allocations_df[['employee_name', 'role', 'allocation_percent', 'hours_projected', 'hours_actual']],
+                    allocations_df[['employee_name', 'role', 'allocated_fte']],
                     width='stretch',
                     hide_index=True
                 )
