@@ -142,6 +142,8 @@ with tab3:
             st.markdown(f"##### Editing: {employee['name']}")
 
             with st.form("edit_employee_form"):
+                # === Basic Information ===
+                st.markdown("**Basic Information**")
                 col1, col2 = st.columns(2)
 
                 with col1:
@@ -149,23 +151,163 @@ with tab3:
                     role = st.text_input("Role*", value=employee['role'])
 
                 with col2:
-                    hire_date = st.date_input("Hire Date", value=pd.to_datetime(employee['hire_date']))
+                    hire_date = st.date_input(
+                        "Hire Date",
+                        value=pd.to_datetime(employee['hire_date']) if pd.notna(employee.get('hire_date')) else None
+                    )
+                    term_date = st.date_input(
+                        "Term Date (optional)",
+                        value=pd.to_datetime(employee['term_date']) if pd.notna(employee.get('term_date')) else None,
+                        help="Leave empty if employee is active"
+                    )
 
-                skills = st.text_area("Skills (comma-separated)", value=employee['skills'])
+                st.markdown("---")
+
+                # === Compensation ===
+                st.markdown("**Compensation**")
+
+                # Pay Type selection
+                pay_type_options = ["Hourly", "Salary"]
+                current_pay_type = employee.get('pay_type', 'Hourly')
+                if current_pay_type not in pay_type_options:
+                    current_pay_type = "Hourly"
+
+                pay_type = st.radio(
+                    "Pay Type*",
+                    options=pay_type_options,
+                    index=pay_type_options.index(current_pay_type),
+                    horizontal=True
+                )
 
                 col1, col2 = st.columns(2)
+
+                # Conditional fields based on pay type
+                if pay_type == "Hourly":
+                    with col1:
+                        cost_rate = st.number_input(
+                            "Cost Rate ($/hour)*",
+                            min_value=0.0,
+                            value=float(employee.get('cost_rate', 0.0)) if pd.notna(employee.get('cost_rate')) else 0.0,
+                            step=1.0,
+                            format="%.2f",
+                            help="Hourly rate for this employee"
+                        )
+                    with col2:
+                        st.info("Annual salary field is hidden for Hourly employees")
+
+                    # For form submission
+                    annual_salary = None
+                    calculated_rate_display = None
+
+                else:  # Salary
+                    with col1:
+                        annual_salary = st.number_input(
+                            "Annual Salary ($)*",
+                            min_value=0.0,
+                            value=float(employee.get('annual_salary', 0.0)) if pd.notna(employee.get('annual_salary')) else 0.0,
+                            step=1000.0,
+                            format="%.2f",
+                            help="Annual salary for this employee"
+                        )
+
+                    # Auto-calculate cost rate from annual salary
+                    if annual_salary > 0:
+                        calculated_cost_rate = annual_salary / 2080
+                        with col2:
+                            st.info(f"**Calculated Hourly Rate:** ${calculated_cost_rate:.2f}/hour  \n(Based on 2080 hours/year)")
+                        cost_rate = calculated_cost_rate
+                    else:
+                        cost_rate = 0.0
+                        with col2:
+                            st.warning("Enter annual salary to calculate hourly rate")
+
+                st.markdown("---")
+
+                # === Benefits ===
+                st.markdown("**Benefits**")
+                col1, col2 = st.columns(2)
+
                 with col1:
-                    update_button = st.form_submit_button("Update Employee", type="primary")
+                    pto_accrual = st.number_input(
+                        "PTO Accrual (hours/year)",
+                        min_value=0.0,
+                        value=float(employee.get('pto_accrual', 120.0)) if pd.notna(employee.get('pto_accrual')) else 120.0,
+                        step=8.0,
+                        format="%.1f",
+                        help="Annual PTO hours"
+                    )
+
                 with col2:
-                    delete_button = st.form_submit_button("Delete Employee", type="secondary")
+                    holidays = st.number_input(
+                        "Holidays (hours/year)",
+                        min_value=0.0,
+                        value=float(employee.get('holidays', 88.0 if pay_type == "Salary" else 0.0)) if pd.notna(employee.get('holidays')) else (88.0 if pay_type == "Salary" else 0.0),
+                        step=8.0,
+                        format="%.1f",
+                        help="Typically 88 for Salary, 0 for Hourly"
+                    )
+
+                st.markdown("---")
+
+                # === Skills ===
+                st.markdown("**Skills**")
+
+                # Skills options
+                skills_options = [
+                    "jr. developer",
+                    "sr. developer",
+                    "sr. consultant",
+                    "technical SME",
+                    "project lead",
+                    "project manager",
+                    "scheduler"
+                ]
+
+                # Parse current skills from comma-separated string
+                current_skills_str = employee.get('skills', '')
+                if pd.notna(current_skills_str) and current_skills_str:
+                    current_skills = [s.strip() for s in current_skills_str.split(',')]
+                else:
+                    current_skills = []
+
+                selected_skills = st.multiselect(
+                    "Skills (select multiple)",
+                    options=skills_options,
+                    default=[s for s in current_skills if s in skills_options],
+                    help="Select one or more skills for this employee"
+                )
+
+                # Convert selected skills back to comma-separated string
+                skills_str = ', '.join(selected_skills) if selected_skills else None
+
+                st.markdown("---")
+
+                # Submit button
+                update_button = st.form_submit_button("Update Employee", type="primary")
 
                 if update_button:
-                    if name and role:
+                    # Validation
+                    if not name or not role:
+                        st.error("Please fill in all required fields marked with *")
+                    elif pay_type == "Hourly" and cost_rate <= 0:
+                        st.error("Cost Rate must be greater than 0 for Hourly employees")
+                    elif pay_type == "Salary" and annual_salary <= 0:
+                        st.error("Annual Salary must be greater than 0 for Salary employees")
+                    elif term_date and hire_date and term_date < hire_date:
+                        st.error("Term Date cannot be before Hire Date")
+                    else:
+                        # Prepare updates
                         updates = {
                             'name': name,
                             'role': role,
-                            'skills': skills if skills else None,
-                            'hire_date': hire_date.strftime('%Y-%m-%d')
+                            'hire_date': hire_date.strftime('%Y-%m-%d') if hire_date else None,
+                            'term_date': term_date.strftime('%Y-%m-%d') if term_date else None,
+                            'pay_type': pay_type,
+                            'cost_rate': cost_rate,
+                            'annual_salary': annual_salary if pay_type == "Salary" else None,
+                            'pto_accrual': pto_accrual,
+                            'holidays': holidays,
+                            'skills': skills_str
                         }
 
                         try:
@@ -174,11 +316,6 @@ with tab3:
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error updating employee: {str(e)}")
-                    else:
-                        st.error("Please fill in all required fields marked with *")
-
-                if delete_button:
-                    st.warning("⚠️ Delete functionality requires confirmation. Please implement a confirmation dialog.")
 
             # Project allocation management (outside the form)
             st.markdown("---")
