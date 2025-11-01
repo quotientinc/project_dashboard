@@ -14,7 +14,7 @@ processor = st.session_state.data_processor
 st.markdown("### 🚀 Project Management")
 
 # Tabs for different views
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["Project List", "Project Details", "Add Project", "Edit Project", "Project Analytics"])
+tab1, tab2, tab3, tab4 = st.tabs(["Project List", "Project Details", "Edit Project", "Project Analytics"])
 
 with tab1:
     # Load projects
@@ -365,64 +365,6 @@ with tab2:
         st.info("No projects available")
 
 with tab3:
-    # Add new project
-    st.markdown("#### Add New Project")
-
-    with st.form("add_project_form"):
-        col1, col2 = st.columns(2)
-
-        with col1:
-            name = st.text_input("Project Name*")
-            description = st.text_area("Description")
-            client = st.text_input("Client*")
-            project_manager = st.text_input("Project Manager*")
-
-        with col2:
-            status = st.selectbox("Status", ["Active", "On Hold", "Completed", "Cancelled"])
-            start_date = st.date_input("Start Date")
-            end_date = st.date_input("End Date")
-            budget_allocated = st.number_input("Budget Allocated", min_value=0.0, step=1000.0)
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            revenue_projected = st.number_input("Revenue Projected", min_value=0.0, step=1000.0)
-
-        with col2:
-            budget_used = st.number_input("Budget Used", min_value=0.0, step=1000.0, value=0.0)
-            revenue_actual = st.number_input("Revenue Actual", min_value=0.0, step=1000.0, value=0.0)
-
-        billable = st.checkbox("Billable Project", value=False, help="Check if this is a billable client project")
-
-        submitted = st.form_submit_button("Add Project")
-
-        if submitted:
-            if name and client and project_manager:
-                project_data = {
-                    'name': name,
-                    'description': description,
-                    'client': client,
-                    'project_manager': project_manager,
-                    'status': status,
-                    'start_date': start_date.strftime('%Y-%m-%d'),
-                    'end_date': end_date.strftime('%Y-%m-%d'),
-                    'budget_allocated': budget_allocated,
-                    'budget_used': budget_used,
-                    'revenue_projected': revenue_projected,
-                    'revenue_actual': revenue_actual,
-                    'billable': 1 if billable else 0
-                }
-
-                try:
-                    db.add_project(project_data)
-                    st.success(f"Project '{name}' added successfully!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error adding project: {str(e)}")
-            else:
-                st.error("Please fill in all required fields marked with *")
-
-with tab4:
     # Edit project
     st.markdown("#### Edit Project")
 
@@ -469,11 +411,7 @@ with tab4:
 
                 billable = st.checkbox("Billable Project", value=bool(project.get('billable', 0)), help="Check if this is a billable client project")
 
-                col1, col2 = st.columns(2)
-                with col1:
-                    update_button = st.form_submit_button("Update Project", type="primary")
-                with col2:
-                    delete_button = st.form_submit_button("Delete Project", type="secondary")
+                update_button = st.form_submit_button("Update Project", type="primary")
 
                 if update_button:
                     if name and client and project_manager:
@@ -500,9 +438,6 @@ with tab4:
                             st.error(f"Error updating project: {str(e)}")
                     else:
                         st.error("Please fill in all required fields marked with *")
-
-                if delete_button:
-                    st.warning("⚠️ Delete functionality requires confirmation. Please implement a confirmation dialog.")
 
             # Team allocation management (outside the form)
             st.markdown("---")
@@ -601,7 +536,7 @@ with tab4:
     else:
         st.info("No projects available to edit")
 
-with tab5:
+with tab4:
     # Project analytics
     projects_df = db.get_projects()
 
