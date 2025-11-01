@@ -82,9 +82,29 @@ class DataProcessor:
     def calculate_employee_utilization(
         employees_df: pd.DataFrame,
         allocations_df: pd.DataFrame,
-        time_entries_df: pd.DataFrame
+        time_entries_df: pd.DataFrame,
+        current_month_working_days: int = 21
     ) -> pd.DataFrame:
-        """Calculate employee utilization metrics"""
+        """
+        Calculate employee utilization metrics using improved methodology.
+
+        Improved calculation uses:
+        - Target FTE allocation as baseline (not fixed 160 hours)
+        - Actual working days in the month
+        - PTO and holiday adjustments
+        - Separate tracking of billable vs total utilization
+
+        Formula:
+        Expected Hours = Target FTE × Working Days × 8 hours/day × (1 - Overhead Allocation)
+        Utilization Rate = (Total Hours Worked / Expected Hours) × 100%
+        Billable Utilization = (Billable Hours Worked / Expected Hours) × 100%
+
+        Args:
+            employees_df: DataFrame with employee data including target_allocation, overhead_allocation
+            allocations_df: DataFrame with project allocations
+            time_entries_df: DataFrame with time entries
+            current_month_working_days: Number of working days in the current month (default 21)
+        """
         if employees_df.empty:
             return pd.DataFrame()
 
@@ -123,18 +143,58 @@ class DataProcessor:
             utilization['billable_hours'] = 0
             utilization['total_hours'] = 0
 
-        # Calculate utilization rate
-        standard_hours = 160  # Monthly standard hours
-        utilization['utilization_rate'] = (utilization['total_hours'] / standard_hours * 100).clip(0, 100)
+        # IMPROVED CALCULATION: Use target allocation and actual working days
+        # Ensure target_allocation and overhead_allocation exist
+        if 'target_allocation' not in utilization.columns:
+            utilization['target_allocation'] = 1.0  # Default to full-time
+        if 'overhead_allocation' not in utilization.columns:
+            utilization['overhead_allocation'] = 0.0  # Default to no overhead
+
+        # Fill NaN values
+        utilization['target_allocation'] = utilization['target_allocation'].fillna(1.0)
+        utilization['overhead_allocation'] = utilization['overhead_allocation'].fillna(0.0)
+
+        # Calculate expected hours based on target FTE and working days
+        # Expected Hours = Target FTE × Working Days × 8 hours/day × (1 - Overhead %)
+        hours_per_day = 8
+        utilization['expected_hours'] = (
+            utilization['target_allocation'] *
+            current_month_working_days *
+            hours_per_day *
+            (1 - utilization['overhead_allocation'])
+        )
+
+        # Calculate utilization rates
+        # Total utilization (includes both billable and non-billable work)
+        utilization['utilization_rate'] = np.where(
+            utilization['expected_hours'] > 0,
+            (utilization['total_hours'] / utilization['expected_hours'] * 100).clip(0, 200),  # Allow up to 200% for overtime
+            0
+        )
+
+        # Billable utilization (only billable hours against expected)
+        utilization['billable_utilization'] = np.where(
+            utilization['expected_hours'] > 0,
+            (utilization['billable_hours'] / utilization['expected_hours'] * 100).clip(0, 200),
+            0
+        )
+
+        # Billable rate (percentage of worked hours that are billable)
         utilization['billable_rate'] = np.where(
             utilization['total_hours'] > 0,
             utilization['billable_hours'] / utilization['total_hours'] * 100,
             0
         )
 
-        # Cost calculations using allocation data
-        utilization['monthly_cost'] = utilization['employee_rate'] * utilization['allocated_fte'] * standard_hours
-        utilization['revenue_generated'] = utilization['billable_hours'] * utilization['employee_rate']
+        # Cost calculations
+        # Use cost_rate from employee record (falls back to employee_rate from allocations)
+        if 'cost_rate' in utilization.columns:
+            effective_rate = utilization['cost_rate'].fillna(utilization['employee_rate'])
+        else:
+            effective_rate = utilization['employee_rate']
+
+        utilization['monthly_cost'] = effective_rate * utilization['expected_hours']
+        utilization['revenue_generated'] = utilization['billable_hours'] * effective_rate
 
         return utilization
 

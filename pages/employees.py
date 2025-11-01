@@ -1,6 +1,4 @@
 import streamlit as st
-import plotly.graph_objects as go
-import plotly.express as px
 import pandas as pd
 from utils.logger import get_logger
 
@@ -72,55 +70,186 @@ with tab1:
 
 with tab2:
     st.markdown("#### Employee Utilization Analysis")
-    
+
     employees_df = db.get_employees()
     allocations_df = db.get_allocations()
     time_entries_df = db.get_time_entries()
-    
+
     if not employees_df.empty:
+        # Get current month working days (you can make this dynamic later)
+        from datetime import datetime
+        import calendar
+        current_year = datetime.now().year
+        current_month = datetime.now().month
+
+        # Calculate working days for current month
+        days_in_month = calendar.monthrange(current_year, current_month)[1]
+        working_days = sum(1 for day in range(1, days_in_month + 1)
+                          if datetime(current_year, current_month, day).weekday() < 5)
+
         utilization_df = processor.calculate_employee_utilization(
-            employees_df, allocations_df, time_entries_df
+            employees_df, allocations_df, time_entries_df, current_month_working_days=working_days
         )
-        
-        # Utilization chart
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=utilization_df['name'],
-            y=utilization_df['utilization_rate'],
-            name='Utilization %',
-            marker_color=utilization_df['utilization_rate'].apply(
-                lambda x: 'green' if x >= 80 else ('yellow' if x >= 60 else 'red')
-            )
-        ))
-        fig.add_shape(
-            type="line", x0=-0.5, x1=len(utilization_df)-0.5,
-            y0=80, y1=80, line=dict(color="red", dash="dash")
-        )
-        fig.update_layout(
-            title="Employee Utilization Rates",
-            yaxis_title="Utilization %",
-            height=400
-        )
-        st.plotly_chart(fig, width='stretch')
-        
-        # Detailed metrics
-        col1, col2 = st.columns(2)
-        
+
+        # Display key info
+        st.info(f"📅 Current Month: {datetime.now().strftime('%B %Y')} • Working Days: {working_days}")
+
+        # Summary metrics
+        col1, col2, col3 = st.columns(3)
         with col1:
-            st.markdown("##### Top Utilized Employees")
-            top_utilized = utilization_df.nlargest(5, 'utilization_rate')[
-                ['name', 'utilization_rate', 'billable_hours']
-            ]
-            st.dataframe(top_utilized, hide_index=True)
-        
+            avg_util = utilization_df['utilization_rate'].mean()
+            st.metric("Average Utilization", f"{avg_util:.1f}%")
         with col2:
-            st.markdown("##### Under-utilized Employees")
-            # Select columns that exist in the utilization_df
-            display_cols = ['name', 'utilization_rate']
-            if 'allocated_fte' in utilization_df.columns:
-                display_cols.append('allocated_fte')
-            under_utilized = utilization_df.nsmallest(5, 'utilization_rate')[display_cols]
-            st.dataframe(under_utilized, hide_index=True)
+            if 'billable_utilization' in utilization_df.columns:
+                avg_billable = utilization_df['billable_utilization'].mean()
+                st.metric("Average Billable Util.", f"{avg_billable:.1f}%")
+        with col3:
+            if 'expected_hours' in utilization_df.columns:
+                total_expected = utilization_df['expected_hours'].sum()
+                total_actual = utilization_df['total_hours'].sum()
+                st.metric("Total Hours", f"{total_actual:.0f} / {total_expected:.0f}")
+
+        st.markdown("---")
+        st.markdown("#### Detailed Utilization Table")
+
+        # Prepare comprehensive table with all calculation values
+        table_df = utilization_df.copy()
+
+        # Calculate derived fields
+        table_df['non_billable_hours'] = table_df['total_hours'] - table_df['billable_hours']
+        table_df['hours_variance'] = table_df['total_hours'] - table_df['expected_hours']
+        table_df['capacity_remaining'] = table_df['expected_hours'] - table_df['total_hours']
+
+        # Add working days column (same for all)
+        table_df['working_days'] = working_days
+
+        # Select and order columns for display
+        display_columns = [
+            'name',
+            'role',
+            'target_allocation',
+            'overhead_allocation',
+            'working_days',
+            'expected_hours',
+            'total_hours',
+            'billable_hours',
+            'non_billable_hours',
+            'utilization_rate',
+            'billable_utilization',
+            'billable_rate',
+            'hours_variance',
+            'capacity_remaining'
+        ]
+
+        # Filter to only existing columns
+        display_columns = [col for col in display_columns if col in table_df.columns]
+        display_df = table_df[display_columns].copy()
+
+        # Rename columns for better display
+        display_df = display_df.rename(columns={
+            'name': 'Employee',
+            'role': 'Role',
+            'target_allocation': 'Target FTE',
+            'overhead_allocation': 'Overhead %',
+            'working_days': 'Working Days',
+            'expected_hours': 'Expected Hrs',
+            'total_hours': 'Actual Hrs',
+            'billable_hours': 'Billable Hrs',
+            'non_billable_hours': 'Non-bill Hrs',
+            'utilization_rate': 'Total Util %',
+            'billable_utilization': 'Billable Util %',
+            'billable_rate': 'Billable Rate %',
+            'hours_variance': 'Variance (+/-)',
+            'capacity_remaining': 'Capacity Rem.'
+        })
+
+        # Format numeric columns
+        if 'Target FTE' in display_df.columns:
+            display_df['Target FTE'] = (display_df['Target FTE'] * 100).round(0).astype(int)
+        if 'Overhead %' in display_df.columns:
+            display_df['Overhead %'] = (display_df['Overhead %'] * 100).round(0).astype(int)
+        if 'Expected Hrs' in display_df.columns:
+            display_df['Expected Hrs'] = display_df['Expected Hrs'].round(1)
+        if 'Actual Hrs' in display_df.columns:
+            display_df['Actual Hrs'] = display_df['Actual Hrs'].round(1)
+        if 'Billable Hrs' in display_df.columns:
+            display_df['Billable Hrs'] = display_df['Billable Hrs'].round(1)
+        if 'Non-bill Hrs' in display_df.columns:
+            display_df['Non-bill Hrs'] = display_df['Non-bill Hrs'].round(1)
+        if 'Total Util %' in display_df.columns:
+            display_df['Total Util %'] = display_df['Total Util %'].round(1)
+        if 'Billable Util %' in display_df.columns:
+            display_df['Billable Util %'] = display_df['Billable Util %'].round(1)
+        if 'Billable Rate %' in display_df.columns:
+            display_df['Billable Rate %'] = display_df['Billable Rate %'].round(1)
+        if 'Variance (+/-)' in display_df.columns:
+            display_df['Variance (+/-)'] = display_df['Variance (+/-)'].round(1)
+        if 'Capacity Rem.' in display_df.columns:
+            display_df['Capacity Rem.'] = display_df['Capacity Rem.'].round(1)
+
+        # Define color function for utilization columns
+        def color_utilization(val):
+            """Color code utilization percentages"""
+            try:
+                val_float = float(val)
+                if val_float < 80:
+                    return 'background-color: #ffcccb'  # Light red
+                elif val_float < 100:
+                    return 'background-color: #ffffcc'  # Light yellow
+                elif val_float <= 120:
+                    return 'background-color: #ccffcc'  # Light green
+                else:
+                    return 'background-color: #ffd9b3'  # Light orange
+            except:
+                return ''
+
+        def color_variance(val):
+            """Color code variance (positive = over, negative = under)"""
+            try:
+                val_float = float(val)
+                if val_float < -10:
+                    return 'background-color: #ffcccb; color: #cc0000'  # Red for significantly under
+                elif val_float < 0:
+                    return 'background-color: #ffffcc'  # Yellow for slightly under
+                elif val_float <= 10:
+                    return 'background-color: #ccffcc'  # Green for on target
+                else:
+                    return 'background-color: #ffd9b3; color: #cc6600'  # Orange for over
+            except:
+                return ''
+
+        # Apply conditional formatting
+        styled_df = display_df.style
+        if 'Total Util %' in display_df.columns:
+            styled_df = styled_df.applymap(color_utilization, subset=['Total Util %'])
+        if 'Billable Util %' in display_df.columns:
+            styled_df = styled_df.applymap(color_utilization, subset=['Billable Util %'])
+        if 'Variance (+/-)' in display_df.columns:
+            styled_df = styled_df.applymap(color_variance, subset=['Variance (+/-)'])
+
+        # Format as strings with proper signs for variance
+        if 'Variance (+/-)' in display_df.columns:
+            display_df['Variance (+/-)'] = display_df['Variance (+/-)'].apply(
+                lambda x: f"+{x:.1f}" if x > 0 else f"{x:.1f}"
+            )
+
+        # Display the table
+        st.dataframe(styled_df, use_container_width=True, hide_index=True, height=600)
+
+        # Add summary row
+        st.markdown("##### Summary Totals")
+        summary_cols = st.columns(5)
+        with summary_cols[0]:
+            st.metric("Total Employees", len(table_df))
+        with summary_cols[1]:
+            st.metric("Total Expected Hrs", f"{table_df['expected_hours'].sum():.0f}")
+        with summary_cols[2]:
+            st.metric("Total Actual Hrs", f"{table_df['total_hours'].sum():.0f}")
+        with summary_cols[3]:
+            st.metric("Total Billable Hrs", f"{table_df['billable_hours'].sum():.0f}")
+        with summary_cols[4]:
+            total_variance = table_df['hours_variance'].sum()
+            st.metric("Total Variance", f"{'+' if total_variance > 0 else ''}{total_variance:.0f} hrs")
 
 with tab3:
     st.markdown("#### Edit Employee")
