@@ -44,10 +44,18 @@ else:  # All Time
     end_date = None
 
 # Load data
-projects_df = db.get_projects()
+all_projects_df = db.get_projects()
 employees_df = db.get_employees()
 allocations_df = db.get_allocations()
 months_df = db.get_months()
+
+# Filter to only billable projects
+if not all_projects_df.empty:
+    projects_df = all_projects_df[all_projects_df['billable'] == 1].copy()
+    billable_project_ids = projects_df['id'].tolist()
+else:
+    projects_df = all_projects_df
+    billable_project_ids = []
 
 # Apply date filtering to time entries and expenses
 if start_date and end_date:
@@ -68,6 +76,15 @@ if start_date and end_date:
 else:
     time_entries_df = db.get_time_entries()
     expenses_df = db.get_expenses()
+
+# Filter time entries, expenses, and allocations to only billable projects
+if billable_project_ids:
+    if not time_entries_df.empty:
+        time_entries_df = time_entries_df[time_entries_df['project_id'].isin(billable_project_ids)].copy()
+    if not expenses_df.empty:
+        expenses_df = expenses_df[expenses_df['project_id'].isin(billable_project_ids)].copy()
+    if not allocations_df.empty:
+        allocations_df = allocations_df[allocations_df['project_id'].isin(billable_project_ids)].copy()
 
 # Calculate monthly utilization trend (for the current year)
 utilization_trend_df = processor.calculate_monthly_utilization_trend(
