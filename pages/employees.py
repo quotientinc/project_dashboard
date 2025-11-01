@@ -249,6 +249,55 @@ with tab3:
 
                 st.markdown("---")
 
+                # === Allocation Settings ===
+                st.markdown("**Allocation Settings**")
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    billable = st.checkbox(
+                        "Billable Employee",
+                        value=bool(employee.get('billable', 0)),
+                        help="Check if this employee's time is billable to clients",
+                        key=f"billable_{employee_id}"
+                    )
+
+                    overhead_allocation = st.number_input(
+                        "Overhead Allocation",
+                        min_value=0.0,
+                        max_value=1.0,
+                        value=float(employee.get('overhead_allocation', 0.0)) if pd.notna(employee.get('overhead_allocation')) else 0.0,
+                        step=0.05,
+                        format="%.2f",
+                        help="Percentage of time allocated to overhead (0-1)",
+                        key=f"overhead_{employee_id}"
+                    )
+
+                with col2:
+                    # Determine default target allocation based on pay type and billable status
+                    current_target = float(employee.get('target_allocation', 0.3)) if pd.notna(employee.get('target_allocation')) else 0.3
+
+                    target_allocation = st.number_input(
+                        "Target Allocation",
+                        min_value=0.0,
+                        max_value=1.0,
+                        value=current_target,
+                        step=0.05,
+                        format="%.2f",
+                        help="Target FTE allocation for this employee (0-1). Billable Salary: 1.0, Billable Hourly: 0.3",
+                        key=f"target_{employee_id}"
+                    )
+
+                # Apply defaults for billable employees
+                if billable:
+                    overhead_allocation = 0.0
+                    # Show info about defaults
+                    if pay_type == "Salary":
+                        st.info("💡 Billable Salary employees: overhead set to 0, target typically 1.0")
+                    else:  # Hourly
+                        st.info("💡 Billable Hourly employees: overhead set to 0, target typically 0.3")
+
+                st.markdown("---")
+
                 # === Skills ===
                 st.markdown("**Skills**")
 
@@ -307,7 +356,10 @@ with tab3:
                             'annual_salary': annual_salary if pay_type == "Salary" else None,
                             'pto_accrual': pto_accrual,
                             'holidays': holidays,
-                            'skills': skills_str
+                            'skills': skills_str,
+                            'billable': 1 if billable else 0,
+                            'overhead_allocation': overhead_allocation,
+                            'target_allocation': target_allocation
                         }
 
                         try:

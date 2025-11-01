@@ -14,6 +14,7 @@ class DatabaseManager:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False, isolation_level=None)
         self.create_tables()
+        self.migrate_employee_allocation_fields()
 
     def create_tables(self):
         """Create all necessary tables"""
@@ -56,6 +57,9 @@ class DatabaseManager:
                 annual_salary REAL,
                 pto_accrual REAL,
                 holidays REAL,
+                billable INTEGER DEFAULT 0,
+                overhead_allocation REAL DEFAULT 0,
+                target_allocation REAL DEFAULT 0.3,
                 created_at TEXT,
                 updated_at TEXT
             )
@@ -184,6 +188,34 @@ class DatabaseManager:
         self.conn.commit()
         print("Schema migration complete. Allocations preserved, all other data cleared.")
         print("Note: Allocation foreign keys may be orphaned until CSV data is imported.")
+
+    def migrate_employee_allocation_fields(self):
+        """
+        Add billable, overhead_allocation, and target_allocation columns to employees table.
+        This migration is safe to run multiple times.
+        """
+        cursor = self.conn.cursor()
+
+        # Check if columns exist
+        cursor.execute("PRAGMA table_info(employees)")
+        columns = [col[1] for col in cursor.fetchall()]
+
+        # Add billable column
+        if 'billable' not in columns:
+            cursor.execute('ALTER TABLE employees ADD COLUMN billable INTEGER DEFAULT 0')
+            print("Added 'billable' column to employees table")
+
+        # Add overhead_allocation column
+        if 'overhead_allocation' not in columns:
+            cursor.execute('ALTER TABLE employees ADD COLUMN overhead_allocation REAL DEFAULT 0')
+            print("Added 'overhead_allocation' column to employees table")
+
+        # Add target_allocation column
+        if 'target_allocation' not in columns:
+            cursor.execute('ALTER TABLE employees ADD COLUMN target_allocation REAL DEFAULT 0.3')
+            print("Added 'target_allocation' column to employees table")
+
+        self.conn.commit()
 
     def is_empty(self):
         """Check if database is empty"""
