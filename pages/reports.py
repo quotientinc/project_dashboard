@@ -114,14 +114,52 @@ def generate_project_status_report(db, processor):
 def generate_resource_report(db, processor):
     st.markdown("#### Resource Utilization Report")
 
-    period = st.selectbox("Select Period", ["Current Month", "Last Month", "Last Quarter", "Custom"])
+    period = st.selectbox("Select Period", ["Current Month", "Last Month", "Past 90 Days", "Custom"])
+
+    # Set date range based on period selection
+    today = datetime.now()
+
+    # Initialize dates
+    start_date = None
+    end_date = None
+
+    if period == "Current Month":
+        start_date = datetime(today.year, today.month, 1)
+        end_date = today
+    elif period == "Last Month":
+        # Get first day of last month
+        first_day_this_month = datetime(today.year, today.month, 1)
+        last_day_last_month = first_day_this_month - pd.Timedelta(days=1)
+        start_date = datetime(last_day_last_month.year, last_day_last_month.month, 1)
+        end_date = last_day_last_month
+    elif period == "Past 90 Days":
+        # Get quarter start (simplified to last 90 days)
+        end_date = today
+        start_date = today - pd.Timedelta(days=90)
+
+    # Show custom date inputs if Custom period is selected
+    if period == "Custom":
+        col1, col2 = st.columns(2)
+        with col1:
+            start_date = st.date_input("Start Date", value=today - pd.Timedelta(days=30))
+        with col2:
+            end_date = st.date_input("End Date", value=today)
+    else:
+        # Show selected period range for non-custom periods
+        st.info(f"Report Period: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
 
     if st.button("Generate Report"):
         employees_df = db.get_employees()
         allocations_df = db.get_allocations()
-        time_entries_df = db.get_time_entries()
+
+        # Filter time entries by the selected period
+        time_entries_df = db.get_time_entries(
+            start_date=start_date.strftime('%Y-%m-%d'),
+            end_date=end_date.strftime('%Y-%m-%d')
+        )
 
         if not employees_df.empty:
+            # TODO: This is not accurate
             utilization_df = processor.calculate_employee_utilization(
                 employees_df, allocations_df, time_entries_df
             )
@@ -143,14 +181,13 @@ def generate_resource_report(db, processor):
             st.dataframe(display_df, width='stretch', hide_index=True)
 
             # Utilization chart
-            # TODO: Resolve and come back to this
-            """fig = px.bar(
+            fig = px.bar(
                 utilization_df,
                 x='name',
                 y='utilization_rate',
-                color=title="Utilization by Employee"
+                title="Utilization by Employee"
             )
-            st.plotly_chart(fig, width='stretch')"""
+            st.plotly_chart(fig, width='stretch')
 
 def generate_financial_report(db, processor):
     st.markdown("#### Financial Report")
