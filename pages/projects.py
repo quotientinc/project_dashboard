@@ -112,16 +112,16 @@ with tab2:
 
             with col3:
                 st.metric("Project Manager", project['project_manager'])
-                # TODO: Fix this
-                #profit = project['revenue_actual'] - project['budget_used']
-                profit = 0
-                st.metric("Profit/Loss", f"${profit:,.0f}")
+                # Calculate Revenue Projected vs. Actual
+                budget_remaining = project['revenue_projected'] - 7
+                st.metric("Budget Remaining", f"${budget_remaining:,.0f}")
 
             # Tabs for project details
             detail_tab1, detail_tab2, detail_tab3, detail_tab4, detail_tab5 = st.tabs(
                 ["Financial", "Team", "Timeline", "Expenses", "Burn Rate"]
             )
 
+            # Financial
             with detail_tab1:
                 # Financial metrics
                 col1, col2 = st.columns(2)
@@ -129,7 +129,7 @@ with tab2:
                 with col1:
                     # TODO: Fix this
                     st.markdown("#### Budget")
-                    """st.metric("Allocated", f"${(0 if project['budget_allocated'] is None else project['budget_allocated']):,.0f}")
+                    st.metric("Allocated", f"${(0 if project['budget_allocated'] is None else project['budget_allocated']):,.0f}")
                     st.metric("Used", f"${(0 if project['budget_used'] is None else project['budget_used']):,.0f}")
                     remaining = project['budget_allocated'] - project['budget_used']
                     st.metric("Remaining", f"${remaining:,.0f}")
@@ -137,12 +137,12 @@ with tab2:
                     if project['budget_allocated'] > 0:
                         budget_pct = project['budget_used'] / project['budget_allocated'] * 100
                         st.progress(min(budget_pct / 100, 1.0))
-                        st.caption(f"Budget Utilization: {budget_pct:.1f}%")"""
+                        st.caption(f"Budget Utilization: {budget_pct:.1f}%")
 
                 with col2:
                     # TODO: Fix this
                     st.markdown("#### Revenue")
-                    """st.metric("Projected", f"${project['revenue_projected']:,.0f}")
+                    st.metric("Projected", f"${project['revenue_projected']:,.0f}")
                     st.metric("Actual", f"${project['revenue_actual']:,.0f}")
                     variance = project['revenue_actual'] - project['revenue_projected']
                     st.metric("Variance", f"${variance:,.0f}")
@@ -150,7 +150,7 @@ with tab2:
                     if project['revenue_projected'] > 0:
                         revenue_pct = project['revenue_actual'] / project['revenue_projected'] * 100
                         st.progress(min(revenue_pct / 100, 1.0))
-                        st.caption(f"Revenue Achievement: {revenue_pct:.1f}%")"""
+                        st.caption(f"Revenue Achievement: {revenue_pct:.1f}%")
 
                 # Cost breakdown
                 costs = processor.calculate_project_costs(
@@ -191,6 +191,7 @@ with tab2:
                             )
                             st.plotly_chart(fig, width='stretch')
 
+            # Team
             with detail_tab2:
                 # Team allocation
                 allocations_df = db.get_allocations(project_id=project_id)
@@ -198,36 +199,84 @@ with tab2:
                 if not allocations_df.empty:
                     st.markdown("#### Team Members")
 
-                    for _, allocation in allocations_df.iterrows():
-                        col1, col2, col3, col4 = st.columns(4)
+                    # Group by employee
+                    for employee_name in allocations_df['employee_name'].unique():
+                        emp_allocs = allocations_df[allocations_df['employee_name'] == employee_name]
 
-                        with col1:
-                            st.write(f"**{allocation['employee_name']}**")
+                        st.markdown(f"**{employee_name}**")
 
-                        with col2:
-                            st.write(f"Role: {allocation['role']}")
-                            fte = allocation.get('allocated_fte', 0)
-                            st.write(f"Allocation: {fte * 100:.0f}%")
+                        # Get role (assuming it's consistent for the employee)
+                        role = emp_allocs['role'].iloc[0] if pd.notna(emp_allocs['role'].iloc[0]) else 'N/A'
+                        st.write(f"*Role: {role}*")
+
+                        # Check if we have allocation_date for monthly breakdown
+                        if 'allocation_date' in emp_allocs.columns and emp_allocs['allocation_date'].notna().any():
+                            # Create monthly allocation display
+                            monthly_data = []
+                            for _, alloc in emp_allocs.iterrows():
+                                if pd.notna(alloc.get('allocation_date')):
+                                    month = pd.to_datetime(alloc['allocation_date']).strftime('%Y-%m')
+                                    fte = alloc.get('allocated_fte', 0)
+                                    monthly_data.append({
+                                        'Month': month,
+                                        'FTE': f"{fte * 100:.0f}%"
+                                    })
+
+                            if monthly_data:
+                                monthly_df = pd.DataFrame(monthly_data)
+                                st.dataframe(monthly_df, hide_index=True, use_container_width=True)
+                        else:
+                            # Fallback to simple FTE display if no allocation_date
+                            total_fte = emp_allocs['allocated_fte'].sum()
+                            st.write(f"Total Allocation: {total_fte * 100:.0f}%")
 
                         st.markdown("---")
 
-                    # Team allocation chart
-                    fig = go.Figure(data=[
-                        go.Bar(
-                            name='Allocated FTE',
-                            x=allocations_df['employee_name'],
-                            y=allocations_df['allocated_fte'] * 100  # Convert to percentage
+                    # Team allocation chart - show by employee with monthly breakdown if available
+                    if 'allocation_date' in allocations_df.columns and allocations_df['allocation_date'].notna().any():
+                        # Create pivot table for stacked bar chart by month
+                        chart_df = allocations_df.copy()
+                        chart_df['month'] = pd.to_datetime(chart_df['allocation_date']).dt.strftime('%Y-%m')
+                        chart_df['fte_pct'] = chart_df['allocated_fte'] * 100
+
+                        fig = go.Figure()
+                        for employee in chart_df['employee_name'].unique():
+                            emp_data = chart_df[chart_df['employee_name'] == employee]
+                            fig.add_trace(go.Scatter(
+                                name=employee,
+                                x=emp_data['month'],
+                                y=emp_data['fte_pct'],
+                                mode='lines+markers',
+                                line=dict(width=2),
+                                marker=dict(size=8)
+                            ))
+
+                        fig.update_layout(
+                            title="Team Allocation by Month (% of Full-Time)",
+                            xaxis_title="Month",
+                            yaxis_title="Allocation %",
+                            height=400
                         )
-                    ])
-                    fig.update_layout(
-                        title="Team Allocation (% of Full-Time)",
-                        yaxis_title="Allocation %",
-                        height=400
-                    )
-                    st.plotly_chart(fig, width='stretch')
+                        st.plotly_chart(fig, width='stretch')
+                    else:
+                        # Fallback to simple bar chart
+                        fig = go.Figure(data=[
+                            go.Bar(
+                                name='Allocated FTE',
+                                x=allocations_df['employee_name'],
+                                y=allocations_df['allocated_fte'] * 100
+                            )
+                        ])
+                        fig.update_layout(
+                            title="Team Allocation (% of Full-Time)",
+                            yaxis_title="Allocation %",
+                            height=400
+                        )
+                        st.plotly_chart(fig, width='stretch')
                 else:
                     st.info("No team members allocated to this project")
 
+            # Timeline
             with detail_tab3:
                 # Timeline
                 st.markdown("#### Project Timeline")
@@ -238,9 +287,7 @@ with tab2:
                 with col2:
                     st.write(f"**End Date:** {project['end_date']}")
                 with col3:
-                    # TODO: Fix this
-                    #  days_total = (pd.to_datetime(project['end_date']) - pd.to_datetime(project['start_date'])).days
-                    days_total = 0
+                    days_total = (pd.to_datetime(project['end_date']) - pd.to_datetime(project['start_date'])).days
                     st.write(f"**Duration:** {days_total} days")
 
                 # Progress
@@ -250,7 +297,7 @@ with tab2:
                     end = pd.to_datetime(project['end_date'])
 
                     # TODO: Fix this
-                    """if today >= start and today <= end:
+                    if today >= start and today <= end:
                         days_elapsed = (today - start).days
                         progress = days_elapsed / days_total * 100
                         st.progress(min(progress / 100, 1.0))
@@ -258,7 +305,7 @@ with tab2:
                     elif today < start:
                         st.info("Project not started yet")
                     else:
-                        st.warning("Project past scheduled end date")"""
+                        st.warning("Project past scheduled end date")
 
                 # Time entries over time
                 time_entries = db.get_time_entries(project_id=project_id)
@@ -276,6 +323,7 @@ with tab2:
                     fig.update_layout(height=400)
                     st.plotly_chart(fig, width='stretch')
 
+            # Expenses
             with detail_tab4:
                 # Expenses
                 expenses_df = db.get_expenses(project_id=project_id)
@@ -316,6 +364,7 @@ with tab2:
                 else:
                     st.info("No expenses recorded for this project")
 
+            # Burn Rate
             with detail_tab5:
                 # Burn Rate Analysis
                 show_burn_rate_editor(project, db, processor)
