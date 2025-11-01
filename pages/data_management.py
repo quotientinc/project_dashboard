@@ -239,6 +239,101 @@ with tab1:
 
     st.divider()
 
+    # Project Reference CSV Import
+    st.markdown("##### 📋 Import Project Reference CSV")
+    st.markdown("Import project reference data from CSV file (e.g., ProjectReference.csv from Deltek).")
+    with st.expander("Project Reference CSV Import", expanded=False):
+        st.markdown("""**Project CSV Format:**
+        - **Project**: Project ID and name combined (e.g., "101715.Y2.000.00 NIH CC OY2")
+        - **POP Start Date**: Format MM/DD/YYYY
+        - **POP End Date**: Format MM/DD/YYYY
+        - **Total Contract Value (All Mods)**: Currency with commas
+        - **Total Contract Funding (All Mods)**: Currency with commas
+
+        **Note:** This import will update existing projects while preserving manually-entered descriptions,
+        status, and project manager assignments.
+        """)
+
+        project_ref_file = st.file_uploader(
+            "Upload Project Reference CSV",
+            type=['csv'],
+            key='project_ref_upload',
+            help="Select a ProjectReference.csv file to import"
+        )
+
+        if project_ref_file is not None:
+            try:
+                from utils.csv_importer import ProjectReferenceCSVImporter
+                import tempfile
+
+                # Save to temp file
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as tmp_file:
+                    tmp_file.write(project_ref_file.getvalue())
+                    tmp_path = tmp_file.name
+
+                # Parse CSV
+                importer = ProjectReferenceCSVImporter(tmp_path)
+                projects, summary = importer.import_all()
+
+                # Show preview
+                st.markdown("##### Import Preview")
+                preview_df = pd.DataFrame(projects)
+                st.dataframe(preview_df.head(10), use_container_width=True)
+
+                # Show summary statistics
+                st.markdown("##### Import Summary")
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Total Projects", summary['total_projects'])
+                with col2:
+                    st.metric("With Budget", summary['with_budget'])
+                with col3:
+                    st.metric("With Funding", summary['with_funding'])
+                with col4:
+                    st.metric("With Dates", summary['with_dates'])
+
+                col5, col6 = st.columns(2)
+                with col5:
+                    st.metric("Total Budget", f"${summary['total_budget']:,.2f}")
+                with col6:
+                    st.metric("Total Funding", f"${summary['total_funding']:,.2f}")
+
+                # Import button
+                if st.button("Import Project Reference Data", type="primary", key='import_project_ref'):
+                    try:
+                        # Use upsert to merge with existing projects
+                        # Preserve description, status, and project_manager
+                        db.upsert_projects(
+                            projects,
+                            preserve_fields=['description', 'status', 'project_manager', 'created_at']
+                        )
+
+                        st.success(f"""
+                        Successfully imported project reference data!
+
+                        - Processed {len(projects)} projects
+                        - With Budget: {summary['with_budget']}
+                        - With Funding: {summary['with_funding']}
+                        - Total Budget: ${summary['total_budget']:,.2f}
+                        - Total Funding: ${summary['total_funding']:,.2f}
+                        """)
+                        st.balloons()
+
+                        # Wait a moment before reloading
+                        import time
+                        time.sleep(2)
+                        st.rerun()
+
+                    except Exception as e:
+                        st.error(f"Error importing project reference data: {str(e)}")
+                        st.exception(e)
+
+            except Exception as e:
+                st.error(f"Error parsing project reference CSV: {str(e)}")
+                st.exception(e)
+
+    st.divider()
+
     # Standard Import Section
     st.markdown("##### 📁 Standard CSV Import")
     data_type = st.selectbox(

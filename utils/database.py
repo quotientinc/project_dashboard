@@ -628,6 +628,67 @@ class DatabaseManager:
 
         self.conn.commit()
 
+    def upsert_projects(self, projects_data, preserve_fields=None):
+        """
+        Upsert (insert or update) projects from list of dicts.
+        Matches on project id. If project exists, updates with new data.
+        If project doesn't exist, inserts new record.
+
+        Args:
+            projects_data: List of project dicts with 'id' field
+            preserve_fields: List of field names to preserve from existing records (not overwrite)
+                           Common fields: ['description', 'status', 'project_manager', 'created_at']
+        """
+        if not projects_data:
+            return
+
+        preserve_fields = preserve_fields or []
+        cursor = self.conn.cursor()
+
+        for project in projects_data:
+            project_id = project['id']
+
+            # Check if project exists
+            cursor.execute("SELECT * FROM projects WHERE id = ?", (project_id,))
+            existing = cursor.fetchone()
+
+            if existing:
+                # Project exists - UPDATE
+                # Get column names from existing record
+                existing_columns = [desc[0] for desc in cursor.description]
+                existing_data = dict(zip(existing_columns, existing))
+
+                # Build update data, preserving specified fields
+                update_data = project.copy()
+                for field in preserve_fields:
+                    if field in existing_data and existing_data[field] is not None:
+                        # Preserve existing value
+                        update_data[field] = existing_data[field]
+
+                # Update timestamp
+                update_data['updated_at'] = datetime.now().isoformat()
+
+                # Build UPDATE query
+                update_fields = [k for k in update_data.keys() if k != 'id']
+                set_clause = ', '.join([f"{field} = ?" for field in update_fields])
+                values = [update_data[field] for field in update_fields] + [project_id]
+
+                query = f"UPDATE projects SET {set_clause} WHERE id = ?"
+                cursor.execute(query, values)
+            else:
+                # Project doesn't exist - INSERT
+                project['created_at'] = datetime.now().isoformat()
+                project['updated_at'] = datetime.now().isoformat()
+
+                columns = list(project.keys())
+                placeholders = ','.join('?' * len(columns))
+                query = f"INSERT INTO projects ({','.join(columns)}) VALUES ({placeholders})"
+
+                values = [project[col] for col in columns]
+                cursor.execute(query, values)
+
+        self.conn.commit()
+
     def bulk_insert_time_entries(self, time_entries_data):
         """Bulk insert time entries from list of dicts"""
         if not time_entries_data:

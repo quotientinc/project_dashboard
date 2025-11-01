@@ -437,3 +437,143 @@ class EmployeeReferenceCSVImporter:
         self.extract_employees()
 
         return self.employees, self.get_summary()
+
+
+class ProjectReferenceCSVImporter:
+    """
+    Imports project data from ProjectReference.csv format for merging with existing data.
+    CSV columns: Project, POP Start Date, POP End Date,
+                 Total Contract Value (All Mods), Total Contract Funding (All Mods)
+
+    The "Project" column contains both project ID and name (e.g., "101715.Y2.000.00 NIH CC OY2")
+    which is split on the first space.
+    """
+
+    def __init__(self, csv_path):
+        """Initialize importer with CSV file path"""
+        self.csv_path = csv_path
+        self.df = None
+        self.projects = []
+
+    def parse_csv(self):
+        """Parse the CSV file"""
+        # Read CSV with encoding that handles BOM
+        self.df = pd.read_csv(self.csv_path, encoding='utf-8-sig')
+
+        # Clean up column names (strip whitespace)
+        self.df.columns = self.df.columns.str.strip()
+
+        # Clean up data
+        self.df['Project'] = self.df['Project'].astype(str).str.strip()
+
+        return self
+
+    def _parse_date(self, date_str):
+        """Convert date from 'MM/DD/YYYY' format to 'YYYY-MM-DD', handling typos like 01//01/2024"""
+        if pd.isna(date_str) or str(date_str).strip() == '':
+            return None
+        try:
+            # Clean up double slashes and extra spaces
+            cleaned = str(date_str).strip().replace('//', '/')
+            # Parse date like "01/01/2024"
+            dt = datetime.strptime(cleaned, '%m/%d/%Y')
+            return dt.strftime('%Y-%m-%d')
+        except Exception as e:
+            print(f"Error parsing date '{date_str}': {e}")
+            return None
+
+    def _parse_currency(self, currency_str):
+        """Convert currency string to float, handling commas and quotes"""
+        if pd.isna(currency_str):
+            return None
+        try:
+            # Remove commas and convert to float
+            cleaned = str(currency_str).strip().replace(',', '')
+            value = float(cleaned)
+            return value if value > 0 else None
+        except Exception as e:
+            print(f"Error parsing currency '{currency_str}': {e}")
+            return None
+
+    def _split_project_column(self, project_str):
+        """
+        Split project column into ID and name.
+        Format: "101715.Y2.000.00 NIH CC OY2"
+        Returns: (id, name)
+        """
+        try:
+            parts = project_str.split(' ', 1)
+            project_id = parts[0].strip()
+            project_name = parts[1].strip() if len(parts) > 1 else project_id
+            return project_id, project_name
+        except Exception:
+            return project_str, project_str
+
+    def extract_projects(self):
+        """Extract project data from CSV and map to database format"""
+        now = datetime.now().isoformat()
+        self.projects = []
+
+        for _, row in self.df.iterrows():
+            # Split Project column into id and name
+            project_id, project_name = self._split_project_column(row['Project'])
+
+            # Skip if no valid project ID
+            if not project_id:
+                continue
+
+            # Parse dates
+            start_date = self._parse_date(row.get('POP Start Date'))
+            end_date = self._parse_date(row.get('POP End Date'))
+
+            # Parse currency values
+            budget_allocated = self._parse_currency(row.get('Total\nContract Value\n(All Mods)'))
+            revenue_projected = self._parse_currency(row.get('Total\nContract Funding\n(All Mods)'))
+
+            # Default all projects to billable
+            billable = 1
+
+            project = {
+                'id': project_id,
+                'name': project_name,
+                'start_date': start_date,
+                'end_date': end_date,
+                'budget_allocated': budget_allocated,
+                'revenue_projected': revenue_projected,
+                'billable': billable,
+                'updated_at': now
+            }
+            self.projects.append(project)
+
+        return self
+
+    def get_summary(self):
+        """Get summary statistics of the import"""
+        if self.df is None:
+            return {}
+
+        with_budget = sum(1 for p in self.projects if p['budget_allocated'])
+        with_funding = sum(1 for p in self.projects if p['revenue_projected'])
+        with_dates = sum(1 for p in self.projects if p['start_date'] and p['end_date'])
+
+        total_budget = sum(p['budget_allocated'] for p in self.projects if p['budget_allocated'])
+        total_funding = sum(p['revenue_projected'] for p in self.projects if p['revenue_projected'])
+
+        return {
+            'total_projects': len(self.projects),
+            'with_budget': with_budget,
+            'with_funding': with_funding,
+            'with_dates': with_dates,
+            'total_budget': total_budget,
+            'total_funding': total_funding
+        }
+
+    def import_all(self):
+        """
+        Parse CSV and extract all project data
+        Returns: (projects, summary)
+        """
+        self.parse_csv()
+        self.extract_projects()
+
+        return self.projects, self.get_summary()
