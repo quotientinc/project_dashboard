@@ -134,6 +134,111 @@ with tab1:
 
     st.divider()
 
+    # Employee Reference CSV Import Section
+    st.markdown("##### 👥 Import Employee Reference CSV")
+    st.info("Import employee data from EmployeeReference.csv format. This will merge with existing employee data - CSV is authoritative for matched fields, database-only fields are preserved.")
+
+    with st.expander("Employee Reference CSV Import", expanded=False):
+        st.markdown("""
+        **Employee Reference CSV Format:**
+        - Columns: Employee Id, Last Name, Preferred/First Name, Billable, Hire Date, Term Date, Job Title, Pay Type Code, Base Rate, Annual Salary, PTO Accural, Holidays
+        - Date Format: M/D/YY (e.g., "1/15/19")
+        - Employee ID is used to match existing records
+
+        **Merge Behavior:**
+        - Existing employees: Updates data from CSV, preserves skills/allocations manually set in database
+        - New employees: Creates new records with smart defaults for billable employees
+        - CSV fields override database values for matched employees
+        - Database-only fields (skills, overhead_allocation, target_allocation) are preserved
+        """)
+
+        employee_ref_file = st.file_uploader(
+            "Choose Employee Reference CSV file",
+            type=['csv'],
+            key="employee_ref_upload",
+            help="Upload a CSV file in EmployeeReference.csv format"
+        )
+
+        if employee_ref_file is not None:
+            try:
+                from utils.csv_importer import EmployeeReferenceCSVImporter
+
+                # Parse and preview
+                importer = EmployeeReferenceCSVImporter(employee_ref_file)
+                employees, summary = importer.import_all()
+
+                # Show summary
+                st.markdown("##### Import Preview")
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Total Employees", summary['total_employees'])
+                with col2:
+                    st.metric("Billable", summary['billable_employees'])
+                with col3:
+                    st.metric("Salary", summary['salary_employees'])
+                with col4:
+                    st.metric("Hourly", summary['hourly_employees'])
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write(f"**Active Employees:** {summary['active_employees']}")
+                with col2:
+                    st.write(f"**Terminated:** {summary['with_term_date']}")
+
+                # Show sample data
+                st.markdown("**Sample Employees:**")
+                sample_df = pd.DataFrame(employees[:10])
+                display_cols = ['id', 'name', 'role', 'billable', 'pay_type', 'hire_date', 'term_date']
+                available_cols = [col for col in display_cols if col in sample_df.columns]
+                st.dataframe(
+                    sample_df[available_cols],
+                    height=300,
+                    hide_index=True
+                )
+
+                # Confirmation checkbox
+                confirm_import = st.checkbox(
+                    "I understand this will merge employee data (CSV is authoritative, preserving skills and allocation settings)",
+                    key="confirm_employee_ref_import"
+                )
+
+                if st.button("Import Employee Reference Data", type="primary", disabled=not confirm_import):
+                    try:
+                        progress_bar = st.progress(0, text="Starting import...")
+
+                        # Merge employees using upsert
+                        progress_bar.progress(50, text=f"Merging {len(employees)} employees...")
+
+                        # Preserve database-only fields
+                        preserve_fields = ['skills', 'overhead_allocation', 'target_allocation', 'created_at']
+                        db.upsert_employees(employees, preserve_fields=preserve_fields)
+
+                        progress_bar.progress(100, text="Import complete!")
+
+                        st.success(f"""
+                        ✅ Employee Reference import completed successfully!
+                        - Processed {len(employees)} employees
+                        - Billable: {summary['billable_employees']}
+                        - Active: {summary['active_employees']}
+                        - Terminated: {summary['with_term_date']}
+                        """)
+                        st.balloons()
+
+                        # Wait a moment before reloading
+                        import time
+                        time.sleep(2)
+                        st.rerun()
+
+                    except Exception as e:
+                        st.error(f"Error importing employee reference data: {str(e)}")
+                        st.exception(e)
+
+            except Exception as e:
+                st.error(f"Error parsing employee reference CSV: {str(e)}")
+                st.exception(e)
+
+    st.divider()
+
     # Standard Import Section
     st.markdown("##### 📁 Standard CSV Import")
     data_type = st.selectbox(

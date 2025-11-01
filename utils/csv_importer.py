@@ -287,3 +287,153 @@ class EmployeeMasterCSVImporter:
         self.extract_employees()
 
         return self.employees, self.get_summary()
+
+
+class EmployeeReferenceCSVImporter:
+    """
+    Imports employee data from EmployeeReference.csv format for merging with existing data.
+    CSV columns: Employee Id, Last Name, Preferred/First Name, Billable, Division Description,
+                 Employee Status Description, Hire Date, Rehire Date, Term Date,
+                 Employment Type Description, Job Title, Pay Frequency Code, Pay Type Code,
+                 Base Rate, Per Check Salary, Annual Salary, PTO Accrual, Holidays, Budgeted Increase
+    """
+
+    def __init__(self, csv_path):
+        """Initialize importer with CSV file path"""
+        self.csv_path = csv_path
+        self.df = None
+        self.employees = []
+
+    def parse_csv(self):
+        """Parse the CSV file"""
+        # Read CSV with encoding that handles BOM
+        self.df = pd.read_csv(self.csv_path, encoding='utf-8-sig')
+
+        # Clean up column names (strip whitespace)
+        self.df.columns = self.df.columns.str.strip()
+
+        # Clean up data
+        self.df['Employee Id'] = pd.to_numeric(self.df['Employee Id'], errors='coerce').fillna(0).astype(int)
+        self.df['Last Name'] = self.df['Last Name'].astype(str).str.strip()
+        self.df['Preferred/First Name'] = self.df['Preferred/First Name'].astype(str).str.strip()
+
+        # Clean numeric fields
+        self.df['Base Rate'] = pd.to_numeric(self.df['Base Rate'], errors='coerce').fillna(0)
+        self.df['Annual Salary'] = pd.to_numeric(self.df['Annual Salary'], errors='coerce').fillna(0)
+        self.df['PTO Accrual'] = pd.to_numeric(self.df['PTO Accrual'], errors='coerce').fillna(0)
+        self.df['Holidays'] = pd.to_numeric(self.df['Holidays'], errors='coerce').fillna(0)
+
+        return self
+
+    def _parse_date(self, date_str):
+        """Convert date from 'M/D/YY' format to 'YYYY-MM-DD'"""
+        if pd.isna(date_str) or str(date_str).strip() == '':
+            return None
+        try:
+            # Parse date like "1/15/19"
+            dt = datetime.strptime(str(date_str).strip(), '%m/%d/%y')
+            return dt.strftime('%Y-%m-%d')
+        except Exception as e:
+            print(f"Error parsing date '{date_str}': {e}")
+            return None
+
+    def _parse_billable(self, billable_str):
+        """Convert billable field to 1/0"""
+        if pd.isna(billable_str):
+            return 0
+        return 1 if str(billable_str).strip().upper() == 'YES' else 0
+
+    def _parse_pay_type(self, pay_type_code):
+        """Convert pay type code to Salary/Hourly"""
+        if pd.isna(pay_type_code):
+            return None
+        code = str(pay_type_code).strip().upper()
+        return 'Salary' if code == 'S' else 'Hourly'
+
+    def extract_employees(self):
+        """Extract employee data from CSV and map to database format"""
+        now = datetime.now().isoformat()
+        self.employees = []
+
+        for _, row in self.df.iterrows():
+            # Skip rows with invalid employee ID
+            if row['Employee Id'] <= 0:
+                continue
+
+            # Construct name from first and last
+            first_name = str(row['Preferred/First Name']).strip()
+            last_name = str(row['Last Name']).strip()
+            full_name = f"{first_name} {last_name}".strip()
+
+            # Parse dates
+            hire_date = self._parse_date(row.get('Hire Date'))
+            term_date = self._parse_date(row.get('Term Date'))
+
+            # Parse billable
+            billable = self._parse_billable(row.get('Billable'))
+
+            # Parse pay type
+            pay_type = self._parse_pay_type(row.get('Pay Type Code'))
+
+            # Get cost rate and annual salary
+            cost_rate = float(row['Base Rate']) if row['Base Rate'] > 0 else None
+            annual_salary = float(row['Annual Salary']) if row['Annual Salary'] > 0 else None
+
+            # Convert PTO accrual from days to hours (multiply by 8)
+            pto_accrual = float(row['PTO Accrual']) * 8 if row['PTO Accrual'] > 0 else None
+
+            # Get holidays
+            holidays = float(row['Holidays']) if row['Holidays'] > 0 else None
+
+            # Get role from Job Title
+            role = str(row['Job Title']).strip() if pd.notna(row.get('Job Title')) else None
+
+            employee = {
+                'id': int(row['Employee Id']),
+                'name': full_name,
+                'role': role,
+                'hire_date': hire_date,
+                'term_date': term_date,
+                'pay_type': pay_type,
+                'cost_rate': cost_rate,
+                'annual_salary': annual_salary,
+                'pto_accrual': pto_accrual,
+                'holidays': holidays,
+                'billable': billable,
+                'updated_at': now
+            }
+            self.employees.append(employee)
+
+        return self
+
+    def get_summary(self):
+        """Get summary statistics of the import"""
+        if self.df is None:
+            return {}
+
+        billable_count = sum(1 for e in self.employees if e['billable'] == 1)
+        salary_count = sum(1 for e in self.employees if e['pay_type'] == 'Salary')
+        hourly_count = sum(1 for e in self.employees if e['pay_type'] == 'Hourly')
+        with_hire_date = sum(1 for e in self.employees if e['hire_date'])
+        with_term_date = sum(1 for e in self.employees if e['term_date'])
+
+        return {
+            'total_employees': len(self.employees),
+            'billable_employees': billable_count,
+            'non_billable_employees': len(self.employees) - billable_count,
+            'salary_employees': salary_count,
+            'hourly_employees': hourly_count,
+            'with_hire_date': with_hire_date,
+            'with_term_date': with_term_date,
+            'active_employees': len(self.employees) - with_term_date
+        }
+
+    def import_all(self):
+        """
+        Parse CSV and extract all employee data
+        Returns: (employees, summary)
+        """
+        self.parse_csv()
+        self.extract_employees()
+
+        return self.employees, self.get_summary()

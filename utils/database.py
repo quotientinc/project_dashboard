@@ -551,6 +551,83 @@ class DatabaseManager:
         cursor.executemany(query, values)
         self.conn.commit()
 
+    def upsert_employees(self, employees_data, preserve_fields=None):
+        """
+        Upsert (insert or update) employees from list of dicts.
+        Matches on employee id. If employee exists, updates with new data.
+        If employee doesn't exist, inserts new record.
+
+        Args:
+            employees_data: List of employee dicts with 'id' field
+            preserve_fields: List of field names to preserve from existing records (not overwrite)
+                           Common fields: ['skills', 'overhead_allocation', 'target_allocation', 'created_at']
+        """
+        if not employees_data:
+            return
+
+        preserve_fields = preserve_fields or []
+        cursor = self.conn.cursor()
+
+        for employee in employees_data:
+            employee_id = employee['id']
+
+            # Check if employee exists
+            cursor.execute("SELECT * FROM employees WHERE id = ?", (employee_id,))
+            existing = cursor.fetchone()
+
+            if existing:
+                # Employee exists - UPDATE
+                # Get column names from existing record
+                existing_columns = [desc[0] for desc in cursor.description]
+                existing_data = dict(zip(existing_columns, existing))
+
+                # Build update data, preserving specified fields
+                update_data = employee.copy()
+                for field in preserve_fields:
+                    if field in existing_data and existing_data[field] is not None:
+                        # Preserve existing value
+                        update_data[field] = existing_data[field]
+
+                # Update timestamp
+                update_data['updated_at'] = datetime.now().isoformat()
+
+                # Build UPDATE query
+                update_fields = [k for k in update_data.keys() if k != 'id']
+                set_clause = ', '.join([f"{field} = ?" for field in update_fields])
+                values = [update_data[field] for field in update_fields] + [employee_id]
+
+                query = f"UPDATE employees SET {set_clause} WHERE id = ?"
+                cursor.execute(query, values)
+            else:
+                # Employee doesn't exist - INSERT
+                employee['created_at'] = datetime.now().isoformat()
+                employee['updated_at'] = datetime.now().isoformat()
+
+                # Apply smart defaults for billable employees
+                if employee.get('billable') == 1:
+                    # Set overhead_allocation to 0 for billable employees
+                    if 'overhead_allocation' not in employee:
+                        employee['overhead_allocation'] = 0.0
+
+                    # Set target_allocation based on pay_type
+                    if 'target_allocation' not in employee:
+                        pay_type = employee.get('pay_type')
+                        if pay_type == 'Salary':
+                            employee['target_allocation'] = 1.0
+                        elif pay_type == 'Hourly':
+                            employee['target_allocation'] = 0.3
+                        else:
+                            employee['target_allocation'] = 0.3  # Default
+
+                columns = list(employee.keys())
+                placeholders = ','.join('?' * len(columns))
+                query = f"INSERT INTO employees ({','.join(columns)}) VALUES ({placeholders})"
+
+                values = [employee[col] for col in columns]
+                cursor.execute(query, values)
+
+        self.conn.commit()
+
     def bulk_insert_time_entries(self, time_entries_data):
         """Bulk insert time entries from list of dicts"""
         if not time_entries_data:
