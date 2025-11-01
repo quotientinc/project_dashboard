@@ -103,6 +103,11 @@ whatif_page = st.Page(
     title="What-If Scenarios",
     icon="🔮"
 )
+months_page = st.Page(
+    "pages/months.py",
+    title="Months",
+    icon="📅"
+)
 data_page = st.Page(
     "pages/data_management.py",
     title="Data Management",
@@ -117,6 +122,7 @@ pg = st.navigation([
     financial_page,
     reports_page,
     whatif_page,
+    months_page,
     data_page
 ])
 

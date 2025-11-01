@@ -458,7 +458,8 @@ class DataProcessor:
                 else:
                     # Fallback to any allocation for this employee
                     emp_allocs = allocations_df[allocations_df['employee_id'] == emp['employee_id']]
-                    fte = emp_allocs['allocated_fte'].iloc[0] if not emp_allocs.empty else 0
+                    #fte = emp_allocs['allocation_percent'].iloc[0] / 100 if not emp_allocs.empty else 0
+                    fte = 0
                     # Calculate working days normally if no specific allocation
                     days_info = DataProcessor.calculate_working_days(year, month)
                     remaining_days = days_info['remaining_days']

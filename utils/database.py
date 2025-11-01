@@ -116,6 +116,23 @@ class DatabaseManager:
             )
         ''')
 
+        # Months table - tracks working days and holidays per month
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS months (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                year INTEGER NOT NULL,
+                month INTEGER NOT NULL,
+                month_name TEXT NOT NULL,
+                quarter TEXT NOT NULL,
+                total_days INTEGER NOT NULL,
+                working_days INTEGER NOT NULL,
+                holidays INTEGER DEFAULT 0,
+                created_at TEXT,
+                updated_at TEXT,
+                UNIQUE(year, month)
+            )
+        ''')
+
         self.conn.commit()
 
     def migrate_schema_for_csv_import(self):
@@ -527,6 +544,72 @@ class DatabaseManager:
         df = pd.read_sql_query(f"SELECT * FROM {table_name}", self.conn)
         df.to_csv(file_path, index=False)
         return df
+
+    # Months methods
+    def get_months(self, year=None):
+        """Get all months or filtered by year, sorted by year DESC, month ASC"""
+        query = "SELECT * FROM months"
+        params = []
+
+        if year:
+            query += " WHERE year = ?"
+            params.append(year)
+
+        query += " ORDER BY year DESC, month ASC"
+        return pd.read_sql_query(query, self.conn, params=params)
+
+    def add_month(self, month_data):
+        """Add a new month record"""
+        month_data['created_at'] = datetime.now().isoformat()
+        month_data['updated_at'] = datetime.now().isoformat()
+
+        columns = list(month_data.keys())
+        placeholders = ','.join('?' * len(columns))
+        query = f"INSERT INTO months ({','.join(columns)}) VALUES ({placeholders})"
+
+        cursor = self.conn.cursor()
+        cursor.execute(query, list(month_data.values()))
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def update_month(self, month_id, updates):
+        """Update a month record"""
+        updates['updated_at'] = datetime.now().isoformat()
+        set_clause = ','.join([f"{k}=?" for k in updates.keys()])
+        query = f"UPDATE months SET {set_clause} WHERE id=?"
+
+        cursor = self.conn.cursor()
+        cursor.execute(query, list(updates.values()) + [month_id])
+        self.conn.commit()
+        return cursor.rowcount
+
+    def delete_month(self, month_id):
+        """Delete a month record"""
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM months WHERE id = ?", (month_id,))
+        self.conn.commit()
+
+    def bulk_upsert_months(self, months_data):
+        """Bulk insert or update months from list of dicts"""
+        if not months_data:
+            return
+
+        cursor = self.conn.cursor()
+        now = datetime.now().isoformat()
+
+        for month_data in months_data:
+            month_data['updated_at'] = now
+            if 'created_at' not in month_data:
+                month_data['created_at'] = now
+
+            columns = list(month_data.keys())
+            placeholders = ','.join('?' * len(columns))
+
+            # Use INSERT OR REPLACE to handle duplicates (based on UNIQUE constraint on year, month)
+            query = f"INSERT OR REPLACE INTO months ({','.join(columns)}) VALUES ({placeholders})"
+            cursor.execute(query, list(month_data.values()))
+
+        self.conn.commit()
 
     def close(self):
         """Close database connection"""

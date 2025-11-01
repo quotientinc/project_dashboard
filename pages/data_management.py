@@ -138,7 +138,7 @@ with tab1:
     st.markdown("##### 📁 Standard CSV Import")
     data_type = st.selectbox(
         "Select Data Type to Import",
-        ["Projects", "Employees", "Allocations", "Expenses"]
+        ["Projects", "Employees", "Allocations", "Expenses", "Months"]
     )
 
     st.markdown("""
@@ -147,6 +147,7 @@ with tab1:
     - **Employees**: name, role, skills, hire_date, term_date, pay_type, cost_rate, annual_salary, pto_accrual, holidays
     - **Allocations**: project_id, employee_id, allocated_fte, start_date, end_date, role, project_rate, employee_rate, allocation_date, working_days, remaining_days
     - **Expenses**: project_id, category, description, amount, date, approved
+    - **Months**: year, month, month_name, quarter, total_days, working_days, holidays
 
     **Note:** For time entries, use the Timesheet CSV Import above.
     """)
@@ -180,7 +181,8 @@ with tab1:
                         "Employees": "employees",
                         "Allocations": "allocations",
                         "Time Entries": "time_entries",
-                        "Expenses": "expenses"
+                        "Expenses": "expenses",
+                        "Months": "months"
                     }
 
                     # Reset file pointer
@@ -206,7 +208,7 @@ with tab2:
 
     export_type = st.selectbox(
         "Select Data to Export",
-        ["Projects", "Employees", "Allocations", "Time Entries", "Expenses", "Complete Database"]
+        ["Projects", "Employees", "Allocations", "Time Entries", "Expenses", "Months", "Complete Database"]
     )
 
     # Date range filter for time-based data
@@ -232,6 +234,8 @@ with tab2:
                 )
             elif export_type == "Expenses":
                 export_df = db.get_expenses()
+            elif export_type == "Months":
+                export_df = db.get_months()
             else:  # Complete Database
                 # Create a multi-sheet Excel file
                 output = io.BytesIO()
@@ -241,6 +245,7 @@ with tab2:
                     db.get_allocations().to_excel(writer, sheet_name='Allocations', index=False)
                     db.get_time_entries().to_excel(writer, sheet_name='Time Entries', index=False)
                     db.get_expenses().to_excel(writer, sheet_name='Expenses', index=False)
+                    db.get_months().to_excel(writer, sheet_name='Months', index=False)
 
                 st.download_button(
                     label="Download Complete Database (Excel)",
@@ -293,7 +298,8 @@ with tab3:
                         'Employees Count': [len(db.get_employees())],
                         'Allocations Count': [len(db.get_allocations())],
                         'Time Entries Count': [len(db.get_time_entries())],
-                        'Expenses Count': [len(db.get_expenses())]
+                        'Expenses Count': [len(db.get_expenses())],
+                        'Months Count': [len(db.get_months())]
                     })
                     metadata.to_excel(writer, sheet_name='Metadata', index=False)
 
@@ -303,6 +309,7 @@ with tab3:
                     db.get_allocations().to_excel(writer, sheet_name='Allocations', index=False)
                     db.get_time_entries().to_excel(writer, sheet_name='Time Entries', index=False)
                     db.get_expenses().to_excel(writer, sheet_name='Expenses', index=False)
+                    db.get_months().to_excel(writer, sheet_name='Months', index=False)
 
                 st.download_button(
                     label="Download Backup File",
@@ -367,11 +374,13 @@ with tab4:
 
     with col3:
         expenses_count = len(db.get_expenses())
+        months_count = len(db.get_months())
         st.metric("Expenses", expenses_count)
+        st.metric("Months", months_count)
 
         # Calculate database size (approximate)
         total_records = (projects_count + employees_count + allocations_count +
-                       time_entries_count + expenses_count)
+                       time_entries_count + expenses_count + months_count)
         st.metric("Total Records", total_records)
 
     # Data cleanup options
