@@ -137,7 +137,92 @@ class DataProcessor:
         utilization['revenue_generated'] = utilization['billable_hours'] * utilization['employee_rate']
 
         return utilization
-    
+
+    @staticmethod
+    def calculate_monthly_utilization_trend(
+        employees_df: pd.DataFrame,
+        allocations_df: pd.DataFrame,
+        time_entries_df: pd.DataFrame,
+        months_df: pd.DataFrame
+    ) -> pd.DataFrame:
+        """
+        Calculate monthly average utilization showing YTD actual (from time entries)
+        and projected (from allocations) for the remainder of the year.
+
+        Returns DataFrame with columns: month, month_name, avg_utilization, type
+        """
+        from datetime import datetime
+
+        if employees_df.empty:
+            return pd.DataFrame()
+
+        current_year = datetime.now().year
+        current_month = datetime.now().month
+
+        # Get months for current year
+        current_year_months = months_df[months_df['year'] == current_year].copy()
+        if current_year_months.empty:
+            # Fallback: generate basic month structure
+            current_year_months = pd.DataFrame({
+                'month': range(1, 13),
+                'month_name': ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                              'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+                'working_days': [21] * 12  # Default approximation
+            })
+
+        total_employees = len(employees_df)
+        standard_monthly_hours = 160
+
+        result = []
+
+        for _, month_row in current_year_months.iterrows():
+            month_num = month_row['month']
+            month_name = month_row['month_name']
+
+            if month_num <= current_month:
+                # YTD Actual: Calculate from time entries
+                if not time_entries_df.empty:
+                    # Filter time entries for this month
+                    time_entries_df['date'] = pd.to_datetime(time_entries_df['date'])
+                    month_entries = time_entries_df[
+                        (time_entries_df['date'].dt.year == current_year) &
+                        (time_entries_df['date'].dt.month == month_num)
+                    ]
+
+                    if not month_entries.empty:
+                        total_hours = month_entries['hours'].sum()
+                        # Average utilization = total hours / (employees × standard hours) × 100
+                        avg_utilization = (total_hours / (total_employees * standard_monthly_hours)) * 100
+                    else:
+                        avg_utilization = 0
+                else:
+                    avg_utilization = 0
+
+                result.append({
+                    'month': month_num,
+                    'month_name': month_name,
+                    'avg_utilization': min(avg_utilization, 100),  # Cap at 100%
+                    'type': 'Actual'
+                })
+            else:
+                # Future months: Projected from allocations
+                if not allocations_df.empty:
+                    # Calculate average FTE allocation
+                    # Note: This is simplified - assumes allocations are for the entire year
+                    total_fte = allocations_df['allocated_fte'].sum()
+                    avg_utilization = (total_fte / total_employees) * 100
+                else:
+                    avg_utilization = 0
+
+                result.append({
+                    'month': month_num,
+                    'month_name': month_name,
+                    'avg_utilization': min(avg_utilization, 100),  # Cap at 100%
+                    'type': 'Projected'
+                })
+
+        return pd.DataFrame(result)
+
     @staticmethod
     def calculate_project_costs(
         project_id: int,
@@ -224,6 +309,10 @@ class DataProcessor:
             if avg_daily_hours > 0:
                 days_to_complete = remaining_hours / avg_daily_hours
                 forecast_date = pd.Timestamp.now() + timedelta(days=days_to_complete)
+                if pd.to_datetime(project['end_date']) is None:
+                    on_track = 1
+                else:
+                    on_track = forecast_date <= pd.to_datetime(project['end_date'])
                 
                 forecasts.append({
                     'project_name': project['name'],
@@ -233,7 +322,7 @@ class DataProcessor:
                     'days_to_complete': days_to_complete,
                     'forecast_completion': forecast_date,
                     'scheduled_end': pd.to_datetime(project['end_date']),
-                    'on_track': forecast_date <= pd.to_datetime(project['end_date'])
+                    'on_track': on_track
                 })
         
         return pd.DataFrame(forecasts)
