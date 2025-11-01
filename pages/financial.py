@@ -9,7 +9,6 @@ logger = get_logger(__name__)
 
 db = st.session_state.db_manager
 processor = st.session_state.data_processor
-filters = st.session_state.filters
 
 st.markdown("### 💰 Financial Analysis")
 

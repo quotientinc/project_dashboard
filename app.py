@@ -126,73 +126,20 @@ pg = st.navigation([
     data_page
 ])
 
-# Global filters in sidebar
+# Quick stats in sidebar
 with st.sidebar:
-    st.markdown("### 🔍 Global Filters")
+    st.markdown("### 📈 Quick Stats")
 
-    # Load filter options
+    # Load data for stats
     db = st.session_state.db_manager
     projects_df = db.get_projects()
     employees_df = db.get_employees()
 
-    # Date range filter
-    col1, col2 = st.columns(2)
-    with col1:
-        start_date = st.date_input(
-            "Start Date",
-            value=datetime.now() - timedelta(days=180),
-            key="global_start_date"
-        )
-    with col2:
-        end_date = st.date_input(
-            "End Date",
-            value=datetime.now() + timedelta(days=180),
-            key="global_end_date"
-        )
-
-    # Project filter
-    selected_projects = st.multiselect(
-        "Filter by Project",
-        options=projects_df['name'].tolist() if not projects_df.empty else [],
-        default=None,
-        key="global_project_filter"
-    )
-
-    # Employee filter
-    selected_employees = st.multiselect(
-        "Filter by Employee",
-        options=employees_df['name'].tolist() if not employees_df.empty else [],
-        default=None,
-        key="global_employee_filter"
-    )
-
-    # Status filter
-    status_options = ["Active", "Completed", "On Hold", "Cancelled"]
-    selected_status = st.multiselect(
-        "Project Status",
-        options=status_options,
-        default=["Active"],
-        key="global_status_filter"
-    )
-
-    st.markdown("---")
-
-    # Quick stats
-    st.markdown("### 📈 Quick Stats")
     if not projects_df.empty:
         st.metric("Total Projects", len(projects_df))
         st.metric("Active Projects", len(projects_df[projects_df['status'] == 'Active']))
     if not employees_df.empty:
         st.metric("Total Employees", len(employees_df))
-
-# Store filters in session state for access by pages
-st.session_state.filters = {
-    'start_date': start_date,
-    'end_date': end_date,
-    'projects': selected_projects,
-    'employees': selected_employees,
-    'status': selected_status
-}
 
 # Run the selected page
 pg.run()

@@ -10,7 +10,6 @@ logger = get_logger(__name__)
 
 db = st.session_state.db_manager
 processor = st.session_state.data_processor
-filters = st.session_state.filters
 
 st.markdown("### 🚀 Project Management")
 
@@ -20,12 +19,6 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(["Project List", "Project Details", "Add 
 with tab1:
     # Load projects
     projects_df = db.get_projects()
-
-    # Apply filters
-    if filters['projects']:
-        projects_df = projects_df[projects_df['name'].isin(filters['projects'])]
-    if filters['status']:
-        projects_df = projects_df[projects_df['status'].isin(filters['status'])]
 
     if not projects_df.empty:
         # Display options

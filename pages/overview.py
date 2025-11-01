@@ -9,23 +9,13 @@ logger = get_logger(__name__)
 
 db = st.session_state.db_manager
 processor = st.session_state.data_processor
-filters = st.session_state.filters
 
-# Load data with filters
+# Load data
 projects_df = db.get_projects()
 employees_df = db.get_employees()
 allocations_df = db.get_allocations()
-time_entries_df = db.get_time_entries(
-    start_date=filters['start_date'].strftime('%Y-%m-%d'),
-    end_date=filters['end_date'].strftime('%Y-%m-%d')
-)
+time_entries_df = db.get_time_entries()
 expenses_df = db.get_expenses()
-
-# Apply filters
-if filters['projects']:
-    projects_df = projects_df[projects_df['name'].isin(filters['projects'])]
-if filters['status']:
-    projects_df = projects_df[projects_df['status'].isin(filters['status'])]
 
 # Key Metrics Row
 st.markdown("### 📊 Key Performance Indicators")
