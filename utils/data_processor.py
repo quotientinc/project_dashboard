@@ -819,3 +819,399 @@ class DataProcessor:
             styles.append('background-color: #F4C7C3')
 
         return '; '.join(styles) if styles else ''
+
+    @staticmethod
+    def get_performance_metrics(
+        start_date: str,
+        end_date: str,
+        constraint: Optional[Dict] = None
+    ) -> Dict:
+        """
+        Generate performance metrics data for reporting.
+
+        Assembles data in a common format for individual reports to operate over.
+        Returns three groups of data: actuals (from time_entries), projected
+        (from allocations), and possible (from employees).
+
+        All data excludes time_entries with project_id='FRINGE.HOL'.
+
+        Args:
+            start_date: Start date in 'YYYY-MM-DD' format
+            end_date: End date in 'YYYY-MM-DD' format
+            constraint: Optional dict to filter data, e.g., {"project_id": "200200.000.00.00"}
+                       or {"employee_id": "100047"}
+
+        Returns:
+            Dictionary with structure:
+            {
+                'actuals': {
+                    'January 2025': {
+                        '100047': {'hours': 100, 'revenue': 10000.00, 'worked_days': 22},
+                        ...
+                    },
+                    ...
+                },
+                'projected': {...},
+                'possible': {...}
+            }
+
+            When constraint is None, data is grouped by employee only.
+            When constraint is {"project_id": "..."}, data is grouped by employee.
+            When constraint is {"employee_id": "..."}, data is grouped by project.
+        """
+        import streamlit as st
+
+        # Access database manager from session state
+        db = st.session_state.db_manager
+
+        # Parse dates
+        start = pd.to_datetime(start_date)
+        end = pd.to_datetime(end_date)
+
+        # Determine filter type
+        filter_type = None
+        filter_value = None
+        if constraint:
+            if 'project_id' in constraint:
+                filter_type = 'project'
+                filter_value = constraint['project_id']
+            elif 'employee_id' in constraint:
+                filter_type = 'employee'
+                filter_value = str(constraint['employee_id'])
+
+        # Initialize result structure
+        result = {
+            'actuals': {},
+            'projected': {},
+            'possible': {}
+        }
+
+        # Get months data for working_days and holidays
+        months_df = db.get_months()
+
+        # Build ACTUALS data from time_entries
+        logger.info(f"Building actuals data from {start_date} to {end_date}")
+        actuals_data = DataProcessor._build_actuals_data(
+            db, start, end, filter_type, filter_value
+        )
+        result['actuals'] = actuals_data
+
+        # Build PROJECTED data from allocations
+        logger.info(f"Building projected data from {start_date} to {end_date}")
+        projected_data = DataProcessor._build_projected_data(
+            db, start, end, filter_type, filter_value, months_df
+        )
+        result['projected'] = projected_data
+
+        # Build POSSIBLE data from employees
+        logger.info(f"Building possible data from {start_date} to {end_date}")
+        possible_data = DataProcessor._build_possible_data(
+            db, start, end, filter_type, filter_value, months_df
+        )
+        result['possible'] = possible_data
+
+        return result
+
+    @staticmethod
+    def _build_actuals_data(
+        db,
+        start: pd.Timestamp,
+        end: pd.Timestamp,
+        filter_type: Optional[str],
+        filter_value: Optional[str]
+    ) -> Dict:
+        """Build actuals data from time_entries table"""
+
+        # Build query to get time entries
+        query = """
+            SELECT
+                t.employee_id,
+                t.project_id,
+                t.date,
+                t.hours,
+                COALESCE(
+                    (SELECT a.bill_rate
+                     FROM allocations a
+                     WHERE a.employee_id = t.employee_id
+                     AND a.project_id = t.project_id
+                     LIMIT 1),
+                    0
+                ) as bill_rate
+            FROM time_entries t
+            WHERE t.date >= ?
+                AND t.date <= ?
+                AND t.project_id != 'FRINGE.HOL'
+        """
+        params = [start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')]
+
+        # Add constraint filter
+        if filter_type == 'project' and filter_value:
+            query += " AND t.project_id = ?"
+            params.append(filter_value)
+        elif filter_type == 'employee' and filter_value:
+            query += " AND t.employee_id = ?"
+            params.append(filter_value)
+
+        time_entries_df = pd.read_sql_query(query, db.conn, params=params)
+
+        if time_entries_df.empty:
+            return {}
+
+        # Convert date to datetime
+        time_entries_df['date'] = pd.to_datetime(time_entries_df['date'])
+        time_entries_df['year'] = time_entries_df['date'].dt.year
+        time_entries_df['month'] = time_entries_df['date'].dt.month
+        time_entries_df['month_name'] = time_entries_df['date'].dt.strftime('%B %Y')
+
+        # Calculate revenue
+        time_entries_df['revenue'] = time_entries_df['hours'] * time_entries_df['bill_rate']
+
+        # Determine grouping key based on filter type
+        if filter_type == 'employee':
+            group_key = 'project_id'
+        else:
+            # Default to employee grouping (when filter_type is 'project' or None)
+            group_key = 'employee_id'
+
+        # Group by month and employee/project
+        grouped = time_entries_df.groupby(['month_name', group_key]).agg({
+            'hours': 'sum',
+            'revenue': 'sum',
+            'date': 'nunique'  # Count unique dates for worked_days
+        }).reset_index()
+
+        grouped.columns = ['month_name', group_key, 'hours', 'revenue', 'worked_days']
+
+        # Build nested dictionary structure
+        actuals = {}
+        for _, row in grouped.iterrows():
+            month = row['month_name']
+            key = str(row[group_key])
+
+            if month not in actuals:
+                actuals[month] = {}
+
+            actuals[month][key] = {
+                'hours': float(row['hours']),
+                'revenue': float(row['revenue']),
+                'worked_days': int(row['worked_days'])
+            }
+
+        return actuals
+
+    @staticmethod
+    def _build_projected_data(
+        db,
+        start: pd.Timestamp,
+        end: pd.Timestamp,
+        filter_type: Optional[str],
+        filter_value: Optional[str],
+        months_df: pd.DataFrame
+    ) -> Dict:
+        """Build projected data from allocations table"""
+
+        # Build query to get allocations
+        query = """
+            SELECT
+                a.employee_id,
+                a.project_id,
+                a.allocation_date,
+                a.allocated_fte,
+                a.bill_rate
+            FROM allocations a
+            WHERE a.allocation_date >= ?
+                AND a.allocation_date <= ?
+        """
+        params = [start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')]
+
+        # Add constraint filter
+        if filter_type == 'project' and filter_value:
+            query += " AND a.project_id = ?"
+            params.append(filter_value)
+        elif filter_type == 'employee' and filter_value:
+            query += " AND a.employee_id = ?"
+            params.append(filter_value)
+
+        allocations_df = pd.read_sql_query(query, db.conn, params=params)
+
+        if allocations_df.empty:
+            return {}
+
+        # Convert allocation_date to datetime
+        allocations_df['allocation_date'] = pd.to_datetime(allocations_df['allocation_date'])
+        allocations_df['year'] = allocations_df['allocation_date'].dt.year
+        allocations_df['month'] = allocations_df['allocation_date'].dt.month
+        allocations_df['month_name'] = allocations_df['allocation_date'].dt.strftime('%B %Y')
+
+        # Join with months table to get working_days and holidays
+        if not months_df.empty:
+            allocations_df = allocations_df.merge(
+                months_df[['year', 'month', 'working_days', 'holidays']],
+                on=['year', 'month'],
+                how='left'
+            )
+            # Fill missing values with defaults
+            allocations_df['working_days'] = allocations_df['working_days'].fillna(21)
+            allocations_df['holidays'] = allocations_df['holidays'].fillna(0)
+        else:
+            allocations_df['working_days'] = 21
+            allocations_df['holidays'] = 0
+
+        # Calculate projected hours and revenue
+        # Formula: hours = (working_days - holidays) × allocated_fte × 8
+        allocations_df['hours'] = (
+            (allocations_df['working_days'] - allocations_df['holidays']) *
+            allocations_df['allocated_fte'] *
+            8
+        )
+        allocations_df['revenue'] = allocations_df['hours'] * allocations_df['bill_rate']
+
+        # Determine grouping key based on filter type
+        if filter_type == 'employee':
+            group_key = 'project_id'
+        else:
+            # Default to employee grouping
+            group_key = 'employee_id'
+
+        # Group by month and employee/project
+        grouped = allocations_df.groupby(['month_name', group_key, 'working_days']).agg({
+            'hours': 'sum',
+            'revenue': 'sum'
+        }).reset_index()
+
+        # Build nested dictionary structure
+        projected = {}
+        for _, row in grouped.iterrows():
+            month = row['month_name']
+            key = str(row[group_key])
+
+            if month not in projected:
+                projected[month] = {}
+
+            projected[month][key] = {
+                'hours': float(row['hours']),
+                'revenue': float(row['revenue']),
+                'worked_days': int(row['working_days'])
+            }
+
+        return projected
+
+    @staticmethod
+    def _build_possible_data(
+        db,
+        start: pd.Timestamp,
+        end: pd.Timestamp,
+        filter_type: Optional[str],
+        filter_value: Optional[str],
+        months_df: pd.DataFrame
+    ) -> Dict:
+        """Build possible data from employees table"""
+
+        # Get active employees
+        query = """
+            SELECT
+                e.id as employee_id,
+                e.target_allocation,
+                e.overhead_allocation,
+                e.term_date
+            FROM employees e
+            WHERE e.billable = 1
+        """
+
+        # If filtering by employee, limit to that employee
+        if filter_type == 'employee' and filter_value:
+            query += " AND e.id = ?"
+            params = [filter_value]
+            employees_df = pd.read_sql_query(query, db.conn, params=params)
+        else:
+            employees_df = pd.read_sql_query(query, db.conn)
+
+        if employees_df.empty:
+            return {}
+
+        # Filter out terminated employees based on date range
+        employees_df['term_date'] = pd.to_datetime(employees_df['term_date'], errors='coerce')
+        # Keep employees who are either active (no term_date) or were terminated after start date
+        employees_df = employees_df[
+            (employees_df['term_date'].isna()) |
+            (employees_df['term_date'] >= start)
+        ]
+
+        if employees_df.empty:
+            return {}
+
+        # Get months in the date range
+        if not months_df.empty:
+            months_in_range = months_df[
+                (months_df['year'] >= start.year) &
+                (months_df['year'] <= end.year)
+            ].copy()
+
+            # Further filter by month
+            months_in_range = months_in_range[
+                ((months_in_range['year'] == start.year) & (months_in_range['month'] >= start.month)) |
+                ((months_in_range['year'] == end.year) & (months_in_range['month'] <= end.month)) |
+                ((months_in_range['year'] > start.year) & (months_in_range['year'] < end.year))
+            ]
+        else:
+            # Fallback: generate months manually
+            months_list = []
+            current = start
+            while current <= end:
+                months_list.append({
+                    'year': current.year,
+                    'month': current.month,
+                    'month_name': current.strftime('%b'),
+                    'working_days': 21,
+                    'holidays': 0
+                })
+                current = current + relativedelta(months=1)
+            months_in_range = pd.DataFrame(months_list)
+
+        if months_in_range.empty:
+            return {}
+
+        # Create month name for display
+        months_in_range['month_name_full'] = pd.to_datetime(
+            months_in_range['year'].astype(str) + '-' +
+            months_in_range['month'].astype(str) + '-01'
+        ).dt.strftime('%B %Y')
+
+        # Cross join employees with months to get all combinations
+        employees_df['key'] = 1
+        months_in_range['key'] = 1
+        cross_join = employees_df.merge(months_in_range, on='key').drop('key', axis=1)
+
+        # Calculate possible hours
+        # Formula: (working_days - holidays) × (target_allocation - overhead_allocation) × 8
+        cross_join['hours'] = (
+            (cross_join['working_days'] - cross_join['holidays']) *
+            (cross_join['target_allocation'] - cross_join['overhead_allocation']) *
+            8
+        )
+
+        # Set revenue to 0 (as per user instruction)
+        cross_join['revenue'] = 0
+
+        # Group by month and employee (only employee grouping for possible data)
+        grouped = cross_join.groupby(['month_name_full', 'employee_id', 'working_days']).agg({
+            'hours': 'sum',
+            'revenue': 'sum'
+        }).reset_index()
+
+        # Build nested dictionary structure
+        possible = {}
+        for _, row in grouped.iterrows():
+            month = row['month_name_full']
+            key = str(row['employee_id'])
+
+            if month not in possible:
+                possible[month] = {}
+
+            possible[month][key] = {
+                'hours': float(row['hours']),
+                'revenue': float(row['revenue']),
+                'worked_days': int(row['working_days'])
+            }
+
+        return possible
