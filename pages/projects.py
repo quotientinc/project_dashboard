@@ -150,18 +150,30 @@ with tab2:
                             }
                         return monthly_totals
 
-                    # Aggregate data
+                    # Get months data for smart combination
+                    months_df = db.get_months()
+
+                    # Use smart combination logic
+                    combined_data = processor.combine_actual_projected_smartly(
+                        actuals_dict=metrics['actuals'],
+                        projected_dict=metrics['projected'],
+                        months_df=months_df
+                    )
+
+                    # Aggregate combined data
+                    combined_monthly = aggregate_monthly_data(combined_data)
+
+                    # Also keep separate aggregates for display purposes
                     actuals_monthly = aggregate_monthly_data(metrics['actuals'])
                     projected_monthly = aggregate_monthly_data(metrics['projected'])
 
-                    # Calculate totals
+                    # Calculate totals from smart combined data
+                    total_combined_hours = sum(m['hours'] for m in combined_monthly.values())
+                    total_combined_revenue = sum(m['revenue'] for m in combined_monthly.values())
+
+                    # Calculate separate totals for display (actual from past, projected from future)
                     total_actual_hours = sum(m['hours'] for m in actuals_monthly.values())
                     total_actual_revenue = sum(m['revenue'] for m in actuals_monthly.values())
-                    total_projected_hours = sum(m['hours'] for m in projected_monthly.values())
-                    total_projected_revenue = sum(m['revenue'] for m in projected_monthly.values())
-
-                    total_combined_hours = total_actual_hours + total_projected_hours
-                    total_combined_revenue = total_actual_revenue + total_projected_revenue
 
                     # Get budget from project
                     budget_revenue = project['budget_allocated'] if pd.notna(project['budget_allocated']) else 0
@@ -190,19 +202,19 @@ with tab2:
 
                     with col1:
                         st.metric(
-                            "Total Hours",
+                            "Total Hours (Smart Combined)",
                             f"{total_combined_hours:,.0f} hrs",
-                            delta=f"Actual: {total_actual_hours:,.0f} | Projected: {total_projected_hours:,.0f}",
-                            help="Actual hours worked + Projected hours from allocations"
+                            delta=f"Actual: {total_actual_hours:,.0f}",
+                            help="Intelligently combined hours: Past = actual only, Current = blended, Future = projected only"
                         )
 
                     with col2:
                         st.metric(
-                            f"Total Revenue ({total_actual_revenue} vs. {total_projected_revenue})",
+                            f"Total Revenue (Smart Combined)",
                             f"${total_combined_revenue:,.0f}",
                             delta=f"${revenue_variance:+,.0f} vs budget",
                             delta_color="inverse" if revenue_variance > 0 else "normal",
-                            help="Actual revenue + Projected revenue vs Budget allocated"
+                            help="Intelligently combined revenue: Past = actual only, Current = blended, Future = projected only"
                         )
 
                     with col3:
@@ -218,11 +230,11 @@ with tab2:
                     st.divider()
 
                     # Monthly breakdown table
-                    st.markdown("##### Monthly Breakdown")
+                    st.markdown("##### Monthly Breakdown (Smart Combined)")
 
                     # Get all unique months and sort chronologically
                     all_months = sorted(
-                        set(list(actuals_monthly.keys()) + list(projected_monthly.keys())),
+                        set(list(combined_monthly.keys())),
                         key=lambda x: pd.to_datetime(x, format='%B %Y')
                     )
 
@@ -230,53 +242,77 @@ with tab2:
                     monthly_data = []
                     cumulative_revenue = 0
 
+                    # Month type icons
+                    month_type_icons = {
+                        'past': '📊',  # Past month - actual only
+                        'active': '⚡',  # Active month - blended
+                        'future': '📈'  # Future month - projected only
+                    }
+
                     for month in all_months:
+                        # Get smart combined data
+                        combined_month = combined_monthly.get(month, {})
+                        combined_hrs = combined_month.get('hours', 0)
+                        combined_rev = combined_month.get('revenue', 0)
+
+                        # Get month type from the combined data (check first entity)
+                        month_type = 'past'  # default
+                        if month in combined_data:
+                            first_entity = list(combined_data[month].values())[0] if combined_data[month] else {}
+                            month_type = first_entity.get('month_type', 'past')
+
+                        # Get actual and projected for reference
                         actual_hrs = actuals_monthly.get(month, {}).get('hours', 0)
                         actual_rev = actuals_monthly.get(month, {}).get('revenue', 0)
                         proj_hrs = projected_monthly.get(month, {}).get('hours', 0)
                         proj_rev = projected_monthly.get(month, {}).get('revenue', 0)
 
-                        total_hrs = actual_hrs + proj_hrs
-                        total_rev = actual_rev + proj_rev
-                        cumulative_revenue += total_rev
+                        cumulative_revenue += combined_rev
 
                         budget_pct = (cumulative_revenue / budget_revenue * 100) if budget_revenue > 0 else 0
 
-                        # Determine month status
+                        # Determine budget status
                         if budget_pct > 100:
-                            month_status = "🔴"
+                            budget_status = "🔴"
                         elif budget_pct >= 90:
-                            month_status = "🟡"
+                            budget_status = "🟡"
                         elif budget_pct >= 80:
-                            month_status = "🟢"
+                            budget_status = "🟢"
                         else:
-                            month_status = "🔵"
+                            budget_status = "🔵"
+
+                        # Get month type icon
+                        type_icon = month_type_icons.get(month_type, '')
 
                         monthly_data.append({
+                            'Type': type_icon,
                             'Month': month,
+                            'Combined Hours': combined_hrs,
+                            'Combined Revenue': combined_rev,
                             'Actual Hours': actual_hrs,
-                            'Projected Hours': proj_hrs,
-                            'Total Hours': total_hrs,
                             'Actual Revenue': actual_rev,
+                            'Projected Hours': proj_hrs,
                             'Projected Revenue': proj_rev,
-                            'Total Revenue': total_rev,
                             'Cumulative Revenue': cumulative_revenue,
                             'Budget %': budget_pct,
-                            'Status': month_status
+                            'Status': budget_status
                         })
 
                     monthly_df = pd.DataFrame(monthly_data)
 
                     # Format display
                     display_df = monthly_df.copy()
+                    display_df['Combined Hours'] = display_df['Combined Hours'].apply(lambda x: f"{x:,.0f}")
+                    display_df['Combined Revenue'] = display_df['Combined Revenue'].apply(lambda x: f"${x:,.0f}")
                     display_df['Actual Hours'] = display_df['Actual Hours'].apply(lambda x: f"{x:,.0f}")
-                    display_df['Projected Hours'] = display_df['Projected Hours'].apply(lambda x: f"{x:,.0f}")
-                    display_df['Total Hours'] = display_df['Total Hours'].apply(lambda x: f"{x:,.0f}")
                     display_df['Actual Revenue'] = display_df['Actual Revenue'].apply(lambda x: f"${x:,.0f}")
+                    display_df['Projected Hours'] = display_df['Projected Hours'].apply(lambda x: f"{x:,.0f}")
                     display_df['Projected Revenue'] = display_df['Projected Revenue'].apply(lambda x: f"${x:,.0f}")
-                    display_df['Total Revenue'] = display_df['Total Revenue'].apply(lambda x: f"${x:,.0f}")
                     display_df['Cumulative Revenue'] = display_df['Cumulative Revenue'].apply(lambda x: f"${x:,.0f}")
                     display_df['Budget %'] = display_df['Budget %'].apply(lambda x: f"{x:.1f}%")
+
+                    # Add legend for icons
+                    st.info("📊 = Past (Actual only) | ⚡ = Active/Current (Blended) | 📈 = Future (Projected only)")
 
                     st.dataframe(display_df, use_container_width=True, hide_index=True, height=400)
 
@@ -308,7 +344,7 @@ with tab2:
                         ))
 
                         fig.update_layout(
-                            title="Cumulative Revenue vs Budget",
+                            title="Cumulative Revenue vs Budget (Smart Combined)",
                             xaxis_title="Month",
                             yaxis_title="Revenue ($)",
                             height=400,
@@ -318,28 +354,38 @@ with tab2:
                         st.plotly_chart(fig, use_container_width=True)
 
                     with col2:
-                        # Monthly hours breakdown
+                        # Monthly hours breakdown with color coding by month type
                         fig = go.Figure()
 
-                        fig.add_trace(go.Bar(
-                            x=monthly_df['Month'],
-                            y=monthly_df['Actual Hours'],
-                            name='Actual Hours',
-                            marker_color='#27AE60'
-                        ))
+                        # Color code bars by month type
+                        colors = []
+                        for month in monthly_df['Month']:
+                            month_type = 'past'
+                            if month in combined_data:
+                                first_entity = list(combined_data[month].values())[0] if combined_data[month] else {}
+                                month_type = first_entity.get('month_type', 'past')
+
+                            # Assign colors based on type
+                            if month_type == 'past':
+                                colors.append('#27AE60')  # Green for actual
+                            elif month_type == 'active':
+                                colors.append('#F39C12')  # Orange for blended
+                            else:  # future
+                                colors.append('#85C1E2')  # Blue for projected
 
                         fig.add_trace(go.Bar(
                             x=monthly_df['Month'],
-                            y=monthly_df['Projected Hours'],
-                            name='Projected Hours',
-                            marker_color='#85C1E2'
+                            y=monthly_df['Combined Hours'],
+                            name='Combined Hours',
+                            marker_color=colors,
+                            text=monthly_df['Type'],
+                            textposition='outside'
                         ))
 
                         fig.update_layout(
-                            title="Hours by Month (Actual + Projected)",
+                            title="Hours by Month (Smart Combined)<br><sub>📊 Past | ⚡ Active | 📈 Future</sub>",
                             xaxis_title="Month",
                             yaxis_title="Hours",
-                            barmode='stack',
                             height=400,
                             hovermode='x unified'
                         )

@@ -1287,3 +1287,145 @@ class DataProcessor:
             }
 
         return possible
+
+    @staticmethod
+    def combine_actual_projected_smartly(
+        actuals_dict: Dict,
+        projected_dict: Dict,
+        months_df: pd.DataFrame,
+        current_date: Optional[datetime] = None
+    ) -> Dict[str, Dict]:
+        """
+        Intelligently combine actual and projected data based on month status.
+
+        Logic:
+        - Past months: Use ONLY actual data
+        - Current/active month: Use actual + partial projected (if month is incomplete)
+        - Future months: Use ONLY projected data
+
+        Args:
+            actuals_dict: Nested dict from get_performance_metrics()['actuals']
+                         Format: {month_name: {entity_id: {hours, revenue, worked_days}}}
+            projected_dict: Nested dict from get_performance_metrics()['projected']
+                           Format: {month_name: {entity_id: {hours, revenue, worked_days}}}
+            months_df: DataFrame with columns [year, month, working_days, holidays]
+            current_date: Optional datetime for testing, defaults to now()
+
+        Returns:
+            Combined dictionary with structure:
+            {
+                month_name: {
+                    entity_id: {
+                        'hours': float,
+                        'revenue': float,
+                        'worked_days': int,
+                        'month_type': str  # 'past', 'active', or 'future'
+                    }
+                }
+            }
+        """
+        if current_date is None:
+            current_date = datetime.now()
+
+        # Get first day of current month for comparison
+        current_month_start = pd.Timestamp(current_date.year, current_date.month, 1)
+
+        # Get all unique months from both actuals and projected
+        all_months = set(list(actuals_dict.keys()) + list(projected_dict.keys()))
+
+        combined = {}
+
+        for month_name in all_months:
+            # Parse month name to datetime (format: "January 2025")
+            try:
+                month_date = pd.to_datetime(month_name, format='%B %Y')
+            except:
+                logger.warning(f"Could not parse month name: {month_name}, skipping")
+                continue
+
+            # Determine month type
+            if month_date < current_month_start:
+                month_type = 'past'
+            elif month_date == current_month_start:
+                month_type = 'current'
+            else:
+                month_type = 'future'
+
+            # Get month info from months_df
+            month_info = months_df[
+                (months_df['year'] == month_date.year) &
+                (months_df['month'] == month_date.month)
+            ]
+
+            if not month_info.empty:
+                working_days = int(month_info['working_days'].iloc[0])
+                holidays = int(month_info['holidays'].iloc[0])
+                expected_working_days = working_days - holidays
+            else:
+                # Fallback to default if month not in database
+                logger.warning(f"Month {month_name} not found in months_df, using defaults")
+                expected_working_days = 21
+
+            # Get entities from both actuals and projected for this month
+            actuals_month = actuals_dict.get(month_name, {})
+            projected_month = projected_dict.get(month_name, {})
+            all_entities = set(list(actuals_month.keys()) + list(projected_month.keys()))
+
+            combined[month_name] = {}
+
+            for entity_id in all_entities:
+                actual_data = actuals_month.get(entity_id, {'hours': 0, 'revenue': 0, 'worked_days': 0})
+                projected_data = projected_month.get(entity_id, {'hours': 0, 'revenue': 0, 'worked_days': 0})
+
+                # Apply combination logic based on month type
+                if month_type == 'past':
+                    # Past month: Use ONLY actuals
+                    combined[month_name][entity_id] = {
+                        'hours': actual_data['hours'],
+                        'revenue': actual_data['revenue'],
+                        'worked_days': actual_data.get('worked_days', 0),
+                        'month_type': 'past'
+                    }
+
+                elif month_type == 'future':
+                    # Future month: Use ONLY projected
+                    combined[month_name][entity_id] = {
+                        'hours': projected_data['hours'],
+                        'revenue': projected_data['revenue'],
+                        'worked_days': projected_data.get('worked_days', expected_working_days),
+                        'month_type': 'future'
+                    }
+
+                else:  # month_type == 'current'
+                    # Current month: Check if active (has remaining days)
+                    worked_days = actual_data.get('worked_days', 0)
+
+                    # Determine if month is "active" (incomplete)
+                    is_active = worked_days < expected_working_days
+
+                    if is_active and expected_working_days > 0:
+                        # Active month: Blend actual + partial projected
+                        # Formula: actual + (remaining_days_ratio × projected)
+                        remaining_days = expected_working_days - worked_days
+                        remaining_ratio = remaining_days / expected_working_days
+
+                        # Calculate blended values
+                        blended_hours = actual_data['hours'] + (remaining_ratio * projected_data['hours'])
+                        blended_revenue = actual_data['revenue'] + (remaining_ratio * projected_data['revenue'])
+
+                        combined[month_name][entity_id] = {
+                            'hours': blended_hours,
+                            'revenue': blended_revenue,
+                            'worked_days': worked_days,
+                            'month_type': 'active'
+                        }
+                    else:
+                        # Current month is complete (all days worked): Use ONLY actuals
+                        combined[month_name][entity_id] = {
+                            'hours': actual_data['hours'],
+                            'revenue': actual_data['revenue'],
+                            'worked_days': worked_days,
+                            'month_type': 'past'  # Treat as past since it's complete
+                        }
+
+        return combined
