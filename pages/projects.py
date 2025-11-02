@@ -99,25 +99,24 @@ with tab2:
                 st.markdown(f"## {project['name']}")
                 st.write(project['description'])
 
-            with col2:
-                st.metric("Status", project['status'])
-                st.metric("Client", project['client'])
+                project_deets = {
+                    "Status": project['status'],
+                    "Client": project['client'],
+                    "Project Manager": project['project_manager'],
+                    "Project Start": project['start_date'],
+                    "Project End": project['end_date']
+                }
+                st.table(project_deets, border="horizontal")
 
-            with col3:
-                st.metric("Project Manager", project['project_manager'])
+            with col2:
                 # Calculate Revenue Projected vs. Actual
-                budget_remaining = project['revenue_projected'] - 7
+                budget = project['budget_allocated']
+                # TODO: Fix this once we have amount info
+                total_accrued = 0
+                budget_remaining = budget - total_accrued
+                st.metric("Budget Allocated", f"${budget:,.0f}")
+                st.metric("Total Accrued to Date", f"${total_accrued:,.0f}")
                 st.metric("Budget Remaining", f"${budget_remaining:,.0f}")
-
-            # Add project dates in a new row
-            st.divider()
-            col1, col2, col3 = st.columns([1, 1, 2])
-
-            with col1:
-                st.metric("Project Start", project['start_date'])
-
-            with col2:
-                st.metric("Project End", project['end_date'])
 
             # Tabs for project details
             detail_tab1, detail_tab2, detail_tab3, detail_tab4, detail_tab5 = st.tabs(
