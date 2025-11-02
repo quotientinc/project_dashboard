@@ -1104,6 +1104,16 @@ class DataProcessor:
         allocations_df['month'] = allocations_df['allocation_date'].dt.month
         allocations_df['month_name'] = allocations_df['allocation_date'].dt.strftime('%B %Y')
 
+        # Filter to only include current and future months (projected = forward-looking)
+        # This prevents double-counting past months that already have actuals
+        from datetime import datetime
+        current_date = datetime.now()
+        first_of_current_month = pd.Timestamp(current_date.year, current_date.month, 1)
+        allocations_df = allocations_df[allocations_df['allocation_date'] >= first_of_current_month]
+
+        if allocations_df.empty:
+            return {}
+
         # Join with months table to get working_days and holidays
         if not months_df.empty:
             allocations_df = allocations_df.merge(

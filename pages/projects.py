@@ -198,7 +198,7 @@ with tab2:
 
                     with col2:
                         st.metric(
-                            "Total Revenue",
+                            f"Total Revenue ({total_actual_revenue} vs. {total_projected_revenue})",
                             f"${total_combined_revenue:,.0f}",
                             delta=f"${revenue_variance:+,.0f} vs budget",
                             delta_color="inverse" if revenue_variance > 0 else "normal",
