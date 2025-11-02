@@ -72,20 +72,18 @@ with tab2:
     st.markdown("#### Employee Utilization Analysis")
 
     employees_df = db.get_employees()
-    allocations_df = db.get_allocations()
-    time_entries_df = db.get_time_entries()
 
     if not employees_df.empty:
         from datetime import datetime
         import calendar
 
-        # Month filter
+        # Date range selection
         col1, col2 = st.columns([1, 1])
 
         with col1:
             # Year selector
             current_year = datetime.now().year
-            year_options = list(range(current_year - 2, current_year + 2))  # 2 years back, 1 year forward
+            year_options = list(range(current_year - 2, current_year + 2))
             selected_year = st.selectbox(
                 "Year",
                 options=year_options,
@@ -103,202 +101,256 @@ with tab2:
             selected_month_name = st.selectbox(
                 "Month",
                 options=month_names,
-                index=current_month - 1,  # Default to current month
+                index=current_month - 1,
                 key="util_month_filter"
             )
             selected_month = month_names.index(selected_month_name) + 1
 
-        # Get month data from database
-        months_df = db.get_months(year=selected_year)
-        month_data = months_df[months_df['month'] == selected_month]
+        # Build date range for get_performance_metrics
+        start_date = f"{selected_year}-{selected_month:02d}-01"
+        last_day = calendar.monthrange(selected_year, selected_month)[1]
+        end_date = f"{selected_year}-{selected_month:02d}-{last_day}"
 
-        if not month_data.empty:
-            month_row = month_data.iloc[0]
-            working_days = int(month_row['working_days'])
-            holidays = int(month_row['holidays']) if pd.notna(month_row['holidays']) else 0
-            actual_working_days = working_days - holidays
-        else:
-            # Fallback to calculation if month not in database
-            days_in_month = calendar.monthrange(selected_year, selected_month)[1]
-            working_days = sum(1 for day in range(1, days_in_month + 1)
-                              if datetime(selected_year, selected_month, day).weekday() < 5)
-            holidays = 0
-            actual_working_days = working_days
-            st.warning(f"⚠️ Month data not found in database for {month_names[selected_month - 1]} {selected_year}. Using calculated values.")
+        # Get performance metrics
+        try:
+            with st.spinner("Loading utilization data..."):
+                metrics = processor.get_performance_metrics(
+                    start_date=start_date,
+                    end_date=end_date
+                )
 
-        utilization_df = processor.calculate_employee_utilization(
-            employees_df,
-            allocations_df,
-            time_entries_df,
-            current_month_working_days=actual_working_days,
-            target_year=selected_year,
-            target_month=selected_month
-        )
+            # Helper function to adjust possible hours for hire/term dates
+            def adjust_possible_hours_for_employee(emp_id, possible_hours, possible_days, actual_days):
+                """Adjust possible hours based on actual days worked (for partial months)"""
+                if possible_days > 0 and actual_days != possible_days:
+                    # Calculate daily rate and adjust
+                    daily_rate = possible_hours / possible_days
+                    return daily_rate * actual_days
+                return possible_hours
 
-        # Display key info with selected month
-        is_current_month = (selected_year == current_year and selected_month == current_month)
-        month_label = f"{month_names[selected_month - 1]} {selected_year}"
-        if is_current_month:
-            st.info(f"📅 **{month_label}** (Current Month) • Working Days: {working_days} • Holidays: {holidays} • Actual Working Days: {actual_working_days}")
-        else:
-            st.info(f"📅 **{month_label}** • Working Days: {working_days} • Holidays: {holidays} • Actual Working Days: {actual_working_days}")
+            # Extract month key (should only be one month)
+            month_key = f"{month_names[selected_month - 1]} {selected_year}"
 
-        # Summary metrics
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            avg_util = utilization_df['utilization_rate'].mean()
-            st.metric("Average Utilization", f"{avg_util:.1f}%")
-        with col2:
-            if 'billable_utilization' in utilization_df.columns:
-                avg_billable = utilization_df['billable_utilization'].mean()
-                st.metric("Average Billable Util.", f"{avg_billable:.1f}%")
-        with col3:
-            if 'expected_hours' in utilization_df.columns:
-                total_expected = utilization_df['expected_hours'].sum()
-                total_actual = utilization_df['total_hours'].sum()
-                st.metric("Total Hours", f"{total_actual:.0f} / {total_expected:.0f}")
+            # Calculate first and last day of report month for filtering
+            first_day_of_month = datetime(selected_year, selected_month, 1).date()
+            last_day_of_month = datetime(selected_year, selected_month, last_day).date()
 
-        st.markdown("---")
-        st.markdown("#### Detailed Utilization Table")
+            # Build utilization DataFrame
+            util_data = []
 
-        # Prepare comprehensive table with all calculation values
-        table_df = utilization_df.copy()
+            for _, emp in employees_df.iterrows():
+                emp_id_str = str(emp['id'])
 
-        # Calculate derived fields
-        table_df['non_billable_hours'] = table_df['total_hours'] - table_df['billable_hours']
-        table_df['hours_variance'] = table_df['total_hours'] - table_df['expected_hours']
-        table_df['capacity_remaining'] = table_df['expected_hours'] - table_df['total_hours']
+                # Check if employee was active during the report month
+                # Skip if hired after the month ended
+                if pd.notna(emp.get('hire_date')):
+                    hire_date = pd.to_datetime(emp['hire_date']).date()
+                    if hire_date > last_day_of_month:
+                        continue  # Skip - hired after this month
 
-        # Add working days column (same for all)
-        table_df['working_days'] = working_days
+                # Skip if termed before the month started
+                if pd.notna(emp.get('term_date')):
+                    term_date = pd.to_datetime(emp['term_date']).date()
+                    if term_date < first_day_of_month:
+                        continue  # Skip - terminated before this month
 
-        # Select and order columns for display
-        display_columns = [
-            'name',
-            'role',
-            'target_allocation',
-            'overhead_allocation',
-            'working_days',
-            'expected_hours',
-            'total_hours',
-            'billable_hours',
-            'non_billable_hours',
-            'utilization_rate',
-            'billable_utilization',
-            'billable_rate',
-            'hours_variance',
-            'capacity_remaining'
-        ]
+                # Get data from metrics
+                actuals = metrics['actuals'].get(month_key, {}).get(emp_id_str, {'hours': 0, 'revenue': 0, 'worked_days': 0})
+                projected = metrics['projected'].get(month_key, {}).get(emp_id_str, {'hours': 0, 'revenue': 0, 'worked_days': 0})
+                possible = metrics['possible'].get(month_key, {}).get(emp_id_str, {'hours': 0, 'revenue': 0, 'worked_days': 0})
 
-        # Filter to only existing columns
-        display_columns = [col for col in display_columns if col in table_df.columns]
-        display_df = table_df[display_columns].copy()
+                # Adjust possible hours for hire/term dates
+                actual_worked_days = actuals['worked_days']
+                possible_worked_days = possible['worked_days']
+                possible_hours = possible['hours']
 
-        # Rename columns for better display
-        display_df = display_df.rename(columns={
-            'name': 'Employee',
-            'role': 'Role',
-            'target_allocation': 'Target FTE',
-            'overhead_allocation': 'Overhead %',
-            'working_days': 'Working Days',
-            'expected_hours': 'Expected Hrs',
-            'total_hours': 'Actual Hrs',
-            'billable_hours': 'Billable Hrs',
-            'non_billable_hours': 'Non-bill Hrs',
-            'utilization_rate': 'Total Util %',
-            'billable_utilization': 'Billable Util %',
-            'billable_rate': 'Billable Rate %',
-            'hours_variance': 'Variance (+/-)',
-            'capacity_remaining': 'Capacity Rem.'
-        })
+                # Adjust if employee worked partial month
+                if actual_worked_days > 0 and actual_worked_days != possible_worked_days:
+                    adjusted_possible_hours = adjust_possible_hours_for_employee(
+                        emp['id'], possible_hours, possible_worked_days, actual_worked_days
+                    )
+                else:
+                    adjusted_possible_hours = possible_hours
 
-        # Format numeric columns
-        if 'Target FTE' in display_df.columns:
-            display_df['Target FTE'] = (display_df['Target FTE'] * 100).round(0).astype(int)
-        if 'Overhead %' in display_df.columns:
-            display_df['Overhead %'] = (display_df['Overhead %'] * 100).round(0).astype(int)
-        if 'Expected Hrs' in display_df.columns:
-            display_df['Expected Hrs'] = display_df['Expected Hrs'].round(1)
-        if 'Actual Hrs' in display_df.columns:
+                # Calculate utilization metrics
+                actual_hours = actuals['hours']
+                projected_hours = projected['hours']
+
+                utilization_pct = (actual_hours / adjusted_possible_hours * 100) if adjusted_possible_hours > 0 else 0
+                variance = actual_hours - projected_hours
+
+                # Determine status
+                if utilization_pct > 120:
+                    status = "🔴 Over"
+                    status_num = 4
+                elif utilization_pct >= 100:
+                    status = "🟡 High"
+                    status_num = 3
+                elif utilization_pct >= 80:
+                    status = "🟢 Good"
+                    status_num = 2
+                else:
+                    status = "🔵 Under"
+                    status_num = 1
+
+                util_data.append({
+                    'employee_id': emp['id'],
+                    'name': emp['name'],
+                    'role': emp['role'],
+                    'possible_hours': adjusted_possible_hours,
+                    'projected_hours': projected_hours,
+                    'actual_hours': actual_hours,
+                    'utilization_pct': utilization_pct,
+                    'variance': variance,
+                    'status': status,
+                    'status_num': status_num,
+                    'worked_days': actual_worked_days
+                })
+
+            util_df = pd.DataFrame(util_data)
+
+            # Summary cards
+            st.markdown("### 📊 Utilization Summary")
+
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                over_util = len(util_df[util_df['utilization_pct'] > 120])
+                st.metric("🔴 Over-Utilized (>120%)", over_util)
+
+            with col2:
+                high_util = len(util_df[(util_df['utilization_pct'] >= 100) & (util_df['utilization_pct'] <= 120)])
+                st.metric("🟡 High Utilization (100-120%)", high_util)
+
+            with col3:
+                good_util = len(util_df[(util_df['utilization_pct'] >= 80) & (util_df['utilization_pct'] < 100)])
+                st.metric("🟢 Well-Utilized (80-100%)", good_util)
+
+            with col4:
+                under_util = len(util_df[util_df['utilization_pct'] < 80])
+                st.metric("🔵 Under-Utilized (<80%)", under_util)
+
+            st.divider()
+
+            # Filters
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+                role_filter = st.selectbox(
+                    "Filter by Role",
+                    ["All"] + sorted(util_df['role'].dropna().unique().tolist()),
+                    key="util_role_filter"
+                )
+
+            with col2:
+                status_filter = st.selectbox(
+                    "Filter by Status",
+                    ["All", "🔴 Over", "🟡 High", "🟢 Good", "🔵 Under"],
+                    key="util_status_filter"
+                )
+
+            with col3:
+                sort_by = st.selectbox(
+                    "Sort by",
+                    ["Name", "Utilization % (High to Low)", "Utilization % (Low to High)", "Variance"],
+                    key="util_sort_by"
+                )
+
+            # Apply filters
+            filtered_df = util_df.copy()
+
+            if role_filter != "All":
+                filtered_df = filtered_df[filtered_df['role'] == role_filter]
+
+            if status_filter != "All":
+                filtered_df = filtered_df[filtered_df['status'] == status_filter]
+
+            # Apply sorting
+            if sort_by == "Name":
+                filtered_df = filtered_df.sort_values('name')
+            elif sort_by == "Utilization % (High to Low)":
+                filtered_df = filtered_df.sort_values('utilization_pct', ascending=False)
+            elif sort_by == "Utilization % (Low to High)":
+                filtered_df = filtered_df.sort_values('utilization_pct', ascending=True)
+            elif sort_by == "Variance":
+                filtered_df = filtered_df.sort_values('variance', ascending=False)
+
+            st.markdown("---")
+            st.markdown(f"### 📋 Detailed Utilization - {month_key}")
+
+            # Display table
+            display_df = filtered_df[[
+                'name', 'role', 'possible_hours', 'projected_hours',
+                'actual_hours', 'utilization_pct', 'variance', 'status'
+            ]].copy()
+
+            display_df = display_df.rename(columns={
+                'name': 'Employee',
+                'role': 'Role',
+                'possible_hours': 'Possible Hrs',
+                'projected_hours': 'Projected Hrs',
+                'actual_hours': 'Actual Hrs',
+                'utilization_pct': 'Utilization %',
+                'variance': 'Variance',
+                'status': 'Status'
+            })
+
+            # Format columns
+            display_df['Possible Hrs'] = display_df['Possible Hrs'].round(1)
+            display_df['Projected Hrs'] = display_df['Projected Hrs'].round(1)
             display_df['Actual Hrs'] = display_df['Actual Hrs'].round(1)
-        if 'Billable Hrs' in display_df.columns:
-            display_df['Billable Hrs'] = display_df['Billable Hrs'].round(1)
-        if 'Non-bill Hrs' in display_df.columns:
-            display_df['Non-bill Hrs'] = display_df['Non-bill Hrs'].round(1)
-        if 'Total Util %' in display_df.columns:
-            display_df['Total Util %'] = display_df['Total Util %'].round(1)
-        if 'Billable Util %' in display_df.columns:
-            display_df['Billable Util %'] = display_df['Billable Util %'].round(1)
-        if 'Billable Rate %' in display_df.columns:
-            display_df['Billable Rate %'] = display_df['Billable Rate %'].round(1)
-        if 'Variance (+/-)' in display_df.columns:
-            display_df['Variance (+/-)'] = display_df['Variance (+/-)'].round(1)
-        if 'Capacity Rem.' in display_df.columns:
-            display_df['Capacity Rem.'] = display_df['Capacity Rem.'].round(1)
+            display_df['Utilization %'] = display_df['Utilization %'].round(1)
+            display_df['Variance'] = display_df['Variance'].round(1)
 
-        # Define color function for utilization columns
-        def color_utilization(val):
-            """Color code utilization percentages"""
-            try:
-                val_float = float(val)
-                if val_float < 80:
-                    return 'background-color: #ffcccb'  # Light red
-                elif val_float < 100:
-                    return 'background-color: #ffffcc'  # Light yellow
-                elif val_float <= 120:
-                    return 'background-color: #ccffcc'  # Light green
+            # Conditional formatting
+            def color_utilization_status(val):
+                if val > 120:
+                    return 'background-color: #ffcccc'  # Red
+                elif val >= 100:
+                    return 'background-color: #fff9cc'  # Yellow
+                elif val >= 80:
+                    return 'background-color: #ccffcc'  # Green
                 else:
-                    return 'background-color: #ffd9b3'  # Light orange
-            except:
-                return ''
+                    return 'background-color: #cce5ff'  # Blue
 
-        def color_variance(val):
-            """Color code variance (positive = over, negative = under)"""
-            try:
-                val_float = float(val)
-                if val_float < -10:
-                    return 'background-color: #ffcccb; color: #cc0000'  # Red for significantly under
-                elif val_float < 0:
-                    return 'background-color: #ffffcc'  # Yellow for slightly under
-                elif val_float <= 10:
-                    return 'background-color: #ccffcc'  # Green for on target
+            def color_variance(val):
+                if val > 10:
+                    return 'background-color: #ffd9b3; color: #cc6600'  # Orange
+                elif val >= -10:
+                    return 'background-color: #ccffcc'  # Green
                 else:
-                    return 'background-color: #ffd9b3; color: #cc6600'  # Orange for over
-            except:
-                return ''
+                    return 'background-color: #ffcccc; color: #cc0000'  # Red
 
-        # Apply conditional formatting
-        styled_df = display_df.style
-        if 'Total Util %' in display_df.columns:
-            styled_df = styled_df.applymap(color_utilization, subset=['Total Util %'])
-        if 'Billable Util %' in display_df.columns:
-            styled_df = styled_df.applymap(color_utilization, subset=['Billable Util %'])
-        if 'Variance (+/-)' in display_df.columns:
-            styled_df = styled_df.applymap(color_variance, subset=['Variance (+/-)'])
+            styled_df = display_df.style.applymap(color_utilization_status, subset=['Utilization %'])
+            styled_df = styled_df.applymap(color_variance, subset=['Variance'])
 
-        # Format as strings with proper signs for variance
-        if 'Variance (+/-)' in display_df.columns:
-            display_df['Variance (+/-)'] = display_df['Variance (+/-)'].apply(
-                lambda x: f"+{x:.1f}" if x > 0 else f"{x:.1f}"
+            st.dataframe(styled_df, use_container_width=True, hide_index=True, height=500)
+
+            # Summary totals
+            st.markdown("##### Summary Totals")
+            summary_cols = st.columns(4)
+            with summary_cols[0]:
+                st.metric("Employees", len(filtered_df))
+            with summary_cols[1]:
+                st.metric("Total Possible Hrs", f"{filtered_df['possible_hours'].sum():.0f}")
+            with summary_cols[2]:
+                st.metric("Total Actual Hrs", f"{filtered_df['actual_hours'].sum():.0f}")
+            with summary_cols[3]:
+                avg_util = filtered_df['utilization_pct'].mean()
+                st.metric("Avg Utilization", f"{avg_util:.1f}%")
+
+            # CSV Export
+            csv = display_df.to_csv(index=False)
+            st.download_button(
+                label="📥 Download Utilization Report",
+                data=csv,
+                file_name=f"utilization_{selected_year}_{selected_month:02d}.csv",
+                mime="text/csv"
             )
 
-        # Display the table
-        st.dataframe(styled_df, use_container_width=True, hide_index=True, height=600)
-
-        # Add summary row
-        st.markdown("##### Summary Totals")
-        summary_cols = st.columns(5)
-        with summary_cols[0]:
-            st.metric("Total Employees", len(table_df))
-        with summary_cols[1]:
-            st.metric("Total Expected Hrs", f"{table_df['expected_hours'].sum():.0f}")
-        with summary_cols[2]:
-            st.metric("Total Actual Hrs", f"{table_df['total_hours'].sum():.0f}")
-        with summary_cols[3]:
-            st.metric("Total Billable Hrs", f"{table_df['billable_hours'].sum():.0f}")
-        with summary_cols[4]:
-            total_variance = table_df['hours_variance'].sum()
-            st.metric("Total Variance", f"{'+' if total_variance > 0 else ''}{total_variance:.0f} hrs")
+        except Exception as e:
+            st.error(f"Error loading utilization data: {str(e)}")
+            logger.error(f"Error in utilization tab: {str(e)}", exc_info=True)
 
 with tab3:
     st.markdown("#### Edit Employee")
