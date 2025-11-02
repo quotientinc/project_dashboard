@@ -109,80 +109,256 @@ with tab2:
                 budget_remaining = project['revenue_projected'] - 7
                 st.metric("Budget Remaining", f"${budget_remaining:,.0f}")
 
+            # Add project dates in a new row
+            st.divider()
+            col1, col2, col3 = st.columns([1, 1, 2])
+
+            with col1:
+                st.metric("Project Start", project['start_date'])
+
+            with col2:
+                st.metric("Project End", project['end_date'])
+
             # Tabs for project details
             detail_tab1, detail_tab2, detail_tab3, detail_tab4, detail_tab5 = st.tabs(
-                ["Financial", "Team", "Timeline", "Expenses", "Burn Rate"]
+                ["Performance", "Team", "Timeline", "Expenses", "Burn Rate"]
             )
 
-            # Financial
+            # Performance
             with detail_tab1:
-                # Financial metrics
-                col1, col2 = st.columns(2)
+                st.markdown("#### Project Performance Analysis")
 
-                with col1:
-                    # TODO: Fix this
-                    st.markdown("#### Budget")
-                    st.metric("Allocated", f"${(0 if project['budget_allocated'] is None else project['budget_allocated']):,.0f}")
-                    st.metric("Used", f"${(0 if project['budget_used'] is None else project['budget_used']):,.0f}")
-                    remaining = project['budget_allocated'] - project['budget_used']
-                    st.metric("Remaining", f"${remaining:,.0f}")
+                # Get performance metrics for project date range
+                try:
+                    with st.spinner("Loading project performance data..."):
+                        metrics = processor.get_performance_metrics(
+                            start_date=project['start_date'],
+                            end_date=project['end_date'],
+                            constraint={'project_id': str(project_id)}
+                        )
 
-                    if project['budget_allocated'] > 0:
-                        budget_pct = project['budget_used'] / project['budget_allocated'] * 100
-                        st.progress(min(budget_pct / 100, 1.0))
-                        st.caption(f"Budget Utilization: {budget_pct:.1f}%")
+                    # Helper function to aggregate metrics across all months and employees
+                    def aggregate_monthly_data(metrics_dict):
+                        """Aggregate metrics by month across all employees"""
+                        monthly_totals = {}
+                        for month, employees in metrics_dict.items():
+                            total_hours = sum(emp_data['hours'] for emp_data in employees.values())
+                            total_revenue = sum(emp_data['revenue'] for emp_data in employees.values())
+                            monthly_totals[month] = {
+                                'hours': total_hours,
+                                'revenue': total_revenue
+                            }
+                        return monthly_totals
 
-                with col2:
-                    # TODO: Fix this
-                    st.markdown("#### Revenue")
-                    st.metric("Projected", f"${project['revenue_projected']:,.0f}")
-                    st.metric("Actual", f"${project['revenue_actual']:,.0f}")
-                    variance = project['revenue_actual'] - project['revenue_projected']
-                    st.metric("Variance", f"${variance:,.0f}")
+                    # Aggregate data
+                    actuals_monthly = aggregate_monthly_data(metrics['actuals'])
+                    projected_monthly = aggregate_monthly_data(metrics['projected'])
 
-                    if project['revenue_projected'] > 0:
-                        revenue_pct = project['revenue_actual'] / project['revenue_projected'] * 100
-                        st.progress(min(revenue_pct / 100, 1.0))
-                        st.caption(f"Revenue Achievement: {revenue_pct:.1f}%")
+                    # Calculate totals
+                    total_actual_hours = sum(m['hours'] for m in actuals_monthly.values())
+                    total_actual_revenue = sum(m['revenue'] for m in actuals_monthly.values())
+                    total_projected_hours = sum(m['hours'] for m in projected_monthly.values())
+                    total_projected_revenue = sum(m['revenue'] for m in projected_monthly.values())
 
-                # Cost breakdown
-                costs = processor.calculate_project_costs(
-                    project_id,
-                    db.get_allocations(project_id=project_id),
-                    db.get_expenses(project_id=project_id),
-                    db.get_time_entries(project_id=project_id)
-                )
+                    total_combined_hours = total_actual_hours + total_projected_hours
+                    total_combined_revenue = total_actual_revenue + total_projected_revenue
 
-                st.markdown("#### Cost Breakdown")
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Labor Cost", f"${costs['labor_cost']:,.0f}")
-                with col2:
-                    st.metric("Expense Cost", f"${costs['expense_cost']:,.0f}")
-                with col3:
-                    st.metric("Total Cost", f"${costs['total_cost']:,.0f}")
+                    # Get budget from project
+                    budget_revenue = project['budget_allocated'] if pd.notna(project['budget_allocated']) else 0
 
-                # Cost charts
-                if costs['cost_breakdown']:
+                    # Calculate burn percentages
+                    revenue_burn_pct = (total_combined_revenue / budget_revenue * 100) if budget_revenue > 0 else 0
+                    revenue_variance = total_combined_revenue - budget_revenue
+
+                    # Determine status
+                    if revenue_burn_pct > 100:
+                        status = "🔴 Over Budget"
+                        status_color = "#ffcccc"
+                    elif revenue_burn_pct >= 90:
+                        status = "🟡 Near Budget"
+                        status_color = "#fff9cc"
+                    elif revenue_burn_pct >= 80:
+                        status = "🟢 On Track"
+                        status_color = "#ccffcc"
+                    else:
+                        status = "🔵 Under Budget"
+                        status_color = "#cce5ff"
+
+                    # Display summary cards
+                    st.markdown("##### Summary")
+                    col1, col2, col3 = st.columns(3)
+
+                    with col1:
+                        st.metric(
+                            "Total Hours",
+                            f"{total_combined_hours:,.0f} hrs",
+                            delta=f"Actual: {total_actual_hours:,.0f} | Projected: {total_projected_hours:,.0f}",
+                            help="Actual hours worked + Projected hours from allocations"
+                        )
+
+                    with col2:
+                        st.metric(
+                            "Total Revenue",
+                            f"${total_combined_revenue:,.0f}",
+                            delta=f"${revenue_variance:+,.0f} vs budget",
+                            delta_color="inverse" if revenue_variance > 0 else "normal",
+                            help="Actual revenue + Projected revenue vs Budget allocated"
+                        )
+
+                    with col3:
+                        st.markdown(
+                            f"<div style='background-color: {status_color}; padding: 20px; border-radius: 5px; text-align: center;'>"
+                            f"<h4>Budget Status</h4>"
+                            f"<h2>{status}</h2>"
+                            f"<p>{revenue_burn_pct:.1f}% of ${budget_revenue:,.0f}</p>"
+                            f"</div>",
+                            unsafe_allow_html=True
+                        )
+
+                    st.divider()
+
+                    # Monthly breakdown table
+                    st.markdown("##### Monthly Breakdown")
+
+                    # Get all unique months and sort chronologically
+                    all_months = sorted(
+                        set(list(actuals_monthly.keys()) + list(projected_monthly.keys())),
+                        key=lambda x: pd.to_datetime(x, format='%B %Y')
+                    )
+
+                    # Build monthly breakdown
+                    monthly_data = []
+                    cumulative_revenue = 0
+
+                    for month in all_months:
+                        actual_hrs = actuals_monthly.get(month, {}).get('hours', 0)
+                        actual_rev = actuals_monthly.get(month, {}).get('revenue', 0)
+                        proj_hrs = projected_monthly.get(month, {}).get('hours', 0)
+                        proj_rev = projected_monthly.get(month, {}).get('revenue', 0)
+
+                        total_hrs = actual_hrs + proj_hrs
+                        total_rev = actual_rev + proj_rev
+                        cumulative_revenue += total_rev
+
+                        budget_pct = (cumulative_revenue / budget_revenue * 100) if budget_revenue > 0 else 0
+
+                        # Determine month status
+                        if budget_pct > 100:
+                            month_status = "🔴"
+                        elif budget_pct >= 90:
+                            month_status = "🟡"
+                        elif budget_pct >= 80:
+                            month_status = "🟢"
+                        else:
+                            month_status = "🔵"
+
+                        monthly_data.append({
+                            'Month': month,
+                            'Actual Hours': actual_hrs,
+                            'Projected Hours': proj_hrs,
+                            'Total Hours': total_hrs,
+                            'Actual Revenue': actual_rev,
+                            'Projected Revenue': proj_rev,
+                            'Total Revenue': total_rev,
+                            'Cumulative Revenue': cumulative_revenue,
+                            'Budget %': budget_pct,
+                            'Status': month_status
+                        })
+
+                    monthly_df = pd.DataFrame(monthly_data)
+
+                    # Format display
+                    display_df = monthly_df.copy()
+                    display_df['Actual Hours'] = display_df['Actual Hours'].apply(lambda x: f"{x:,.0f}")
+                    display_df['Projected Hours'] = display_df['Projected Hours'].apply(lambda x: f"{x:,.0f}")
+                    display_df['Total Hours'] = display_df['Total Hours'].apply(lambda x: f"{x:,.0f}")
+                    display_df['Actual Revenue'] = display_df['Actual Revenue'].apply(lambda x: f"${x:,.0f}")
+                    display_df['Projected Revenue'] = display_df['Projected Revenue'].apply(lambda x: f"${x:,.0f}")
+                    display_df['Total Revenue'] = display_df['Total Revenue'].apply(lambda x: f"${x:,.0f}")
+                    display_df['Cumulative Revenue'] = display_df['Cumulative Revenue'].apply(lambda x: f"${x:,.0f}")
+                    display_df['Budget %'] = display_df['Budget %'].apply(lambda x: f"{x:.1f}%")
+
+                    st.dataframe(display_df, use_container_width=True, hide_index=True, height=400)
+
+                    # Burn rate visualization
+                    st.divider()
+                    st.markdown("##### Burn Rate Visualization")
+
                     col1, col2 = st.columns(2)
 
                     with col1:
-                        if 'by_employee' in costs['cost_breakdown'] and costs['cost_breakdown']['by_employee']:
-                            fig = px.pie(
-                                values=list(costs['cost_breakdown']['by_employee'].values()),
-                                names=list(costs['cost_breakdown']['by_employee'].keys()),
-                                title="Cost by Employee"
-                            )
-                            st.plotly_chart(fig, width='stretch')
+                        # Cumulative revenue vs budget chart
+                        fig = go.Figure()
+
+                        fig.add_trace(go.Scatter(
+                            x=monthly_df['Month'],
+                            y=monthly_df['Cumulative Revenue'],
+                            name='Cumulative Revenue',
+                            mode='lines+markers',
+                            line=dict(color='#2E86C1', width=3),
+                            fill='tozeroy'
+                        ))
+
+                        fig.add_trace(go.Scatter(
+                            x=monthly_df['Month'],
+                            y=[budget_revenue] * len(monthly_df),
+                            name='Budget',
+                            mode='lines',
+                            line=dict(color='red', width=2, dash='dash')
+                        ))
+
+                        fig.update_layout(
+                            title="Cumulative Revenue vs Budget",
+                            xaxis_title="Month",
+                            yaxis_title="Revenue ($)",
+                            height=400,
+                            hovermode='x unified'
+                        )
+
+                        st.plotly_chart(fig, use_container_width=True)
 
                     with col2:
-                        if 'by_category' in costs['cost_breakdown'] and costs['cost_breakdown']['by_category']:
-                            fig = px.pie(
-                                values=list(costs['cost_breakdown']['by_category'].values()),
-                                names=list(costs['cost_breakdown']['by_category'].keys()),
-                                title="Cost by Category"
-                            )
-                            st.plotly_chart(fig, width='stretch')
+                        # Monthly hours breakdown
+                        fig = go.Figure()
+
+                        fig.add_trace(go.Bar(
+                            x=monthly_df['Month'],
+                            y=monthly_df['Actual Hours'],
+                            name='Actual Hours',
+                            marker_color='#27AE60'
+                        ))
+
+                        fig.add_trace(go.Bar(
+                            x=monthly_df['Month'],
+                            y=monthly_df['Projected Hours'],
+                            name='Projected Hours',
+                            marker_color='#85C1E2'
+                        ))
+
+                        fig.update_layout(
+                            title="Hours by Month (Actual + Projected)",
+                            xaxis_title="Month",
+                            yaxis_title="Hours",
+                            barmode='stack',
+                            height=400,
+                            hovermode='x unified'
+                        )
+
+                        st.plotly_chart(fig, use_container_width=True)
+
+                    # CSV Export
+                    csv = monthly_df.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Download Monthly Breakdown",
+                        data=csv,
+                        file_name=f"project_performance_{project_id}_{project['start_date']}_{project['end_date']}.csv",
+                        mime="text/csv"
+                    )
+
+                except Exception as e:
+                    st.error(f"Error loading performance data: {str(e)}")
+                    logger.error(f"Error in performance tab: {str(e)}", exc_info=True)
+                    st.info("Unable to load performance metrics. Please check the logs for details.")
 
             # Team
             with detail_tab2:
