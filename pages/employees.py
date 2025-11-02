@@ -76,23 +76,72 @@ with tab2:
     time_entries_df = db.get_time_entries()
 
     if not employees_df.empty:
-        # Get current month working days (you can make this dynamic later)
         from datetime import datetime
         import calendar
-        current_year = datetime.now().year
-        current_month = datetime.now().month
 
-        # Calculate working days for current month
-        days_in_month = calendar.monthrange(current_year, current_month)[1]
-        working_days = sum(1 for day in range(1, days_in_month + 1)
-                          if datetime(current_year, current_month, day).weekday() < 5)
+        # Month filter
+        col1, col2 = st.columns([1, 1])
+
+        with col1:
+            # Year selector
+            current_year = datetime.now().year
+            year_options = list(range(current_year - 2, current_year + 2))  # 2 years back, 1 year forward
+            selected_year = st.selectbox(
+                "Year",
+                options=year_options,
+                index=year_options.index(current_year),
+                key="util_year_filter"
+            )
+
+        with col2:
+            # Month selector
+            current_month = datetime.now().month
+            month_names = [
+                "January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"
+            ]
+            selected_month_name = st.selectbox(
+                "Month",
+                options=month_names,
+                index=current_month - 1,  # Default to current month
+                key="util_month_filter"
+            )
+            selected_month = month_names.index(selected_month_name) + 1
+
+        # Get month data from database
+        months_df = db.get_months(year=selected_year)
+        month_data = months_df[months_df['month'] == selected_month]
+
+        if not month_data.empty:
+            month_row = month_data.iloc[0]
+            working_days = int(month_row['working_days'])
+            holidays = int(month_row['holidays']) if pd.notna(month_row['holidays']) else 0
+            actual_working_days = working_days - holidays
+        else:
+            # Fallback to calculation if month not in database
+            days_in_month = calendar.monthrange(selected_year, selected_month)[1]
+            working_days = sum(1 for day in range(1, days_in_month + 1)
+                              if datetime(selected_year, selected_month, day).weekday() < 5)
+            holidays = 0
+            actual_working_days = working_days
+            st.warning(f"⚠️ Month data not found in database for {month_names[selected_month - 1]} {selected_year}. Using calculated values.")
 
         utilization_df = processor.calculate_employee_utilization(
-            employees_df, allocations_df, time_entries_df, current_month_working_days=working_days
+            employees_df,
+            allocations_df,
+            time_entries_df,
+            current_month_working_days=actual_working_days,
+            target_year=selected_year,
+            target_month=selected_month
         )
 
-        # Display key info
-        st.info(f"📅 Current Month: {datetime.now().strftime('%B %Y')} • Working Days: {working_days}")
+        # Display key info with selected month
+        is_current_month = (selected_year == current_year and selected_month == current_month)
+        month_label = f"{month_names[selected_month - 1]} {selected_year}"
+        if is_current_month:
+            st.info(f"📅 **{month_label}** (Current Month) • Working Days: {working_days} • Holidays: {holidays} • Actual Working Days: {actual_working_days}")
+        else:
+            st.info(f"📅 **{month_label}** • Working Days: {working_days} • Holidays: {holidays} • Actual Working Days: {actual_working_days}")
 
         # Summary metrics
         col1, col2, col3 = st.columns(3)

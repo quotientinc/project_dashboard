@@ -83,7 +83,9 @@ class DataProcessor:
         employees_df: pd.DataFrame,
         allocations_df: pd.DataFrame,
         time_entries_df: pd.DataFrame,
-        current_month_working_days: int = 21
+        current_month_working_days: int = 21,
+        target_year: int = None,
+        target_month: int = None
     ) -> pd.DataFrame:
         """
         Calculate employee utilization metrics using improved methodology.
@@ -93,6 +95,7 @@ class DataProcessor:
         - Actual working days in the month
         - PTO and holiday adjustments
         - Separate tracking of billable vs total utilization
+        - ONLY time entries from the specified month
 
         Formula:
         Expected Hours = Target FTE × Working Days × 8 hours/day × (1 - Overhead Allocation)
@@ -102,13 +105,47 @@ class DataProcessor:
         Args:
             employees_df: DataFrame with employee data including target_allocation, overhead_allocation
             allocations_df: DataFrame with project allocations
-            time_entries_df: DataFrame with time entries
+            time_entries_df: DataFrame with time entries (will be filtered to target month)
             current_month_working_days: Number of working days in the current month (default 21)
+            target_year: Year to filter time entries (defaults to current year)
+            target_month: Month to filter time entries (defaults to current month)
         """
+        from datetime import datetime
+
         if employees_df.empty:
             return pd.DataFrame()
 
+        # Default to current year/month if not specified
+        if target_year is None:
+            target_year = datetime.now().year
+        if target_month is None:
+            target_month = datetime.now().month
+
+        # Filter out terminated employees who left before the reporting period
+        # If terminated during the month, include them (they worked part of the month)
+        # If terminated before the month started, exclude them
         utilization = employees_df.copy()
+
+        # Convert term_date to datetime if it exists
+        if 'term_date' in utilization.columns:
+            utilization['term_date_dt'] = pd.to_datetime(utilization['term_date'], errors='coerce')
+
+            # First day of the target month
+            target_month_start = datetime(target_year, target_month, 1)
+
+            # Filter: keep employees who either:
+            # 1. Have no term date (still active), OR
+            # 2. Were terminated during or after the target month
+            utilization = utilization[
+                (utilization['term_date_dt'].isna()) |
+                (utilization['term_date_dt'] >= target_month_start)
+            ].copy()
+
+            # Drop the temporary datetime column
+            utilization = utilization.drop(columns=['term_date_dt'])
+
+        if utilization.empty:
+            return pd.DataFrame()
 
         # Calculate allocated FTE and get rates from allocations
         if not allocations_df.empty:
@@ -124,21 +161,36 @@ class DataProcessor:
             utilization['employee_rate'] = 0
             utilization['allocated_fte'] = 0
 
-        # Calculate billable vs non-billable hours
+        # FILTER time entries to only the target month
         if not time_entries_df.empty:
-            billable = time_entries_df.groupby(['employee_id', 'billable'])['hours'].sum().unstack(fill_value=0)
-            if 1 in billable.columns:
-                billable_hours = billable[1].reset_index()
-                billable_hours.columns = ['employee_id', 'billable_hours']
-                utilization = utilization.merge(billable_hours, left_on='id', right_on='employee_id', how='left')
-                utilization['billable_hours'] = utilization['billable_hours'].fillna(0)
-            else:
-                utilization['billable_hours'] = 0
+            # Ensure date column is datetime
+            time_entries_df['date'] = pd.to_datetime(time_entries_df['date'])
 
-            total_hours = time_entries_df.groupby('employee_id')['hours'].sum().reset_index()
-            total_hours.columns = ['employee_id', 'total_hours']
-            utilization = utilization.merge(total_hours, left_on='id', right_on='employee_id', how='left')
-            utilization['total_hours'] = utilization['total_hours'].fillna(0)
+            # Filter to target year and month
+            month_entries = time_entries_df[
+                (time_entries_df['date'].dt.year == target_year) &
+                (time_entries_df['date'].dt.month == target_month)
+            ].copy()
+
+            if not month_entries.empty:
+                # Calculate billable vs non-billable hours for THIS MONTH ONLY
+                billable = month_entries.groupby(['employee_id', 'billable'])['hours'].sum().unstack(fill_value=0)
+                if 1 in billable.columns:
+                    billable_hours = billable[1].reset_index()
+                    billable_hours.columns = ['employee_id', 'billable_hours']
+                    utilization = utilization.merge(billable_hours, left_on='id', right_on='employee_id', how='left')
+                    utilization['billable_hours'] = utilization['billable_hours'].fillna(0)
+                else:
+                    utilization['billable_hours'] = 0
+
+                total_hours = month_entries.groupby('employee_id')['hours'].sum().reset_index()
+                total_hours.columns = ['employee_id', 'total_hours']
+                utilization = utilization.merge(total_hours, left_on='id', right_on='employee_id', how='left')
+                utilization['total_hours'] = utilization['total_hours'].fillna(0)
+            else:
+                # No time entries for this month
+                utilization['billable_hours'] = 0
+                utilization['total_hours'] = 0
         else:
             utilization['billable_hours'] = 0
             utilization['total_hours'] = 0
