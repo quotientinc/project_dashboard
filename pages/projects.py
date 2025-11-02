@@ -101,6 +101,7 @@ with tab2:
 
                 project_deets = {
                     "Status": project['status'],
+                    "Project ID": project['id'],
                     "Client": project['client'],
                     "Project Manager": project['project_manager'],
                     "Project Start": project['start_date'],
