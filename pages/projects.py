@@ -509,8 +509,8 @@ with tab3:
                             selected_emp = available_employees[available_employees['name'] == employee_name].iloc[0]
                             logger.info(f"Selected employee: {selected_emp['id']}, {selected_emp['name']}")
 
-                            # Get employee's cost_rate to use as employee_rate
-                            employee_rate = selected_emp.get('cost_rate', None)
+                            # Get employee's cost_rate to use as bill_rate
+                            bill_rate = selected_emp.get('cost_rate', None)
 
                             allocation_data = {
                                 'project_id': project_id,
@@ -519,7 +519,7 @@ with tab3:
                                 'start_date': alloc_start.strftime('%Y-%m-%d'),
                                 'end_date': alloc_end.strftime('%Y-%m-%d'),
                                 'role': role_in_project,
-                                'employee_rate': employee_rate
+                                'bill_rate': bill_rate
                             }
                             logger.info(f"Allocation data: {allocation_data}")
 

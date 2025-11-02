@@ -150,15 +150,15 @@ class DataProcessor:
         # Calculate allocated FTE and get rates from allocations
         if not allocations_df.empty:
             allocated = allocations_df.groupby('employee_id').agg({
-                'employee_rate': 'mean',  # Average rate across allocations
+                'bill_rate': 'mean',  # Average rate across allocations
                 'allocated_fte': 'sum'    # Sum FTE across all allocations
             }).reset_index()
 
             utilization = utilization.merge(allocated, left_on='id', right_on='employee_id', how='left')
-            utilization['employee_rate'] = utilization['employee_rate'].fillna(0)
+            utilization['bill_rate'] = utilization['bill_rate'].fillna(0)
             utilization['allocated_fte'] = utilization['allocated_fte'].fillna(0)
         else:
-            utilization['employee_rate'] = 0
+            utilization['bill_rate'] = 0
             utilization['allocated_fte'] = 0
 
         # FILTER time entries to only the target month
@@ -239,11 +239,11 @@ class DataProcessor:
         )
 
         # Cost calculations
-        # Use cost_rate from employee record (falls back to employee_rate from allocations)
+        # Use cost_rate from employee record (falls back to bill_rate from allocations)
         if 'cost_rate' in utilization.columns:
-            effective_rate = utilization['cost_rate'].fillna(utilization['employee_rate'])
+            effective_rate = utilization['cost_rate'].fillna(utilization['bill_rate'])
         else:
-            effective_rate = utilization['employee_rate']
+            effective_rate = utilization['bill_rate']
 
         utilization['monthly_cost'] = effective_rate * utilization['expected_hours']
         utilization['revenue_generated'] = utilization['billable_hours'] * effective_rate

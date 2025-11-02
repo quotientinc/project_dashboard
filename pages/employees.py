@@ -615,8 +615,8 @@ with tab3:
 
                     if st.form_submit_button("Add to Project"):
                         try:
-                            # Get employee's cost_rate to use as employee_rate
-                            employee_rate = employee.get('cost_rate', None)
+                            # Get employee's cost_rate to use as bill_rate
+                            bill_rate = employee.get('cost_rate', None)
 
                             allocation_data = {
                                 'project_id': selected_proj['id'],
@@ -625,7 +625,7 @@ with tab3:
                                 'start_date': alloc_start.strftime('%Y-%m-%d'),
                                 'end_date': alloc_end.strftime('%Y-%m-%d'),
                                 'role': role_in_project,
-                                'employee_rate': employee_rate
+                                'bill_rate': bill_rate
                             }
 
                             db.add_allocation(allocation_data)

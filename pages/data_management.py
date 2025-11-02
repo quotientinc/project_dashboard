@@ -345,7 +345,7 @@ with tab1:
     **CSV Format Requirements:**
     - **Projects**: name, description, status, start_date, end_date, budget_allocated, budget_used, revenue_projected, revenue_actual, client, project_manager, billable
     - **Employees**: name, role, skills, hire_date, term_date, pay_type, cost_rate, annual_salary, pto_accrual, holidays, billable, overhead_allocation, target_allocation
-    - **Allocations**: project_id, employee_id, allocated_fte, start_date, end_date, role, project_rate, employee_rate, allocation_date, working_days, remaining_days
+    - **Allocations**: project_id, employee_id, allocated_fte, start_date, end_date, role, bill_rate, allocation_date, working_days, remaining_days
     - **Expenses**: project_id, category, description, amount, date, approved
     - **Months**: year, month, month_name, quarter, total_days, working_days, holidays
 

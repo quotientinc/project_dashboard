@@ -15,6 +15,7 @@ class DatabaseManager:
         self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False, isolation_level=None)
         self.create_tables()
         self.migrate_employee_allocation_fields()
+        self.migrate_allocation_bill_rate()
 
     def create_tables(self):
         """Create all necessary tables"""
@@ -76,8 +77,7 @@ class DatabaseManager:
                 start_date TEXT,
                 end_date TEXT,
                 role TEXT,
-                project_rate REAL,
-                employee_rate REAL,
+                bill_rate REAL,
                 allocation_date TEXT,
                 working_days INTEGER,
                 remaining_days INTEGER,
@@ -217,6 +217,44 @@ class DatabaseManager:
 
         self.conn.commit()
 
+    def migrate_allocation_bill_rate(self):
+        """
+        Migrate allocations table from employee_rate to bill_rate.
+        - Adds bill_rate column if it doesn't exist
+        - Copies data from employee_rate to bill_rate if employee_rate exists
+        - This migration is safe to run multiple times.
+        """
+        cursor = self.conn.cursor()
+
+        # Check if columns exist
+        cursor.execute("PRAGMA table_info(allocations)")
+        columns = [col[1] for col in cursor.fetchall()]
+
+        # If employee_rate exists and bill_rate doesn't, this is an old database
+        if 'employee_rate' in columns and 'bill_rate' not in columns:
+            print("Migrating allocations: employee_rate -> bill_rate...")
+
+            # Add bill_rate column
+            cursor.execute('ALTER TABLE allocations ADD COLUMN bill_rate REAL')
+            print("Added 'bill_rate' column to allocations table")
+
+            # Copy data from employee_rate to bill_rate
+            cursor.execute('UPDATE allocations SET bill_rate = employee_rate')
+            rows_updated = cursor.rowcount
+            print(f"Copied employee_rate to bill_rate for {rows_updated} allocations")
+
+            self.conn.commit()
+            print("✅ Migration complete: employee_rate -> bill_rate")
+
+            # Note: We don't drop the old columns yet for safety
+            # They can be dropped in a future cleanup migration
+        elif 'bill_rate' in columns:
+            # Migration already done
+            pass
+        else:
+            # New database - bill_rate column created by create_tables
+            pass
+
     def is_empty(self):
         """Check if database is empty"""
         cursor = self.conn.cursor()
@@ -336,7 +374,7 @@ class DatabaseManager:
         """Get allocations filtered by project or employee"""
         query = """
             SELECT a.*, p.name as project_name, e.name as employee_name,
-                   COALESCE(a.project_rate, a.employee_rate) as effective_rate
+                   a.bill_rate as effective_rate
             FROM allocations a
             JOIN projects p ON a.project_id = p.id
             JOIN employees e ON a.employee_id = e.id
@@ -401,18 +439,11 @@ class DatabaseManager:
         """Get time entries with filters"""
         query = """
             SELECT t.*, e.name as employee_name, p.name as project_name,
-                   COALESCE(
-                       (SELECT a.project_rate
-                        FROM allocations a
-                        WHERE a.project_id = t.project_id
-                        AND a.employee_id = t.employee_id
-                        LIMIT 1),
-                       (SELECT a.employee_rate
-                        FROM allocations a
-                        WHERE a.project_id = t.project_id
-                        AND a.employee_id = t.employee_id
-                        LIMIT 1)
-                   ) as hourly_rate
+                   (SELECT a.bill_rate
+                    FROM allocations a
+                    WHERE a.project_id = t.project_id
+                    AND a.employee_id = t.employee_id
+                    LIMIT 1) as hourly_rate
             FROM time_entries t
             JOIN employees e ON t.employee_id = e.id
             JOIN projects p ON t.project_id = p.id
@@ -460,18 +491,11 @@ class DatabaseManager:
                 t.employee_id,
                 e.name as employee_name,
                 e.role,
-                COALESCE(
-                    (SELECT a.project_rate
-                     FROM allocations a
-                     WHERE a.project_id = t.project_id
-                     AND a.employee_id = t.employee_id
-                     LIMIT 1),
-                    (SELECT a.employee_rate
-                     FROM allocations a
-                     WHERE a.project_id = t.project_id
-                     AND a.employee_id = t.employee_id
-                     LIMIT 1)
-                ) as rate,
+                (SELECT a.bill_rate
+                 FROM allocations a
+                 WHERE a.project_id = t.project_id
+                 AND a.employee_id = t.employee_id
+                 LIMIT 1) as rate,
                 strftime('%Y-%m', t.date) as month,
                 SUM(t.hours) as actual_hours
             FROM time_entries t

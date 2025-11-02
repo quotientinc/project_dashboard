@@ -176,7 +176,7 @@ def resource_allocation_scenarios(db, processor):
 
             # Calculate current average rate and total FTE from allocations
             if not allocations_df.empty:
-                current_avg_rate = allocations_df['employee_rate'].mean()
+                current_avg_rate = allocations_df['bill_rate'].mean()
                 current_total_fte = allocations_df['allocated_fte'].sum()
             else:
                 current_avg_rate = 120.0  # Default fallback
