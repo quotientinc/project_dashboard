@@ -112,8 +112,24 @@ with tab2:
             with col2:
                 # Calculate Revenue Projected vs. Actual
                 budget = project['budget_allocated']
-                # TODO: Fix this once we have amount info
-                total_accrued = 0
+
+                # Get actual accrued revenue from time_entries
+                time_entries = db.get_time_entries(project_id=project_id)
+                if not time_entries.empty:
+                    # Calculate revenue using amount if available, otherwise hours × bill_rate
+                    def calculate_entry_revenue(row):
+                        if pd.notna(row.get('amount')) and row['amount'] != 0:
+                            return row['amount']
+                        elif pd.notna(row.get('bill_rate')):
+                            return row['hours'] * row['bill_rate']
+                        else:
+                            return 0
+
+                    time_entries['revenue'] = time_entries.apply(calculate_entry_revenue, axis=1)
+                    total_accrued = time_entries['revenue'].sum()
+                else:
+                    total_accrued = 0
+
                 budget_remaining = budget - total_accrued
                 st.metric("Budget Allocated", f"${budget:,.0f}")
                 st.metric("Total Accrued to Date", f"${total_accrued:,.0f}")
@@ -210,7 +226,7 @@ with tab2:
 
                     with col2:
                         st.metric(
-                            f"Total Revenue (Smart Combined)",
+                            f"Total Accrued (Smart Combined)",
                             f"${total_combined_revenue:,.0f}",
                             delta=f"${revenue_variance:+,.0f} vs budget",
                             delta_color="inverse" if revenue_variance > 0 else "normal",
@@ -414,6 +430,21 @@ with tab2:
                 if not allocations_df.empty:
                     st.markdown("#### Team Members")
 
+                    # Get time entries for this project to show actual hours
+                    time_entries = db.get_time_entries(project_id=project_id)
+
+                    # Process time entries to get monthly hours by employee
+                    actual_hours_by_employee = {}
+                    if not time_entries.empty:
+                        time_entries['date'] = pd.to_datetime(time_entries['date'])
+                        time_entries['month'] = time_entries['date'].dt.strftime('%Y-%m')
+
+                        # Group by employee and month
+                        for emp_id in time_entries['employee_id'].unique():
+                            emp_time = time_entries[time_entries['employee_id'] == emp_id]
+                            monthly_hours = emp_time.groupby('month')['hours'].sum().to_dict()
+                            actual_hours_by_employee[emp_id] = monthly_hours
+
                     # Group by employee
                     for employee_name in allocations_df['employee_name'].unique():
                         emp_allocs = allocations_df[allocations_df['employee_name'] == employee_name]
@@ -424,17 +455,45 @@ with tab2:
                         role = emp_allocs['role'].iloc[0] if pd.notna(emp_allocs['role'].iloc[0]) else 'N/A'
                         st.write(f"*Role: {role}*")
 
+                        # Get employee_id for this employee
+                        employee_id = emp_allocs['employee_id'].iloc[0]
+
                         # Check if we have allocation_date for monthly breakdown
                         if 'allocation_date' in emp_allocs.columns and emp_allocs['allocation_date'].notna().any():
-                            # Create monthly allocation display
+                            # Create monthly allocation display with actual hours
                             monthly_data = []
                             for _, alloc in emp_allocs.iterrows():
                                 if pd.notna(alloc.get('allocation_date')):
                                     month = pd.to_datetime(alloc['allocation_date']).strftime('%Y-%m')
                                     fte = alloc.get('allocated_fte', 0)
+
+                                    # Get working days from months table
+                                    alloc_date = pd.to_datetime(alloc['allocation_date'])
+                                    months_df = db.get_months()
+                                    month_info = months_df[
+                                        (months_df['year'] == alloc_date.year) &
+                                        (months_df['month'] == alloc_date.month)
+                                    ]
+
+                                    if not month_info.empty:
+                                        working_days = month_info['working_days'].iloc[0]
+                                        holidays = month_info['holidays'].iloc[0]
+                                        allocated_hours = (working_days - holidays) * fte * 8
+                                    else:
+                                        # Fallback to 21 working days
+                                        allocated_hours = 21 * fte * 8
+
+                                    # Get actual hours for this month
+                                    actual_hours = 0
+                                    if employee_id in actual_hours_by_employee:
+                                        actual_hours = actual_hours_by_employee[employee_id].get(month, 0)
+
                                     monthly_data.append({
                                         'Month': month,
-                                        'FTE': f"{fte * 100:.0f}%"
+                                        'FTE': f"{fte * 100:.0f}%",
+                                        'Allocated Hours': f"{allocated_hours:,.0f}",
+                                        'Actual Hours': f"{actual_hours:,.0f}" if actual_hours > 0 else "-",
+                                        'Variance': f"{actual_hours - allocated_hours:+,.0f}" if actual_hours > 0 else "-"
                                     })
 
                             if monthly_data:
@@ -447,32 +506,108 @@ with tab2:
 
                         st.markdown("---")
 
-                    # Team allocation chart - show by employee with monthly breakdown if available
+                    # Team allocation chart - show allocated vs actual hours
                     if 'allocation_date' in allocations_df.columns and allocations_df['allocation_date'].notna().any():
-                        # Create pivot table for stacked bar chart by month
+                        st.markdown("#### Allocated vs Actual Hours by Employee")
+
+                        # Prepare data for comparison chart
                         chart_df = allocations_df.copy()
                         chart_df['month'] = pd.to_datetime(chart_df['allocation_date']).dt.strftime('%Y-%m')
-                        chart_df['fte_pct'] = chart_df['allocated_fte'] * 100
 
-                        fig = go.Figure()
-                        for employee in chart_df['employee_name'].unique():
-                            emp_data = chart_df[chart_df['employee_name'] == employee]
-                            fig.add_trace(go.Scatter(
-                                name=employee,
-                                x=emp_data['month'],
-                                y=emp_data['fte_pct'],
-                                mode='lines+markers',
-                                line=dict(width=2),
-                                marker=dict(size=8)
-                            ))
+                        # Calculate allocated hours for each row
+                        months_df = db.get_months()
+                        allocated_hours_list = []
 
-                        fig.update_layout(
-                            title="Team Allocation by Month (% of Full-Time)",
-                            xaxis_title="Month",
-                            yaxis_title="Allocation %",
-                            height=400
-                        )
-                        st.plotly_chart(fig, width='stretch')
+                        for _, row in chart_df.iterrows():
+                            alloc_date = pd.to_datetime(row['allocation_date'])
+                            month_info = months_df[
+                                (months_df['year'] == alloc_date.year) &
+                                (months_df['month'] == alloc_date.month)
+                            ]
+
+                            if not month_info.empty:
+                                working_days = month_info['working_days'].iloc[0]
+                                holidays = month_info['holidays'].iloc[0]
+                                allocated_hours = (working_days - holidays) * row['allocated_fte'] * 8
+                            else:
+                                allocated_hours = 21 * row['allocated_fte'] * 8
+
+                            allocated_hours_list.append(allocated_hours)
+
+                        chart_df['allocated_hours'] = allocated_hours_list
+
+                        # Create comparison chart with two columns
+                        col1, col2 = st.columns(2)
+
+                        with col1:
+                            # Bar chart: Allocated vs Actual by Employee-Month
+                            fig = go.Figure()
+
+                            # Get all unique months
+                            all_months = sorted(chart_df['month'].unique())
+
+                            for employee in chart_df['employee_name'].unique():
+                                emp_chart_data = chart_df[chart_df['employee_name'] == employee]
+                                employee_id = emp_chart_data['employee_id'].iloc[0]
+
+                                # Get allocated hours
+                                allocated_by_month = dict(zip(emp_chart_data['month'], emp_chart_data['allocated_hours']))
+
+                                # Get actual hours
+                                actual_by_month = {}
+                                if employee_id in actual_hours_by_employee:
+                                    actual_by_month = actual_hours_by_employee[employee_id]
+
+                                # Create trace for allocated hours
+                                fig.add_trace(go.Bar(
+                                    name=f"{employee} - Allocated",
+                                    x=list(allocated_by_month.keys()),
+                                    y=list(allocated_by_month.values()),
+                                    marker=dict(pattern=dict(shape="/")),
+                                    legendgroup=employee,
+                                    showlegend=True
+                                ))
+
+                                # Create trace for actual hours
+                                actual_hours_values = [actual_by_month.get(m, 0) for m in allocated_by_month.keys()]
+                                fig.add_trace(go.Bar(
+                                    name=f"{employee} - Actual",
+                                    x=list(allocated_by_month.keys()),
+                                    y=actual_hours_values,
+                                    legendgroup=employee,
+                                    showlegend=True
+                                ))
+
+                            fig.update_layout(
+                                title="Allocated vs Actual Hours by Month",
+                                xaxis_title="Month",
+                                yaxis_title="Hours",
+                                barmode='group',
+                                height=400
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+
+                        with col2:
+                            # Line chart: Allocation % over time
+                            fig2 = go.Figure()
+                            for employee in chart_df['employee_name'].unique():
+                                emp_data = chart_df[chart_df['employee_name'] == employee]
+                                fig2.add_trace(go.Scatter(
+                                    name=employee,
+                                    x=emp_data['month'],
+                                    y=emp_data['allocated_fte'] * 100,
+                                    mode='lines+markers',
+                                    line=dict(width=2),
+                                    marker=dict(size=8)
+                                ))
+
+                            fig2.update_layout(
+                                title="Team Allocation by Month (% FTE)",
+                                xaxis_title="Month",
+                                yaxis_title="Allocation %",
+                                height=400
+                            )
+                            st.plotly_chart(fig2, use_container_width=True)
                     else:
                         # Fallback to simple bar chart
                         fig = go.Figure(data=[
