@@ -238,7 +238,40 @@ class DataProcessor:
             0
         )
 
-        # Cost calculations
+        # Revenue calculations - use actual time entry data when available
+        if not time_entries_df.empty and not month_entries.empty:
+            # Check if amount column exists in time_entries
+            if 'amount' in month_entries.columns:
+                # Calculate actual revenue from time entries (use amount when available)
+                def calculate_row_revenue(row):
+                    if pd.notna(row.get('amount')) and row['amount'] != 0:
+                        return row['amount']
+                    elif pd.notna(row.get('bill_rate')):
+                        return row['hours'] * row['bill_rate']
+                    else:
+                        return 0
+
+                month_entries['revenue'] = month_entries.apply(calculate_row_revenue, axis=1)
+                actual_revenue = month_entries.groupby('employee_id')['revenue'].sum().reset_index()
+                actual_revenue.columns = ['employee_id', 'actual_revenue']
+                utilization = utilization.merge(actual_revenue, left_on='id', right_on='employee_id', how='left')
+                utilization['revenue_generated'] = utilization['actual_revenue'].fillna(0)
+            else:
+                # Fallback to calculated revenue using bill_rate from allocations
+                if 'cost_rate' in utilization.columns:
+                    effective_rate = utilization['cost_rate'].fillna(utilization['bill_rate'])
+                else:
+                    effective_rate = utilization['bill_rate']
+                utilization['revenue_generated'] = utilization['billable_hours'] * effective_rate
+        else:
+            # No time entries - use calculated revenue
+            if 'cost_rate' in utilization.columns:
+                effective_rate = utilization['cost_rate'].fillna(utilization['bill_rate'])
+            else:
+                effective_rate = utilization['bill_rate']
+            utilization['revenue_generated'] = utilization['billable_hours'] * effective_rate
+
+        # Cost calculations (keep as-is for expected costs)
         # Use cost_rate from employee record (falls back to bill_rate from allocations)
         if 'cost_rate' in utilization.columns:
             effective_rate = utilization['cost_rate'].fillna(utilization['bill_rate'])
@@ -246,7 +279,6 @@ class DataProcessor:
             effective_rate = utilization['bill_rate']
 
         utilization['monthly_cost'] = effective_rate * utilization['expected_hours']
-        utilization['revenue_generated'] = utilization['billable_hours'] * effective_rate
 
         return utilization
 
@@ -354,15 +386,34 @@ class DataProcessor:
         if not allocations_df.empty and not time_entries_df.empty:
             project_time = time_entries_df[time_entries_df['project_id'] == project_id]
             if not project_time.empty:
-                labor_cost = (project_time['hours'] * project_time['hourly_rate']).sum()
-                costs['labor_cost'] = labor_cost
-                
-                # Breakdown by employee
-                # Calculate cost per row first, then group and sum
+                # Use amount if available, otherwise calculate from bill_rate
                 project_time_copy = project_time.copy()
-                project_time_copy['cost'] = project_time_copy['hours'] * project_time_copy['hourly_rate']
-                employee_costs = project_time_copy.groupby('employee_name')['cost'].sum().to_dict()
-                costs['cost_breakdown']['by_employee'] = employee_costs
+
+                if 'amount' in project_time.columns and project_time['amount'].notna().any():
+                    # Calculate cost: use amount when available, fallback to hours × bill_rate
+                    def calculate_cost(row):
+                        if pd.notna(row.get('amount')) and row['amount'] != 0:
+                            return row['amount']
+                        elif pd.notna(row.get('bill_rate')):
+                            return row['hours'] * row['bill_rate']
+                        else:
+                            # Fallback to hourly_rate if it exists (for backward compatibility)
+                            return row['hours'] * row.get('hourly_rate', 0)
+
+                    project_time_copy['cost'] = project_time_copy.apply(calculate_cost, axis=1)
+                elif 'bill_rate' in project_time.columns:
+                    project_time_copy['cost'] = project_time_copy['hours'] * project_time_copy['bill_rate']
+                else:
+                    # Fallback to hourly_rate if it exists (for backward compatibility)
+                    project_time_copy['cost'] = project_time_copy['hours'] * project_time_copy.get('hourly_rate', 0)
+
+                labor_cost = project_time_copy['cost'].sum()
+                costs['labor_cost'] = labor_cost
+
+                # Breakdown by employee
+                if 'employee_name' in project_time_copy.columns:
+                    employee_costs = project_time_copy.groupby('employee_name')['cost'].sum().to_dict()
+                    costs['cost_breakdown']['by_employee'] = employee_costs
         
         # Expense costs
         if not expenses_df.empty:

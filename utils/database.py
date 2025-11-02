@@ -557,13 +557,10 @@ class DatabaseManager:
                 t.employee_id,
                 e.name as employee_name,
                 e.role,
-                (SELECT a.bill_rate
-                 FROM allocations a
-                 WHERE a.project_id = t.project_id
-                 AND a.employee_id = t.employee_id
-                 LIMIT 1) as rate,
+                t.bill_rate as rate,
                 strftime('%Y-%m', t.date) as month,
-                SUM(t.hours) as actual_hours
+                SUM(t.hours) as actual_hours,
+                SUM(t.amount) as actual_revenue
             FROM time_entries t
             JOIN employees e ON t.employee_id = e.id
             WHERE t.project_id = ?
@@ -578,7 +575,7 @@ class DatabaseManager:
             query += " AND t.date <= ?"
             params.append(end_date)
 
-        query += " GROUP BY t.employee_id, e.name, e.role, rate, month ORDER BY e.name, month"
+        query += " GROUP BY t.employee_id, e.name, e.role, month ORDER BY e.name, month"
 
         return pd.read_sql_query(query, self.conn, params=params)
 

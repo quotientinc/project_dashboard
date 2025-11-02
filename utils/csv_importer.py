@@ -170,16 +170,16 @@ class TimesheetCSVImporter:
 
             # Extract bill_rate and amount from CSV (columns have spaces in names)
             bill_rate = None
-            if pd.notna(row[' Billing Rate ']):
+            if pd.notna(row['Billing Rate']):
                 try:
-                    bill_rate = float(row[' Billing Rate '])
+                    bill_rate = float(row['Billing Rate'])
                 except (ValueError, TypeError):
                     bill_rate = None
 
             amount = None
-            if pd.notna(row[' Amount ']):
+            if pd.notna(row['Amount']):
                 try:
-                    amount = float(row[' Amount '])
+                    amount = float(row['Amount'])
                 except (ValueError, TypeError):
                     amount = None
 
