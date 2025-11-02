@@ -96,15 +96,23 @@ with tab1:
                         progress_bar.progress(10, text="Migrating database schema...")
                         db.migrate_schema_for_csv_import()
 
-                        # Step 2: Import projects
+                        # Step 2: Delete existing time entries and expenses
+                        # This ensures we don't accumulate duplicate data on re-import
+                        progress_bar.progress(20, text="Clearing existing time entries and expenses...")
+                        cursor = db.conn.cursor()
+                        cursor.execute("DELETE FROM time_entries")
+                        cursor.execute("DELETE FROM expenses")
+                        db.conn.commit()
+
+                        # Step 3: Import projects
                         progress_bar.progress(30, text=f"Importing {len(projects)} projects...")
                         db.bulk_insert_projects(projects)
 
-                        # Step 3: Import employees
+                        # Step 4: Import employees
                         progress_bar.progress(50, text=f"Importing {len(employees)} employees...")
                         db.bulk_insert_employees(employees)
 
-                        # Step 4: Import time entries
+                        # Step 5: Import time entries
                         progress_bar.progress(70, text=f"Importing {len(time_entries)} time entries...")
                         db.bulk_insert_time_entries(time_entries)
 
