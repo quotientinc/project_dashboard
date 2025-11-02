@@ -929,6 +929,8 @@ class DataProcessor:
                 t.project_id,
                 t.date,
                 t.hours,
+                t.amount,
+                t.bill_rate as time_entry_bill_rate,
                 COALESCE(
                     (SELECT a.bill_rate
                      FROM allocations a
@@ -936,7 +938,7 @@ class DataProcessor:
                      AND a.project_id = t.project_id
                      LIMIT 1),
                     0
-                ) as bill_rate
+                ) as allocation_bill_rate
             FROM time_entries t
             WHERE t.date >= ?
                 AND t.date <= ?
@@ -963,8 +965,16 @@ class DataProcessor:
         time_entries_df['month'] = time_entries_df['date'].dt.month
         time_entries_df['month_name'] = time_entries_df['date'].dt.strftime('%B %Y')
 
-        # Calculate revenue
-        time_entries_df['revenue'] = time_entries_df['hours'] * time_entries_df['bill_rate']
+        # Calculate revenue: Use amount if available, otherwise calculate from hours × bill_rate
+        # Priority: 1) time_entries.amount, 2) hours × allocation.bill_rate
+        def calculate_revenue(row):
+            if pd.notna(row['amount']) and row['amount'] != 0:
+                return row['amount']
+            else:
+                # Fallback to calculated revenue using allocation bill_rate
+                return row['hours'] * row['allocation_bill_rate']
+
+        time_entries_df['revenue'] = time_entries_df.apply(calculate_revenue, axis=1)
 
         # Determine grouping key based on filter type
         if filter_type == 'employee':

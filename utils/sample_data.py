@@ -336,8 +336,7 @@ def generate_sample_data(db_manager):
                     'date': month_date,
                     'hours': emp_data['actual_hours'][month_idx],
                     'description': f'NIA web development work - {month_date}',
-                    'billable': 1,
-                    'is_projected': 0
+                    'billable': 1
                 }
                 db_manager.add_time_entry(time_entry)
             # Create projected hours for future months (April 2025 onwards)
@@ -348,8 +347,7 @@ def generate_sample_data(db_manager):
                     'date': month_date,
                     'hours': emp_data['actual_hours'][month_idx],
                     'description': f'NIA web development work (projected) - {month_date}',
-                    'billable': 1,
-                    'is_projected': 1
+                    'billable': 1
                 }
                 db_manager.add_time_entry(time_entry)
 

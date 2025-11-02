@@ -16,6 +16,7 @@ class DatabaseManager:
         self.create_tables()
         self.migrate_employee_allocation_fields()
         self.migrate_allocation_bill_rate()
+        self.migrate_time_entries_bill_rate()
 
     def create_tables(self):
         """Create all necessary tables"""
@@ -98,7 +99,8 @@ class DatabaseManager:
                 hours REAL,
                 description TEXT,
                 billable INTEGER,
-                is_projected INTEGER DEFAULT 0,
+                bill_rate REAL,
+                amount REAL,
                 created_at TEXT,
                 FOREIGN KEY (employee_id) REFERENCES employees (id),
                 FOREIGN KEY (project_id) REFERENCES projects (id)
@@ -254,6 +256,70 @@ class DatabaseManager:
         else:
             # New database - bill_rate column created by create_tables
             pass
+
+    def migrate_time_entries_bill_rate(self):
+        """
+        Migrate time_entries table to add bill_rate and amount columns, remove is_projected.
+        - Adds bill_rate REAL column if it doesn't exist
+        - Adds amount REAL column if it doesn't exist
+        - Removes is_projected column if it exists
+        This migration is safe to run multiple times.
+        """
+        cursor = self.conn.cursor()
+
+        # Check if columns exist
+        cursor.execute("PRAGMA table_info(time_entries)")
+        columns = [col[1] for col in cursor.fetchall()]
+
+        # Add bill_rate column
+        if 'bill_rate' not in columns:
+            cursor.execute('ALTER TABLE time_entries ADD COLUMN bill_rate REAL')
+            print("Added 'bill_rate' column to time_entries table")
+
+        # Add amount column
+        if 'amount' not in columns:
+            cursor.execute('ALTER TABLE time_entries ADD COLUMN amount REAL')
+            print("Added 'amount' column to time_entries table")
+
+        # Remove is_projected column if it exists
+        # SQLite doesn't support DROP COLUMN directly, so we need to recreate the table
+        if 'is_projected' in columns:
+            print("Removing 'is_projected' column from time_entries table...")
+
+            # Get all data
+            cursor.execute("SELECT id, employee_id, project_id, date, hours, description, billable, bill_rate, amount, created_at FROM time_entries")
+            data = cursor.fetchall()
+
+            # Drop and recreate table
+            cursor.execute("DROP TABLE time_entries")
+            cursor.execute('''
+                CREATE TABLE time_entries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    employee_id INTEGER,
+                    project_id TEXT,
+                    date TEXT,
+                    hours REAL,
+                    description TEXT,
+                    billable INTEGER,
+                    bill_rate REAL,
+                    amount REAL,
+                    created_at TEXT,
+                    FOREIGN KEY (employee_id) REFERENCES employees (id),
+                    FOREIGN KEY (project_id) REFERENCES projects (id)
+                )
+            ''')
+
+            # Restore data
+            if data:
+                cursor.executemany(
+                    "INSERT INTO time_entries (id, employee_id, project_id, date, hours, description, billable, bill_rate, amount, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    data
+                )
+                print(f"Restored {len(data)} time entries")
+
+            print("✅ Removed 'is_projected' column from time_entries table")
+
+        self.conn.commit()
 
     def is_empty(self):
         """Check if database is empty"""

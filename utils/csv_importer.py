@@ -168,6 +168,21 @@ class TimesheetCSVImporter:
                 not project_id[0].isdigit()):
                 is_billable = 0
 
+            # Extract bill_rate and amount from CSV (columns have spaces in names)
+            bill_rate = None
+            if pd.notna(row[' Billing Rate ']):
+                try:
+                    bill_rate = float(row[' Billing Rate '])
+                except (ValueError, TypeError):
+                    bill_rate = None
+
+            amount = None
+            if pd.notna(row[' Amount ']):
+                try:
+                    amount = float(row[' Amount '])
+                except (ValueError, TypeError):
+                    amount = None
+
             time_entry = {
                 'employee_id': int(row['Employee ID']),
                 'project_id': row['Project ID'],
@@ -175,7 +190,8 @@ class TimesheetCSVImporter:
                 'hours': float(row['Entered Hours']),
                 'description': row['Comments'] if pd.notna(row['Comments']) else None,
                 'billable': is_billable,
-                'is_projected': 0,
+                'bill_rate': bill_rate,
+                'amount': amount,
                 'created_at': now
             }
             self.time_entries.append(time_entry)
