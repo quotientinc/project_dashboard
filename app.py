@@ -88,6 +88,11 @@ employees_page = st.Page(
     title="Employees",
     icon="👥"
 )
+performance_data_page = st.Page(
+    "pages/performance_data.py",
+    title="Performance Data",
+    icon="📊"
+)
 financial_page = st.Page(
     "pages/financial.py",
     title="Financial Analysis",
@@ -119,6 +124,7 @@ pg = st.navigation([
     overview_page,
     projects_page,
     employees_page,
+    performance_data_page,
     financial_page,
     reports_page,
     whatif_page,
