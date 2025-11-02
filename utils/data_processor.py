@@ -1104,12 +1104,13 @@ class DataProcessor:
         allocations_df['month'] = allocations_df['allocation_date'].dt.month
         allocations_df['month_name'] = allocations_df['allocation_date'].dt.strftime('%B %Y')
 
+        # TODO: This might have been a heavy-handed fix
         # Filter to only include current and future months (projected = forward-looking)
         # This prevents double-counting past months that already have actuals
-        from datetime import datetime
-        current_date = datetime.now()
-        first_of_current_month = pd.Timestamp(current_date.year, current_date.month, 1)
-        allocations_df = allocations_df[allocations_df['allocation_date'] >= first_of_current_month]
+        ##from datetime import datetime
+        ##current_date = datetime.now()
+        ##first_of_current_month = pd.Timestamp(current_date.year, current_date.month, 1)
+        ##allocations_df = allocations_df[allocations_df['allocation_date'] >= first_of_current_month]
 
         if allocations_df.empty:
             return {}
