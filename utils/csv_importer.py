@@ -94,10 +94,7 @@ class TimesheetCSVImporter:
                 'status': 'Active',
                 'start_date': None,
                 'end_date': None,
-                'budget_allocated': None,
-                'budget_used': None,
-                'revenue_projected': None,
-                'revenue_actual': None,
+                'contract_value': None,
                 'client': None,
                 'project_manager': None,
                 'created_at': now,
@@ -543,8 +540,7 @@ class ProjectReferenceCSVImporter:
             end_date = self._parse_date(row.get('POP End Date'))
 
             # Parse currency values
-            budget_allocated = self._parse_currency(row.get('Total\nContract Value\n(All Mods)'))
-            revenue_projected = self._parse_currency(row.get('Total\nContract Funding\n(All Mods)'))
+            contract_value = self._parse_currency(row.get('Total\nContract Value\n(All Mods)'))
 
             # Default all projects to billable
             billable = 1
@@ -573,8 +569,7 @@ class ProjectReferenceCSVImporter:
                 'start_date': start_date,
                 'end_date': end_date,
                 'status': status,
-                'budget_allocated': budget_allocated,
-                'revenue_projected': revenue_projected,
+                'contract_value': contract_value,
                 'billable': billable,
                 'updated_at': now
             }
@@ -587,20 +582,16 @@ class ProjectReferenceCSVImporter:
         if self.df is None:
             return {}
 
-        with_budget = sum(1 for p in self.projects if p['budget_allocated'])
-        with_funding = sum(1 for p in self.projects if p['revenue_projected'])
+        with_budget = sum(1 for p in self.projects if p['contract_value'])
         with_dates = sum(1 for p in self.projects if p['start_date'] and p['end_date'])
 
-        total_budget = sum(p['budget_allocated'] for p in self.projects if p['budget_allocated'])
-        total_funding = sum(p['revenue_projected'] for p in self.projects if p['revenue_projected'])
+        total_budget = sum(p['contract_value'] for p in self.projects if p['contract_value'])
 
         return {
             'total_projects': len(self.projects),
             'with_budget': with_budget,
-            'with_funding': with_funding,
             'with_dates': with_dates,
-            'total_budget': total_budget,
-            'total_funding': total_funding
+            'total_budget': total_budget
         }
 
     def import_all(self):

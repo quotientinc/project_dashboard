@@ -24,7 +24,7 @@ def project_cost_scenarios(db, processor):
         st.markdown("##### Current Baseline")
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Budget Allocated", f"${project['budget_allocated']:,.0f}")
+            st.metric("Budget Allocated", f"${project['contract_value']:,.0f}")
         with col2:
             st.metric("Budget Used", f"${project['budget_used']:,.0f}")
         with col3:

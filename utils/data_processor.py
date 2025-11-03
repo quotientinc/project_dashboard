@@ -50,30 +50,29 @@ class DataProcessor:
         
         # Budget health
         health_metrics['budget_health'] = (
-            (health_metrics['budget_allocated'] - health_metrics['budget_used']) / 
-            health_metrics['budget_allocated'] * 100
+            (health_metrics['contract_value'] - health_metrics['budget_used']) / 
+            health_metrics['contract_value'] * 100
         ).fillna(0)
         
         # Schedule health (days remaining vs total days)
         health_metrics['start_date'] = pd.to_datetime(health_metrics['start_date'])
         health_metrics['end_date'] = pd.to_datetime(health_metrics['end_date'])
         today = pd.Timestamp.now()
-        
+
         total_days = (health_metrics['end_date'] - health_metrics['start_date']).dt.days
         days_elapsed = (today - health_metrics['start_date']).dt.days
         health_metrics['schedule_progress'] = (days_elapsed / total_days * 100).clip(0, 100)
-        
-        # Revenue vs Cost
+
+        # Margin calculation: remaining budget as percentage of contract value
         health_metrics['profit_margin'] = (
-            (health_metrics['revenue_actual'] - health_metrics['budget_used']) / 
-            health_metrics['revenue_actual'] * 100
+            (health_metrics['contract_value'] - health_metrics['budget_used']) /
+            health_metrics['contract_value'] * 100
         ).fillna(0)
-        
-        # Overall health score
+
+        # Overall health score (weighted average of budget health and schedule progress)
         health_metrics['health_score'] = (
-            health_metrics['budget_health'].clip(0, 100) * 0.3 +
-            (100 - abs(health_metrics['schedule_progress'] - 50)) * 0.3 +
-            health_metrics['profit_margin'].clip(0, 100) * 0.4
+            health_metrics['budget_health'].clip(0, 100) * 0.5 +
+            (100 - abs(health_metrics['schedule_progress'] - 50)) * 0.5
         ).round(1)
         
         return health_metrics
@@ -464,7 +463,7 @@ class DataProcessor:
             avg_daily_hours = daily_hours.mean()
             
             # Calculate remaining work (simplified)
-            total_budget_hours = project['budget_allocated'] / 150 if project['budget_allocated'] else 0
+            total_budget_hours = project['contract_value'] / 150 if project['contract_value'] else 0
             hours_used = project_time['hours'].sum()
             remaining_hours = max(0, total_budget_hours - hours_used)
             
@@ -837,7 +836,7 @@ class DataProcessor:
         if not hbm_df.empty:
             # Calculate project totals
             actual_cost = hbm_df['total_cost'].sum()
-            current_funding = project.get('budget_allocated', 0)
+            current_funding = project.get('contract_value', 0)
             balance = current_funding - actual_cost
 
             return hbm_df, {

@@ -49,8 +49,8 @@ def generate_executive_summary(db, processor):
 
         # Project summary
         st.markdown("#### Project Summary")
-        summary_df = projects_df[['name', 'status', 'budget_allocated', 'budget_used', 'revenue_actual']].copy()
-        summary_df['Budget Variance'] = summary_df['budget_allocated'] - summary_df['budget_used']
+        summary_df = projects_df[['name', 'status', 'contract_value', 'budget_used', 'revenue_actual']].copy()
+        summary_df['Budget Variance'] = summary_df['contract_value'] - summary_df['budget_used']
         st.dataframe(summary_df, width='stretch', hide_index=True)
 
         # Download option
@@ -86,7 +86,7 @@ def generate_project_status_report(db, processor):
             col1, col2, col3 = st.columns(3)
 
             with col1:
-                budget_progress = (project['budget_used'] / project['budget_allocated'] * 100) if project['budget_allocated'] > 0 else 0
+                budget_progress = (project['budget_used'] / project['contract_value'] * 100) if project['contract_value'] > 0 else 0
                 st.metric("Budget Progress", f"{budget_progress:.1f}%")
                 st.progress(min(budget_progress / 100, 1.0))
 

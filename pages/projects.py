@@ -12,17 +12,17 @@ db = st.session_state.db_manager
 processor = st.session_state.data_processor
 
 # Helper functions for safe NULL handling
-def safe_budget_percentage(budget_used, budget_allocated):
+def safe_budget_percentage(budget_used, contract_value):
     """
     Safely calculate budget percentage with NULL/NaN handling.
     Returns tuple: (percentage: float or None, display_string: str)
     """
-    if pd.isna(budget_allocated) or budget_allocated == 0:
+    if pd.isna(contract_value) or contract_value == 0:
         return None, 'N/A'
     if pd.isna(budget_used):
         return None, 'N/A'
 
-    pct = (budget_used / budget_allocated) * 100
+    pct = (budget_used / contract_value) * 100
     return pct, f"{pct:.1f}%"
 
 def safe_currency_display(value):
@@ -61,13 +61,13 @@ with tab1:
             # Calculate over budget count with NULL handling
             over_budget_count = 0
             for _, proj in projects_df.iterrows():
-                pct, _ = safe_budget_percentage(proj['budget_used'], proj['budget_allocated'])
+                pct, _ = safe_budget_percentage(proj['budget_used'], proj['contract_value'])
                 if pct is not None and pct > 100:
                     over_budget_count += 1
 
             st.metric("Over Budget", over_budget_count, delta_color="inverse")
         with col6:
-            total_budget = projects_df['budget_allocated'].sum()
+            total_budget = projects_df['contract_value'].sum()
             st.metric("Total Budget", f"${total_budget/1e6:.1f}M")
 
         st.markdown("---")
@@ -99,11 +99,11 @@ with tab1:
 
         with col3:
             # Add data quality indicator
-            projects_with_budget = len(projects_df[pd.notna(projects_df['budget_allocated'])])
+            projects_with_budget = len(projects_df[pd.notna(projects_df['contract_value'])])
             st.metric(
                 "With Budget Data",
                 f"{projects_with_budget}/{len(projects_df)}",
-                help="Number of projects with budget_allocated data"
+                help="Number of projects with contract_value data"
             )
 
         # Optional search
@@ -139,7 +139,7 @@ with tab1:
         elif sort_by == "Budget % Used (High to Low)":
             # Calculate percentage, keeping NaN for missing data
             filtered_df['budget_pct'] = filtered_df.apply(
-                lambda row: safe_budget_percentage(row['budget_used'], row['budget_allocated'])[0],
+                lambda row: safe_budget_percentage(row['budget_used'], row['contract_value'])[0],
                 axis=1
             )
             # Sort with NaN last
@@ -147,7 +147,7 @@ with tab1:
         elif sort_by == "Budget % Used (Low to High)":
             # Calculate percentage, keeping NaN for missing data
             filtered_df['budget_pct'] = filtered_df.apply(
-                lambda row: safe_budget_percentage(row['budget_used'], row['budget_allocated'])[0],
+                lambda row: safe_budget_percentage(row['budget_used'], row['contract_value'])[0],
                 axis=1
             )
             # Sort with NaN last
@@ -186,12 +186,12 @@ with tab1:
             )
 
             # Budget - use safe helpers
-            display_df['Budget Allocated'] = filtered_df['budget_allocated'].apply(safe_currency_display)
+            display_df['Budget Allocated'] = filtered_df['contract_value'].apply(safe_currency_display)
             display_df['Budget Used'] = filtered_df['budget_used'].apply(safe_currency_display)
 
             # Budget percentage - use safe calculation
             budget_pcts = filtered_df.apply(
-                lambda row: safe_budget_percentage(row['budget_used'], row['budget_allocated'])[1],
+                lambda row: safe_budget_percentage(row['budget_used'], row['contract_value'])[1],
                 axis=1
             )
             display_df['Budget %'] = budget_pcts
@@ -300,7 +300,7 @@ with tab2:
 
             with col2:
                 # Get budget values (budget_used is now calculated automatically by get_projects())
-                budget = project['budget_allocated'] if pd.notna(project['budget_allocated']) else 0
+                budget = project['contract_value'] if pd.notna(project['contract_value']) else 0
                 total_accrued = project['budget_used'] if pd.notna(project['budget_used']) else 0
 
                 budget_remaining = budget - total_accrued
@@ -366,7 +366,7 @@ with tab2:
                     total_actual_revenue = sum(m['revenue'] for m in actuals_monthly.values())
 
                     # Get budget from project
-                    budget_revenue = project['budget_allocated'] if pd.notna(project['budget_allocated']) else 0
+                    budget_revenue = project['contract_value'] if pd.notna(project['contract_value']) else 0
 
                     # Calculate burn percentages
                     revenue_burn_pct = (total_combined_revenue / budget_revenue * 100) if budget_revenue > 0 else 0
@@ -909,9 +909,6 @@ with tab3:
             key="edit_project_select"
         )
 
-        # Fill 0 for revenue_actual
-        projects_df['revenue_actual'] = projects_df['revenue_actual'].fillna(0)
-
         if selected_project_name:
             project = projects_df[projects_df['name'] == selected_project_name].iloc[0]
             project_id = project['id']
@@ -933,16 +930,7 @@ with tab3:
                     status = st.selectbox("Status", status_options_edit, index=current_status_index)
                     start_date = st.date_input("Start Date", value=pd.to_datetime(project['start_date']))
                     end_date = st.date_input("End Date", value=pd.to_datetime(project['end_date']))
-                    budget_allocated = st.number_input("Budget Allocated", min_value=0.0, step=1000.0, value=float(project['budget_allocated']))
-
-                col1, col2 = st.columns(2)
-
-                with col1:
-                    revenue_projected = st.number_input("Revenue Projected", min_value=0.0, step=1000.0, value=float(project['revenue_projected']))
-                    budget_used = st.number_input("Budget Used", min_value=0.0, step=1000.0, value=float(project['budget_used']))
-
-                with col2:
-                    revenue_actual = st.number_input("Revenue Actual", min_value=0.0, step=1000.0, value=float(project['revenue_actual']))
+                    contract_value = st.number_input("Contract Value", min_value=0.0, step=1000.0, value=float(project['contract_value']), help="Total contract value - what the customer pays")
 
                 billable = st.checkbox("Billable Project", value=bool(project.get('billable', 0)), help="Check if this is a billable client project")
 
@@ -958,10 +946,7 @@ with tab3:
                             'status': status,
                             'start_date': start_date.strftime('%Y-%m-%d'),
                             'end_date': end_date.strftime('%Y-%m-%d'),
-                            'budget_allocated': budget_allocated,
-                            'budget_used': budget_used,
-                            'revenue_projected': revenue_projected,
-                            'revenue_actual': revenue_actual,
+                            'contract_value': contract_value,
                             'billable': 1 if billable else 0
                         }
 
@@ -1320,76 +1305,25 @@ with tab4:
         if selected_projects:
             comparison_df = projects_df[projects_df['name'].isin(selected_projects)].copy()
 
-            # Comparison charts
-            col1, col2 = st.columns(2)
-
-            with col1:
-                # Budget comparison
-                fig = go.Figure()
-                fig.add_trace(go.Bar(
-                    name='Allocated',
-                    x=comparison_df['name'],
-                    y=comparison_df['budget_allocated']
-                ))
-                fig.add_trace(go.Bar(
-                    name='Used',
-                    x=comparison_df['name'],
-                    y=comparison_df['budget_used']
-                ))
-                fig.update_layout(
-                    title="Budget Comparison",
-                    barmode='group',
-                    height=400
-                )
-                st.plotly_chart(fig, width='stretch')
-
-            with col2:
-                # Revenue comparison
-                fig = go.Figure()
-                fig.add_trace(go.Bar(
-                    name='Projected',
-                    x=comparison_df['name'],
-                    y=comparison_df['revenue_projected']
-                ))
-                fig.add_trace(go.Bar(
-                    name='Actual',
-                    x=comparison_df['name'],
-                    y=comparison_df['revenue_actual']
-                ))
-                fig.update_layout(
-                    title="Revenue Comparison",
-                    barmode='group',
-                    height=400
-                )
-                st.plotly_chart(fig, width='stretch')
-
-            # Profitability analysis
-            st.markdown("#### Profitability Analysis")
-
-            comparison_df['profit'] = comparison_df['revenue_actual'] - comparison_df['budget_used']
-            comparison_df['profit_margin'] = (comparison_df['profit'] / comparison_df['revenue_actual'] * 100).fillna(0)
+            # Budget comparison chart
+            st.markdown("#### Budget Comparison")
 
             fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=comparison_df['revenue_actual'],
-                y=comparison_df['profit'],
-                mode='markers+text',
-                text=comparison_df['name'],
-                textposition="top center",
-                marker=dict(
-                    size=comparison_df['budget_used'] / 5000,
-                    color=comparison_df['profit_margin'],
-                    colorscale='RdYlGn',
-                    showscale=True,
-                    colorbar=dict(title="Profit Margin %")
-                )
+            fig.add_trace(go.Bar(
+                name='Contract Value',
+                x=comparison_df['name'],
+                y=comparison_df['contract_value']
+            ))
+            fig.add_trace(go.Bar(
+                name='Accrued to Date',
+                x=comparison_df['name'],
+                y=comparison_df['budget_used']
             ))
             fig.update_layout(
-                title="Revenue vs Profit (Bubble size = Budget Used)",
-                xaxis_title="Revenue Actual",
-                yaxis_title="Profit",
-                height=500
+                title="Contract Value vs Accrued Amount",
+                barmode='group',
+                height=400
             )
-            st.plotly_chart(fig, width='stretch')
+            st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("No projects available for analysis")

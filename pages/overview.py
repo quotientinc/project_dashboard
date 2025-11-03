@@ -106,17 +106,17 @@ with col1:
     st.metric("Avg Employee Utilization", f"{avg_employee_utilization:.1f}%")
 
 with col2:
-    total_revenue = projects_df['revenue_actual'].sum() if not projects_df.empty else 0
-    st.metric("Total Revenue", f"${total_revenue:,.0f}")
+    total_contract_value = projects_df['contract_value'].sum() if not projects_df.empty else 0
+    st.metric("Total Contract Value", f"${total_contract_value:,.0f}")
 
 with col3:
-    total_cost = projects_df['budget_used'].sum() if not projects_df.empty else 0
-    st.metric("Total Cost", f"${total_cost:,.0f}")
+    total_accrued = projects_df['budget_used'].sum() if not projects_df.empty else 0
+    st.metric("Total Accrued", f"${total_accrued:,.0f}")
 
 with col4:
-    profit = total_revenue - total_cost
-    profit_margin = (profit / total_revenue * 100) if total_revenue > 0 else 0
-    st.metric("Profit Margin", f"{profit_margin:.1f}%", f"${profit:,.0f}")
+    remaining = total_contract_value - total_accrued
+    burn_rate = (total_accrued / total_contract_value * 100) if total_contract_value > 0 else 0
+    st.metric("Budget Burn Rate", f"{burn_rate:.1f}%", f"${remaining:,.0f} remaining", delta_color="inverse")
 
 # Charts Row 1
 st.markdown("---")

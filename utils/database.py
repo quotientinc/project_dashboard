@@ -17,6 +17,7 @@ class DatabaseManager:
         self.migrate_employee_allocation_fields()
         self.migrate_allocation_bill_rate()
         self.migrate_time_entries_bill_rate()
+        self.migrate_projects_schema_cleanup()
 
     def create_tables(self):
         """Create all necessary tables"""
@@ -31,10 +32,7 @@ class DatabaseManager:
                 status TEXT,
                 start_date TEXT,
                 end_date TEXT,
-                budget_allocated REAL,
-                budget_used REAL,
-                revenue_projected REAL,
-                revenue_actual REAL,
+                contract_value REAL,
                 client TEXT,
                 project_manager TEXT,
                 billable INTEGER DEFAULT 0,
@@ -320,6 +318,109 @@ class DatabaseManager:
             print("✅ Removed 'is_projected' column from time_entries table")
 
         self.conn.commit()
+
+    def migrate_projects_schema_cleanup(self):
+        """
+        Clean up projects table schema:
+        - Rename budget_allocated -> contract_value
+        - Remove budget_used (always calculated from time_entries)
+        - Remove revenue_projected
+        - Remove revenue_actual
+        This migration is safe to run multiple times.
+        """
+        cursor = self.conn.cursor()
+
+        # Check current schema
+        cursor.execute("PRAGMA table_info(projects)")
+        columns = [col[1] for col in cursor.fetchall()]
+
+        # Check if migration already completed
+        if 'contract_value' in columns and 'budget_allocated' not in columns:
+            print("Projects schema already cleaned up")
+            return
+
+        # Check if migration is needed
+        needs_migration = False
+        if 'budget_allocated' in columns:
+            needs_migration = True
+        if 'budget_used' in columns:
+            needs_migration = True
+        if 'revenue_projected' in columns:
+            needs_migration = True
+        if 'revenue_actual' in columns:
+            needs_migration = True
+
+        if not needs_migration:
+            print("Projects schema does not need cleanup migration")
+            return
+
+        print("Starting projects schema cleanup migration...")
+
+        # SQLite doesn't support ALTER TABLE DROP COLUMN or RENAME COLUMN easily
+        # We need to recreate the table
+
+        # Step 1: Get all current data
+        cursor.execute("SELECT * FROM projects")
+        projects_data = cursor.fetchall()
+        cursor.execute("PRAGMA table_info(projects)")
+        old_columns = cursor.fetchall()
+        old_column_names = [col[1] for col in old_columns]
+
+        # Step 2: Create column mapping (old -> new)
+        column_mapping = {}
+        for old_col in old_column_names:
+            if old_col == 'budget_allocated':
+                column_mapping[old_col] = 'contract_value'
+            elif old_col in ['budget_used', 'revenue_projected', 'revenue_actual']:
+                column_mapping[old_col] = None  # Drop these columns
+            else:
+                column_mapping[old_col] = old_col  # Keep as-is
+
+        # Step 3: Build new column list (excluding dropped columns)
+        new_column_names = [column_mapping[old_col] for old_col in old_column_names if column_mapping[old_col] is not None]
+
+        # Step 4: Transform data for new schema
+        transformed_data = []
+        for row in projects_data:
+            new_row = []
+            for i, old_col in enumerate(old_column_names):
+                new_col = column_mapping[old_col]
+                if new_col is not None:  # Only include if not dropped
+                    new_row.append(row[i])
+            transformed_data.append(tuple(new_row))
+
+        # Step 5: Drop old table
+        cursor.execute("DROP TABLE projects")
+
+        # Step 6: Create new table with updated schema
+        cursor.execute('''
+            CREATE TABLE projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                status TEXT,
+                start_date TEXT,
+                end_date TEXT,
+                contract_value REAL,
+                client TEXT,
+                project_manager TEXT,
+                billable INTEGER DEFAULT 0,
+                created_at TEXT,
+                updated_at TEXT
+            )
+        ''')
+
+        # Step 7: Restore data
+        if transformed_data:
+            placeholders = ','.join('?' * len(new_column_names))
+            query = f"INSERT INTO projects ({','.join(new_column_names)}) VALUES ({placeholders})"
+            cursor.executemany(query, transformed_data)
+            print(f"Migrated {len(transformed_data)} projects to new schema")
+
+        self.conn.commit()
+        print("✅ Projects schema cleanup complete:")
+        print("   - Renamed: budget_allocated -> contract_value")
+        print("   - Removed: budget_used, revenue_projected, revenue_actual")
 
     def is_empty(self):
         """Check if database is empty"""
