@@ -549,11 +549,25 @@ class ProjectReferenceCSVImporter:
             # Default all projects to billable
             billable = 1
 
+            # Determine status based on end_date
+            status = 'Active'
+            if end_date:
+                try:
+                    end_date_obj = datetime.strptime(end_date, '%Y-%m-%d')
+                    today = datetime.now()
+
+                    if end_date_obj < today:
+                        status = 'Completed'
+                except (ValueError, TypeError):
+                    # If date parsing fails, default to Active
+                    status = 'Active'
+
             project = {
                 'id': project_id,
                 'name': project_name,
                 'start_date': start_date,
                 'end_date': end_date,
+                'status': status,
                 'budget_allocated': budget_allocated,
                 'revenue_projected': revenue_projected,
                 'billable': billable,

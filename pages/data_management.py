@@ -316,7 +316,20 @@ with tab1:
                             preserve_fields=['description', 'status', 'project_manager', 'created_at']
                         )
 
-                        st.success(f"""
+                        # Auto-complete projects that have passed their end_date (but only if currently Active)
+                        from datetime import datetime
+                        cursor = db.conn.cursor()
+                        today = datetime.now().strftime('%Y-%m-%d')
+                        cursor.execute("""
+                            UPDATE projects
+                            SET status = 'Completed', updated_at = ?
+                            WHERE end_date < ?
+                            AND status = 'Active'
+                        """, (datetime.now().isoformat(), today))
+                        rows_updated = cursor.rowcount
+                        db.conn.commit()
+
+                        success_msg = f"""
                         Successfully imported project reference data!
 
                         - Processed {len(projects)} projects
@@ -324,7 +337,12 @@ with tab1:
                         - With Funding: {summary['with_funding']}
                         - Total Budget: ${summary['total_budget']:,.2f}
                         - Total Funding: ${summary['total_funding']:,.2f}
-                        """)
+                        """
+
+                        if rows_updated > 0:
+                            success_msg += f"\n        - Auto-marked {rows_updated} project(s) as Completed (end_date has passed)"
+
+                        st.success(success_msg)
                         st.balloons()
 
                         # Wait a moment before reloading
