@@ -92,6 +92,46 @@ with tab2:
             project = projects_df[projects_df['name'] == selected_project].iloc[0]
             project_id = project['id']
 
+            # Check allocation coverage
+            allocations_df = db.get_allocations(project_id=project_id)
+            if not allocations_df.empty and 'allocation_date' in allocations_df.columns:
+                try:
+                    project_start = pd.to_datetime(project['start_date'])
+                    project_end = pd.to_datetime(project['end_date'])
+                    allocations_df['allocation_date'] = pd.to_datetime(allocations_df['allocation_date'])
+                    first_allocation = allocations_df['allocation_date'].min()
+                    last_allocation = allocations_df['allocation_date'].max()
+
+                    # Calculate gaps in days
+                    gap_before = (first_allocation - project_start).days if first_allocation > project_start else 0
+                    gap_after = (project_end - last_allocation).days if last_allocation < project_end else 0
+
+                    if gap_before > 0 or gap_after > 0:
+                        # Calculate approximate months (30 days = 1 month)
+                        months_before = gap_before // 30
+                        months_after = gap_after // 30
+
+                        # Build warning message
+                        warning_msg = f"⚠️ **Incomplete Allocation Coverage** — "
+                        warning_msg += f"Project runs **{project_start.strftime('%b %Y')}** to **{project_end.strftime('%b %Y')}**, "
+                        warning_msg += f"but allocation data only exists for **{first_allocation.strftime('%b %Y')}** to **{last_allocation.strftime('%b %Y')}**. "
+
+                        gaps = []
+                        if months_before > 0:
+                            gaps.append(f"{months_before} month(s) at start")
+                        if months_after > 0:
+                            gaps.append(f"{months_after} month(s) at end")
+
+                        warning_msg += f"Missing: {' and '.join(gaps)}. "
+                        warning_msg += "This will affect Monthly Breakdown table and projected revenue calculations."
+
+                        st.warning(warning_msg)
+                except (ValueError, TypeError):
+                    # Skip if dates can't be parsed
+                    pass
+            elif allocations_df.empty:
+                st.warning("⚠️ **No allocations found** for this project. Add team allocations to enable projected revenue calculations.")
+
             # Project header
             col1, col2, col3 = st.columns([2, 1, 1])
 
