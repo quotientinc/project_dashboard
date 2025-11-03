@@ -24,23 +24,26 @@ with tab1:
         st.markdown("#### Project Overview")
 
         # Summary metrics
-        col1, col2, col3, col4, col5 = st.columns(5)
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
         with col1:
             active_count = len(projects_df[projects_df['status'] == 'Active'])
             st.metric("Active", active_count)
         with col2:
+            future_count = len(projects_df[projects_df['status'] == 'Future'])
+            st.metric("Future", future_count, help="Projects not yet started")
+        with col3:
             completed_count = len(projects_df[projects_df['status'] == 'Completed'])
             st.metric("Completed", completed_count)
-        with col3:
+        with col4:
             on_hold_count = len(projects_df[projects_df['status'] == 'On Hold'])
             st.metric("On Hold", on_hold_count)
-        with col4:
+        with col5:
             over_budget = len(projects_df[
                 (projects_df['budget_allocated'] > 0) &
                 (projects_df['budget_used'] / projects_df['budget_allocated'] > 1.0)
             ])
             st.metric("Over Budget", over_budget, delta_color="inverse")
-        with col5:
+        with col6:
             total_budget = projects_df['budget_allocated'].sum()
             st.metric("Total Budget", f"${total_budget/1e6:.1f}M")
 
@@ -50,7 +53,7 @@ with tab1:
         col1, col2, col3 = st.columns([2, 1, 1])
 
         with col1:
-            status_options = ['Active', 'Completed', 'On Hold', 'Cancelled']
+            status_options = ['Active', 'Future', 'Completed', 'On Hold', 'Cancelled']
             selected_statuses = st.multiselect(
                 "Filter by Status",
                 options=status_options,
@@ -133,6 +136,7 @@ with tab1:
                         # Status color configuration
                         status_config = {
                             'Active': {'emoji': '🟢', 'bg': '#d4edda', 'text': '#155724'},
+                            'Future': {'emoji': '🔮', 'bg': '#e8daff', 'text': '#5a2d82'},
                             'Completed': {'emoji': '🔵', 'bg': '#d1ecf1', 'text': '#0c5460'},
                             'On Hold': {'emoji': '🟡', 'bg': '#fff3cd', 'text': '#856404'},
                             'Cancelled': {'emoji': '🔴', 'bg': '#f8d7da', 'text': '#721c24'}
@@ -216,6 +220,7 @@ with tab1:
                     with cols[idx % 3]:
                         status_color = {
                             'Active': '🟢',
+                            'Future': '🔮',
                             'Completed': '🔵',
                             'On Hold': '🟡',
                             'Cancelled': '🔴'
@@ -958,8 +963,9 @@ with tab3:
                     project_manager = st.text_input("Project Manager*", value=project['project_manager'])
 
                 with col2:
-                    status = st.selectbox("Status", ["Active", "On Hold", "Completed", "Cancelled"],
-                                        index=["Active", "On Hold", "Completed", "Cancelled"].index(project['status']))
+                    status_options_edit = ["Active", "Future", "On Hold", "Completed", "Cancelled"]
+                    current_status_index = status_options_edit.index(project['status']) if project['status'] in status_options_edit else 0
+                    status = st.selectbox("Status", status_options_edit, index=current_status_index)
                     start_date = st.date_input("Start Date", value=pd.to_datetime(project['start_date']))
                     end_date = st.date_input("End Date", value=pd.to_datetime(project['end_date']))
                     budget_allocated = st.number_input("Budget Allocated", min_value=0.0, step=1000.0, value=float(project['budget_allocated']))

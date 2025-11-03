@@ -316,17 +316,28 @@ with tab1:
                             preserve_fields=['description', 'status', 'project_manager', 'created_at']
                         )
 
-                        # Auto-complete projects that have passed their end_date (but only if currently Active)
+                        # Auto-complete projects that have passed their end_date (but only if Active or Future)
                         from datetime import datetime
                         cursor = db.conn.cursor()
                         today = datetime.now().strftime('%Y-%m-%d')
+
                         cursor.execute("""
                             UPDATE projects
                             SET status = 'Completed', updated_at = ?
                             WHERE end_date < ?
-                            AND status = 'Active'
+                            AND status IN ('Active', 'Future')
                         """, (datetime.now().isoformat(), today))
-                        rows_updated = cursor.rowcount
+                        rows_completed = cursor.rowcount
+
+                        # Auto-activate projects that have started (but only if currently Future)
+                        cursor.execute("""
+                            UPDATE projects
+                            SET status = 'Active', updated_at = ?
+                            WHERE start_date <= ?
+                            AND status = 'Future'
+                        """, (datetime.now().isoformat(), today))
+                        rows_activated = cursor.rowcount
+
                         db.conn.commit()
 
                         success_msg = f"""
@@ -339,8 +350,10 @@ with tab1:
                         - Total Funding: ${summary['total_funding']:,.2f}
                         """
 
-                        if rows_updated > 0:
-                            success_msg += f"\n        - Auto-marked {rows_updated} project(s) as Completed (end_date has passed)"
+                        if rows_completed > 0:
+                            success_msg += f"\n        - Auto-marked {rows_completed} project(s) as Completed (end_date has passed)"
+                        if rows_activated > 0:
+                            success_msg += f"\n        - Auto-marked {rows_activated} project(s) as Active (start_date has arrived)"
 
                         st.success(success_msg)
                         st.balloons()
