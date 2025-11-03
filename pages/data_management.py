@@ -65,6 +65,44 @@ with tab1:
                     st.write(f"**Date Range:** {summary['date_range'][0]} to {summary['date_range'][1]}")
                 st.write(f"**Total Hours:** {summary['total_hours']:,.1f}")
 
+                # Show date range comparison
+                if summary['date_range']:
+                    existing_range = db.get_existing_time_entries_date_range()
+
+                    st.markdown("### 📅 Date Range Impact")
+                    col1, col2, col3 = st.columns(3)
+
+                    with col1:
+                        st.markdown("**Incoming CSV:**")
+                        st.info(f"{summary['date_range'][0]}\nto\n{summary['date_range'][1]}")
+
+                    with col2:
+                        st.markdown("**Current Database:**")
+                        if existing_range:
+                            st.info(f"{existing_range[0]}\nto\n{existing_range[1]}")
+                        else:
+                            st.info("No existing\ntime entries")
+
+                    with col3:
+                        st.markdown("**Will Be Deleted:**")
+                        if existing_range:
+                            # Calculate overlap
+                            csv_start = summary['date_range'][0]
+                            csv_end = summary['date_range'][1]
+                            db_start = existing_range[0]
+                            db_end = existing_range[1]
+
+                            # Overlap is max(start1, start2) to min(end1, end2)
+                            overlap_start = max(csv_start, db_start)
+                            overlap_end = min(csv_end, db_end)
+
+                            if overlap_start <= overlap_end:
+                                st.warning(f"{overlap_start}\nto\n{overlap_end}")
+                            else:
+                                st.success("No overlap\n(safe import)")
+                        else:
+                            st.success("No existing\ndata")
+
                 # Show sample data
                 col1, col2 = st.columns(2)
                 with col1:
@@ -83,8 +121,27 @@ with tab1:
                     )
 
                 # Confirmation checkbox
+                if summary['date_range']:
+                    existing_range = db.get_existing_time_entries_date_range()
+                    if existing_range:
+                        csv_start = summary['date_range'][0]
+                        csv_end = summary['date_range'][1]
+                        db_start = existing_range[0]
+                        db_end = existing_range[1]
+                        overlap_start = max(csv_start, db_start)
+                        overlap_end = min(csv_end, db_end)
+
+                        if overlap_start <= overlap_end:
+                            confirm_text = f"I understand this will delete time entries from {overlap_start} to {overlap_end}, and migrate the database schema"
+                        else:
+                            confirm_text = "I understand this will import new data and migrate the database schema (no existing data will be deleted)"
+                    else:
+                        confirm_text = "I understand this will import new data and migrate the database schema (no existing data to delete)"
+                else:
+                    confirm_text = "I understand this will delete all existing time entries and expenses, and migrate the database schema"
+
                 confirm_import = st.checkbox(
-                    "I understand this will delete existing time entries and expenses, and migrate the database schema",
+                    confirm_text,
                     key="confirm_timesheet_import"
                 )
 
@@ -96,13 +153,40 @@ with tab1:
                         progress_bar.progress(10, text="Migrating database schema...")
                         db.migrate_schema_for_csv_import()
 
-                        # Step 2: Delete existing time entries and expenses
-                        # This ensures we don't accumulate duplicate data on re-import
-                        progress_bar.progress(20, text="Clearing existing time entries and expenses...")
-                        cursor = db.conn.cursor()
-                        cursor.execute("DELETE FROM time_entries")
-                        cursor.execute("DELETE FROM expenses")
-                        db.conn.commit()
+                        # Step 2: Delete existing time entries in the CSV date range
+                        # This enables incremental imports while preserving data outside the range
+                        deleted_count = 0
+                        if summary['date_range']:
+                            csv_start, csv_end = summary['date_range']
+                            existing_range = db.get_existing_time_entries_date_range()
+
+                            if existing_range:
+                                # Calculate overlap
+                                db_start, db_end = existing_range
+                                overlap_start = max(csv_start, db_start)
+                                overlap_end = min(csv_end, db_end)
+
+                                if overlap_start <= overlap_end:
+                                    progress_bar.progress(20, text=f"Clearing time entries from {overlap_start} to {overlap_end}...")
+                                    deleted_count = db.delete_time_entries_by_date_range(overlap_start, overlap_end)
+                                else:
+                                    progress_bar.progress(20, text="No overlapping time entries to clear...")
+                            else:
+                                progress_bar.progress(20, text="No existing time entries (first import)...")
+
+                            # Always clear expenses (they're typically regenerated on import)
+                            cursor = db.conn.cursor()
+                            cursor.execute("DELETE FROM expenses")
+                            db.conn.commit()
+                        else:
+                            # Fallback: No date range available, clear all (original behavior)
+                            progress_bar.progress(20, text="Clearing all existing time entries and expenses...")
+                            cursor = db.conn.cursor()
+                            cursor.execute("DELETE FROM time_entries")
+                            cursor.execute("DELETE FROM expenses")
+                            db.conn.commit()
+                            cursor.execute("SELECT changes()")
+                            deleted_count = cursor.fetchone()[0]
 
                         # Step 3: Import projects
                         progress_bar.progress(30, text=f"Importing {len(projects)} projects...")
@@ -118,13 +202,22 @@ with tab1:
 
                         progress_bar.progress(100, text="Import complete!")
 
-                        st.success(f"""
+                        # Build success message with deletion info
+                        success_msg = f"""
                         ✅ Timesheet import completed successfully!
                         - Imported {len(projects)} projects
                         - Imported {len(employees)} employees
                         - Imported {len(time_entries)} time entries
                         - Total hours: {summary['total_hours']:,.1f}
-                        """)
+                        """
+                        if deleted_count > 0:
+                            if summary['date_range']:
+                                csv_start, csv_end = summary['date_range']
+                                success_msg += f"\n- Replaced {deleted_count} existing time entries in date range {csv_start} to {csv_end}"
+                            else:
+                                success_msg += f"\n- Deleted {deleted_count} previous time entries"
+
+                        st.success(success_msg)
                         st.balloons()
 
                         # Wait a moment before reloading

@@ -545,6 +545,41 @@ class DatabaseManager:
 
         return pd.read_sql_query(query, self.conn, params=params)
 
+    def get_existing_time_entries_date_range(self):
+        """
+        Get the current date range of time_entries in the database.
+
+        Returns:
+            Tuple (min_date, max_date) in 'YYYY-MM-DD' format, or None if no entries exist
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT MIN(date), MAX(date) FROM time_entries")
+        result = cursor.fetchone()
+
+        if result and result[0] and result[1]:
+            return (result[0], result[1])
+        return None
+
+    def delete_time_entries_by_date_range(self, start_date: str, end_date: str):
+        """
+        Delete time_entries within a specific date range (inclusive).
+
+        Args:
+            start_date: Start date in 'YYYY-MM-DD' format
+            end_date: End date in 'YYYY-MM-DD' format
+
+        Returns:
+            Number of rows deleted
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "DELETE FROM time_entries WHERE date >= ? AND date <= ?",
+            (start_date, end_date)
+        )
+        rows_deleted = cursor.rowcount
+        self.conn.commit()
+        return rows_deleted
+
     def calculate_budget_used(self, project_id: str) -> float:
         """
         Calculate total budget used from time_entries for a project.
