@@ -21,34 +21,199 @@ with tab1:
     projects_df = db.get_projects()
 
     if not projects_df.empty:
-        # Display options
-        col1, col2 = st.columns([3, 1])
+        st.markdown("#### Project Overview")
+
+        # Summary metrics
+        col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
-            st.markdown("#### All Projects")
+            active_count = len(projects_df[projects_df['status'] == 'Active'])
+            st.metric("Active", active_count)
         with col2:
-            view_mode = st.selectbox("View", ["Table", "Cards"], label_visibility="collapsed")
+            completed_count = len(projects_df[projects_df['status'] == 'Completed'])
+            st.metric("Completed", completed_count)
+        with col3:
+            on_hold_count = len(projects_df[projects_df['status'] == 'On Hold'])
+            st.metric("On Hold", on_hold_count)
+        with col4:
+            over_budget = len(projects_df[
+                (projects_df['budget_allocated'] > 0) &
+                (projects_df['budget_used'] / projects_df['budget_allocated'] > 1.0)
+            ])
+            st.metric("Over Budget", over_budget, delta_color="inverse")
+        with col5:
+            total_budget = projects_df['budget_allocated'].sum()
+            st.metric("Total Budget", f"${total_budget/1e6:.1f}M")
 
-        if view_mode == "Table":
-            # Table view
-            display_df = projects_df[[
-                'name', 'client', 'status', 'project_manager',
-                'start_date', 'end_date', 'budget_allocated', 'budget_used',
-                'revenue_projected', 'revenue_actual'
-            ]].copy()
+        st.markdown("---")
 
-            # Format currency columns
-            for col in ['budget_allocated', 'budget_used', 'revenue_projected', 'revenue_actual']:
-                display_df[col] = display_df[col].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "-")
+        # Filters and controls
+        col1, col2, col3 = st.columns([2, 1, 1])
 
-            st.dataframe(display_df, width='stretch', hide_index=True)
+        with col1:
+            status_options = ['Active', 'Completed', 'On Hold', 'Cancelled']
+            selected_statuses = st.multiselect(
+                "Filter by Status",
+                options=status_options,
+                default=['Active'],
+                help="Select one or more statuses to display"
+            )
 
+        with col2:
+            sort_by = st.selectbox(
+                "Sort by",
+                options=[
+                    "Name (A-Z)",
+                    "Budget % Used (High to Low)",
+                    "Budget % Used (Low to High)",
+                    "Start Date (Newest)",
+                    "Start Date (Oldest)",
+                    "Client (A-Z)"
+                ]
+            )
+
+        with col3:
+            view_mode = st.selectbox(
+                "View Mode",
+                options=["Detailed Cards", "Compact Table", "Simple Cards"]
+            )
+
+        # Optional search
+        search_term = st.text_input(
+            "🔍 Search projects",
+            placeholder="Search by name, client, or project manager...",
+            label_visibility="collapsed"
+        )
+
+        st.markdown("---")
+
+        # Apply filters
+        filtered_df = projects_df.copy()
+
+        # Status filter
+        if selected_statuses:
+            filtered_df = filtered_df[filtered_df['status'].isin(selected_statuses)]
         else:
-            # Card view
-            cols = st.columns(3)
-            for idx, (_, project) in enumerate(projects_df.iterrows()):
-                with cols[idx % 3]:
-                    with st.container():
-                        # Status color
+            filtered_df = pd.DataFrame()
+
+        # Search filter
+        if search_term:
+            search_mask = (
+                filtered_df['name'].str.contains(search_term, case=False, na=False) |
+                filtered_df['client'].str.contains(search_term, case=False, na=False) |
+                filtered_df['project_manager'].str.contains(search_term, case=False, na=False)
+            )
+            filtered_df = filtered_df[search_mask]
+
+        # Apply sorting
+        if sort_by == "Name (A-Z)":
+            filtered_df = filtered_df.sort_values('name')
+        elif sort_by == "Budget % Used (High to Low)":
+            filtered_df['budget_pct'] = (filtered_df['budget_used'] / filtered_df['budget_allocated'] * 100).fillna(0)
+            filtered_df = filtered_df.sort_values('budget_pct', ascending=False)
+        elif sort_by == "Budget % Used (Low to High)":
+            filtered_df['budget_pct'] = (filtered_df['budget_used'] / filtered_df['budget_allocated'] * 100).fillna(0)
+            filtered_df = filtered_df.sort_values('budget_pct', ascending=True)
+        elif sort_by == "Start Date (Newest)":
+            filtered_df = filtered_df.sort_values('start_date', ascending=False)
+        elif sort_by == "Start Date (Oldest)":
+            filtered_df = filtered_df.sort_values('start_date', ascending=True)
+        elif sort_by == "Client (A-Z)":
+            filtered_df = filtered_df.sort_values('client')
+
+        # Show count
+        st.caption(f"Showing {len(filtered_df)} of {len(projects_df)} projects")
+
+        # Display projects
+        if not filtered_df.empty:
+            if view_mode == "Detailed Cards":
+                # Enhanced card view with status colors and progress bars
+                cols = st.columns(2)
+                for idx, (_, project) in enumerate(filtered_df.iterrows()):
+                    with cols[idx % 2]:
+                        # Status color configuration
+                        status_config = {
+                            'Active': {'emoji': '🟢', 'bg': '#d4edda', 'text': '#155724'},
+                            'Completed': {'emoji': '🔵', 'bg': '#d1ecf1', 'text': '#0c5460'},
+                            'On Hold': {'emoji': '🟡', 'bg': '#fff3cd', 'text': '#856404'},
+                            'Cancelled': {'emoji': '🔴', 'bg': '#f8d7da', 'text': '#721c24'}
+                        }
+                        config = status_config.get(project['status'], {'emoji': '⚪', 'bg': '#e9ecef', 'text': '#495057'})
+
+                        with st.container():
+                            # Header with status badge
+                            col_a, col_b = st.columns([3, 1])
+                            with col_a:
+                                st.markdown(f"### {config['emoji']} {project['name']}")
+                            with col_b:
+                                st.markdown(
+                                    f"<span style='background-color: {config['bg']}; color: {config['text']}; "
+                                    f"padding: 4px 12px; border-radius: 12px; font-size: 11px; font-weight: bold; "
+                                    f"display: inline-block; margin-top: 8px;'>{project['status']}</span>",
+                                    unsafe_allow_html=True
+                                )
+
+                            # Project info
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.write(f"**Client:** {project['client']}")
+                                st.write(f"**Start:** {project['start_date']}")
+                            with col2:
+                                st.write(f"**PM:** {project['project_manager']}")
+                                st.write(f"**End:** {project['end_date']}")
+
+                            # Budget progress
+                            if pd.notna(project['budget_allocated']) and project['budget_allocated'] > 0:
+                                budget_pct = (project['budget_used'] / project['budget_allocated'] * 100)
+                                st.markdown(f"**💰 Budget:** ${project['budget_used']:,.0f} / ${project['budget_allocated']:,.0f} ({budget_pct:.0f}%)")
+                                st.progress(min(budget_pct / 100, 1.0))
+
+                            # Revenue progress
+                            if pd.notna(project['revenue_projected']) and project['revenue_projected'] > 0:
+                                revenue_pct = (project['revenue_actual'] / project['revenue_projected'] * 100)
+                                st.markdown(f"**📈 Revenue:** ${project['revenue_actual']:,.0f} / ${project['revenue_projected']:,.0f} ({revenue_pct:.0f}%)")
+                                st.progress(min(revenue_pct / 100, 1.0))
+
+                            st.markdown("---")
+
+            elif view_mode == "Compact Table":
+                # Enhanced table view with status emoji and budget %
+                display_df = filtered_df[[
+                    'name', 'client', 'status', 'project_manager',
+                    'start_date', 'end_date', 'budget_allocated', 'budget_used'
+                ]].copy()
+
+                # Add budget % column
+                display_df['Budget %'] = ((filtered_df['budget_used'] / filtered_df['budget_allocated'] * 100)
+                                           .fillna(0).round(1).astype(str) + '%')
+
+                # Format currency columns
+                for col in ['budget_allocated', 'budget_used']:
+                    display_df[col] = display_df[col].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "-")
+
+                # Rename columns for display
+                display_df = display_df.rename(columns={
+                    'name': 'Project',
+                    'client': 'Client',
+                    'status': 'Status',
+                    'project_manager': 'PM',
+                    'start_date': 'Start',
+                    'end_date': 'End',
+                    'budget_allocated': 'Budget',
+                    'budget_used': 'Used'
+                })
+
+                st.dataframe(
+                    display_df,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=600
+                )
+
+            else:  # Simple Cards
+                # Minimal card view
+                cols = st.columns(3)
+                for idx, (_, project) in enumerate(filtered_df.iterrows()):
+                    with cols[idx % 3]:
                         status_color = {
                             'Active': '🟢',
                             'Completed': '🔵',
@@ -57,25 +222,27 @@ with tab1:
                         }.get(project['status'], '⚪')
 
                         st.markdown(f"### {status_color} {project['name']}")
-                        st.write(f"**Client:** {project['client']}")
-                        st.write(f"**PM:** {project['project_manager']}")
-                        st.write(f"**Status:** {project['status']}")
+                        st.caption(f"{project['client']} • {project['project_manager']}")
+                        st.caption(f"{project['start_date']} to {project['end_date']}")
 
-                        # Progress bars
-                        if project['budget_allocated']:
-                            budget_used_pct = (project['budget_used'] / project['budget_allocated'] * 100)
-                            st.progress(min(budget_used_pct / 100, 1.0))
+                        if pd.notna(project['budget_allocated']) and project['budget_allocated'] > 0:
+                            budget_pct = (project['budget_used'] / project['budget_allocated'] * 100)
+                            st.progress(min(budget_pct / 100, 1.0))
                             st.caption(f"Budget: ${project['budget_used']:,.0f} / ${project['budget_allocated']:,.0f}")
 
-                        if project['revenue_projected']:
-                            revenue_pct = (project['revenue_actual'] / project['revenue_projected'] * 100)
-                            st.progress(min(revenue_pct / 100, 1.0))
-                            st.caption(f"Revenue: ${project['revenue_actual']:,.0f} / ${project['revenue_projected']:,.0f}")
-
-                        st.write(f"**Duration:** {project['start_date']} to {project['end_date']}")
                         st.markdown("---")
+
+        else:
+            # Empty state with helpful message
+            if not selected_statuses:
+                st.info("👆 Select at least one project status above to view projects")
+            elif search_term:
+                st.info(f"No projects found matching '{search_term}' with status: {', '.join(selected_statuses)}")
+            else:
+                st.info(f"No projects found with status: {', '.join(selected_statuses)}")
+
     else:
-        st.info("No projects found with current filters")
+        st.info("No projects found. Import project data to get started.")
 
 with tab2:
     # Project details view
