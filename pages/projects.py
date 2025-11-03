@@ -248,9 +248,9 @@ with tab2:
                     # Monthly breakdown table
                     st.markdown("##### Monthly Breakdown (Smart Combined)")
 
-                    # Get all unique months and sort chronologically
+                    # Get all unique months from actuals, projected, and combined to include future months
                     all_months = sorted(
-                        set(list(combined_monthly.keys())),
+                        set(list(actuals_monthly.keys()) + list(projected_monthly.keys()) + list(combined_monthly.keys())),
                         key=lambda x: pd.to_datetime(x, format='%B %Y')
                     )
 
