@@ -11,6 +11,26 @@ logger = get_logger(__name__)
 db = st.session_state.db_manager
 processor = st.session_state.data_processor
 
+# Helper functions for safe NULL handling
+def safe_budget_percentage(budget_used, budget_allocated):
+    """
+    Safely calculate budget percentage with NULL/NaN handling.
+    Returns tuple: (percentage: float or None, display_string: str)
+    """
+    if pd.isna(budget_allocated) or budget_allocated == 0:
+        return None, 'N/A'
+    if pd.isna(budget_used):
+        return None, 'N/A'
+
+    pct = (budget_used / budget_allocated) * 100
+    return pct, f"{pct:.1f}%"
+
+def safe_currency_display(value):
+    """Safely display currency with NULL handling."""
+    if pd.isna(value):
+        return '-'
+    return f"${value:,.0f}"
+
 st.markdown("### 🚀 Project Management")
 
 # Tabs for different views
@@ -38,11 +58,14 @@ with tab1:
             on_hold_count = len(projects_df[projects_df['status'] == 'On Hold'])
             st.metric("On Hold", on_hold_count)
         with col5:
-            over_budget = len(projects_df[
-                (projects_df['budget_allocated'] > 0) &
-                (projects_df['budget_used'] / projects_df['budget_allocated'] > 1.0)
-            ])
-            st.metric("Over Budget", over_budget, delta_color="inverse")
+            # Calculate over budget count with NULL handling
+            over_budget_count = 0
+            for _, proj in projects_df.iterrows():
+                pct, _ = safe_budget_percentage(proj['budget_used'], proj['budget_allocated'])
+                if pct is not None and pct > 100:
+                    over_budget_count += 1
+
+            st.metric("Over Budget", over_budget_count, delta_color="inverse")
         with col6:
             total_budget = projects_df['budget_allocated'].sum()
             st.metric("Total Budget", f"${total_budget/1e6:.1f}M")
@@ -66,18 +89,21 @@ with tab1:
                 "Sort by",
                 options=[
                     "Name (A-Z)",
-                    "Budget % Used (High to Low)",
-                    "Budget % Used (Low to High)",
                     "Start Date (Newest)",
                     "Start Date (Oldest)",
+                    "Budget % Used (High to Low)",
+                    "Budget % Used (Low to High)",
                     "Client (A-Z)"
                 ]
             )
 
         with col3:
-            view_mode = st.selectbox(
-                "View Mode",
-                options=["Detailed Cards", "Compact Table", "Simple Cards"]
+            # Add data quality indicator
+            projects_with_budget = len(projects_df[pd.notna(projects_df['budget_allocated'])])
+            st.metric(
+                "With Budget Data",
+                f"{projects_with_budget}/{len(projects_df)}",
+                help="Number of projects with budget_allocated data"
             )
 
         # Optional search
@@ -111,131 +137,82 @@ with tab1:
         if sort_by == "Name (A-Z)":
             filtered_df = filtered_df.sort_values('name')
         elif sort_by == "Budget % Used (High to Low)":
-            filtered_df['budget_pct'] = (filtered_df['budget_used'] / filtered_df['budget_allocated'] * 100).fillna(0)
-            filtered_df = filtered_df.sort_values('budget_pct', ascending=False)
+            # Calculate percentage, keeping NaN for missing data
+            filtered_df['budget_pct'] = filtered_df.apply(
+                lambda row: safe_budget_percentage(row['budget_used'], row['budget_allocated'])[0],
+                axis=1
+            )
+            # Sort with NaN last
+            filtered_df = filtered_df.sort_values('budget_pct', ascending=False, na_position='last')
         elif sort_by == "Budget % Used (Low to High)":
-            filtered_df['budget_pct'] = (filtered_df['budget_used'] / filtered_df['budget_allocated'] * 100).fillna(0)
-            filtered_df = filtered_df.sort_values('budget_pct', ascending=True)
+            # Calculate percentage, keeping NaN for missing data
+            filtered_df['budget_pct'] = filtered_df.apply(
+                lambda row: safe_budget_percentage(row['budget_used'], row['budget_allocated'])[0],
+                axis=1
+            )
+            # Sort with NaN last
+            filtered_df = filtered_df.sort_values('budget_pct', ascending=True, na_position='last')
         elif sort_by == "Start Date (Newest)":
-            filtered_df = filtered_df.sort_values('start_date', ascending=False)
+            filtered_df = filtered_df.sort_values('start_date', ascending=False, na_position='last')
         elif sort_by == "Start Date (Oldest)":
-            filtered_df = filtered_df.sort_values('start_date', ascending=True)
+            filtered_df = filtered_df.sort_values('start_date', ascending=True, na_position='last')
         elif sort_by == "Client (A-Z)":
             filtered_df = filtered_df.sort_values('client')
 
         # Show count
         st.caption(f"Showing {len(filtered_df)} of {len(projects_df)} projects")
 
-        # Display projects
+        # Display projects in enhanced compact table
         if not filtered_df.empty:
-            if view_mode == "Detailed Cards":
-                # Enhanced card view with status colors and progress bars
-                cols = st.columns(2)
-                for idx, (_, project) in enumerate(filtered_df.iterrows()):
-                    with cols[idx % 2]:
-                        # Status color configuration
-                        status_config = {
-                            'Active': {'emoji': '🟢', 'bg': '#d4edda', 'text': '#155724'},
-                            'Future': {'emoji': '🔮', 'bg': '#e8daff', 'text': '#5a2d82'},
-                            'Completed': {'emoji': '🔵', 'bg': '#d1ecf1', 'text': '#0c5460'},
-                            'On Hold': {'emoji': '🟡', 'bg': '#fff3cd', 'text': '#856404'},
-                            'Cancelled': {'emoji': '🔴', 'bg': '#f8d7da', 'text': '#721c24'}
-                        }
-                        config = status_config.get(project['status'], {'emoji': '⚪', 'bg': '#e9ecef', 'text': '#495057'})
+            # Prepare display DataFrame
+            display_df = pd.DataFrame()
 
-                        with st.container():
-                            # Header with status badge
-                            col_a, col_b = st.columns([3, 1])
-                            with col_a:
-                                st.markdown(f"### {config['emoji']} {project['name']}")
-                            with col_b:
-                                st.markdown(
-                                    f"<span style='background-color: {config['bg']}; color: {config['text']}; "
-                                    f"padding: 4px 12px; border-radius: 12px; font-size: 11px; font-weight: bold; "
-                                    f"display: inline-block; margin-top: 8px;'>{project['status']}</span>",
-                                    unsafe_allow_html=True
-                                )
+            # Project basics
+            display_df['Project'] = filtered_df['name']
+            display_df['Client'] = filtered_df['client']
+            display_df['PM'] = filtered_df['project_manager']
+            display_df['Status'] = filtered_df['status']
 
-                            # Project info
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                st.write(f"**Client:** {project['client']}")
-                                st.write(f"**Start:** {project['start_date']}")
-                            with col2:
-                                st.write(f"**PM:** {project['project_manager']}")
-                                st.write(f"**End:** {project['end_date']}")
+            # Dates
+            display_df['Start'] = filtered_df['start_date']
+            display_df['End'] = filtered_df['end_date']
 
-                            # Budget progress
-                            if pd.notna(project['budget_allocated']) and project['budget_allocated'] > 0:
-                                budget_pct = (project['budget_used'] / project['budget_allocated'] * 100)
-                                st.markdown(f"**💰 Budget:** ${project['budget_used']:,.0f} / ${project['budget_allocated']:,.0f} ({budget_pct:.0f}%)")
-                                st.progress(min(budget_pct / 100, 1.0))
+            # Calculate duration
+            display_df['Duration'] = filtered_df.apply(
+                lambda row: f"{(pd.to_datetime(row['end_date']) - pd.to_datetime(row['start_date'])).days} days"
+                if pd.notna(row['start_date']) and pd.notna(row['end_date'])
+                else '-',
+                axis=1
+            )
 
-                            # Revenue progress
-                            if pd.notna(project['revenue_projected']) and project['revenue_projected'] > 0:
-                                revenue_pct = (project['revenue_actual'] / project['revenue_projected'] * 100)
-                                st.markdown(f"**📈 Revenue:** ${project['revenue_actual']:,.0f} / ${project['revenue_projected']:,.0f} ({revenue_pct:.0f}%)")
-                                st.progress(min(revenue_pct / 100, 1.0))
+            # Budget - use safe helpers
+            display_df['Budget Allocated'] = filtered_df['budget_allocated'].apply(safe_currency_display)
+            display_df['Budget Used'] = filtered_df['budget_used'].apply(safe_currency_display)
 
-                            st.markdown("---")
+            # Budget percentage - use safe calculation
+            budget_pcts = filtered_df.apply(
+                lambda row: safe_budget_percentage(row['budget_used'], row['budget_allocated'])[1],
+                axis=1
+            )
+            display_df['Budget %'] = budget_pcts
 
-            elif view_mode == "Compact Table":
-                # Enhanced table view with status emoji and budget %
-                display_df = filtered_df[[
-                    'name', 'client', 'status', 'project_manager',
-                    'start_date', 'end_date', 'budget_allocated', 'budget_used'
-                ]].copy()
-
-                # Add budget % column
-                display_df['Budget %'] = ((filtered_df['budget_used'] / filtered_df['budget_allocated'] * 100)
-                                           .fillna(0).round(1).astype(str) + '%')
-
-                # Format currency columns
-                for col in ['budget_allocated', 'budget_used']:
-                    display_df[col] = display_df[col].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "-")
-
-                # Rename columns for display
-                display_df = display_df.rename(columns={
-                    'name': 'Project',
-                    'client': 'Client',
-                    'status': 'Status',
-                    'project_manager': 'PM',
-                    'start_date': 'Start',
-                    'end_date': 'End',
-                    'budget_allocated': 'Budget',
-                    'budget_used': 'Used'
-                })
-
-                st.dataframe(
-                    display_df,
-                    use_container_width=True,
-                    hide_index=True,
-                    height=600
-                )
-
-            else:  # Simple Cards
-                # Minimal card view
-                cols = st.columns(3)
-                for idx, (_, project) in enumerate(filtered_df.iterrows()):
-                    with cols[idx % 3]:
-                        status_color = {
-                            'Active': '🟢',
-                            'Future': '🔮',
-                            'Completed': '🔵',
-                            'On Hold': '🟡',
-                            'Cancelled': '🔴'
-                        }.get(project['status'], '⚪')
-
-                        st.markdown(f"### {status_color} {project['name']}")
-                        st.caption(f"{project['client']} • {project['project_manager']}")
-                        st.caption(f"{project['start_date']} to {project['end_date']}")
-
-                        if pd.notna(project['budget_allocated']) and project['budget_allocated'] > 0:
-                            budget_pct = (project['budget_used'] / project['budget_allocated'] * 100)
-                            st.progress(min(budget_pct / 100, 1.0))
-                            st.caption(f"Budget: ${project['budget_used']:,.0f} / ${project['budget_allocated']:,.0f}")
-
-                        st.markdown("---")
+            # Display with configuration
+            st.dataframe(
+                display_df,
+                use_container_width=True,
+                hide_index=True,
+                height=600,
+                column_config={
+                    "Status": st.column_config.TextColumn(
+                        "Status",
+                        help="Project status",
+                    ),
+                    "Budget %": st.column_config.TextColumn(
+                        "Budget %",
+                        help="Percentage of allocated budget used. N/A = missing budget data",
+                    ),
+                }
+            )
 
         else:
             # Empty state with helpful message
@@ -322,30 +299,15 @@ with tab2:
                 st.table(project_deets, border="horizontal")
 
             with col2:
-                # Calculate Revenue Projected vs. Actual
-                budget = project['budget_allocated']
-
-                # Get actual accrued revenue from time_entries
-                time_entries = db.get_time_entries(project_id=project_id)
-                if not time_entries.empty:
-                    # Calculate revenue using amount if available, otherwise hours × bill_rate
-                    def calculate_entry_revenue(row):
-                        if pd.notna(row.get('amount')) and row['amount'] != 0:
-                            return row['amount']
-                        elif pd.notna(row.get('bill_rate')):
-                            return row['hours'] * row['bill_rate']
-                        else:
-                            return 0
-
-                    time_entries['revenue'] = time_entries.apply(calculate_entry_revenue, axis=1)
-                    total_accrued = time_entries['revenue'].sum()
-                else:
-                    total_accrued = 0
+                # Get budget values (budget_used is now calculated automatically by get_projects())
+                budget = project['budget_allocated'] if pd.notna(project['budget_allocated']) else 0
+                total_accrued = project['budget_used'] if pd.notna(project['budget_used']) else 0
 
                 budget_remaining = budget - total_accrued
-                st.metric("Budget Allocated", f"${budget:,.0f}")
-                st.metric("Total Accrued to Date", f"${total_accrued:,.0f}")
-                st.metric("Budget Remaining", f"${budget_remaining:,.0f}")
+
+                st.metric("Budget Allocated", safe_currency_display(budget))
+                st.metric("Total Accrued to Date", safe_currency_display(total_accrued))
+                st.metric("Budget Remaining", safe_currency_display(budget_remaining))
 
             # Tabs for project details
             detail_tab1, detail_tab2, detail_tab3, detail_tab4, detail_tab5 = st.tabs(
@@ -946,6 +908,9 @@ with tab3:
             options=projects_df['name'].tolist(),
             key="edit_project_select"
         )
+
+        # Fill 0 for revenue_actual
+        projects_df['revenue_actual'] = projects_df['revenue_actual'].fillna(0)
 
         if selected_project_name:
             project = projects_df[projects_df['name'] == selected_project_name].iloc[0]

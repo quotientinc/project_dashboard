@@ -352,7 +352,15 @@ class DatabaseManager:
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
 
-        return pd.read_sql_query(query, self.conn, params=params)
+        df = pd.read_sql_query(query, self.conn, params=params)
+
+        # Calculate budget_used from time_entries for each project
+        if not df.empty:
+            df['budget_used'] = df['id'].apply(
+                lambda proj_id: self.calculate_budget_used(proj_id)
+            )
+
+        return df
 
     def add_project(self, project_data):
         """Add a new project"""
@@ -536,6 +544,28 @@ class DatabaseManager:
             query += " WHERE " + " AND ".join(conditions)
 
         return pd.read_sql_query(query, self.conn, params=params)
+
+    def calculate_budget_used(self, project_id: str) -> float:
+        """
+        Calculate total budget used from time_entries for a project.
+        Returns sum of (hours × bill_rate) or amount for all time entries.
+        Returns 0.0 if no time entries exist.
+        """
+        time_entries = self.get_time_entries(project_id=project_id)
+        if time_entries.empty:
+            return 0.0
+
+        # Calculate cost for each entry
+        def calculate_entry_cost(row):
+            if pd.notna(row.get('amount')) and row['amount'] != 0:
+                return row['amount']
+            elif pd.notna(row.get('bill_rate')) and pd.notna(row.get('hours')):
+                return row['hours'] * row['bill_rate']
+            else:
+                return 0.0
+
+        time_entries['cost'] = time_entries.apply(calculate_entry_cost, axis=1)
+        return float(time_entries['cost'].sum())
 
     def add_time_entry(self, time_data):
         """Add a time entry"""
