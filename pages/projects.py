@@ -651,8 +651,7 @@ with tab2:
 
                                     if not month_info.empty:
                                         working_days = month_info['working_days'].iloc[0]
-                                        holidays = month_info['holidays'].iloc[0]
-                                        allocated_hours = (working_days - holidays) * fte * 8
+                                        allocated_hours = working_days * fte * 8
                                     else:
                                         # Fallback to 21 working days
                                         allocated_hours = 21 * fte * 8
@@ -701,8 +700,7 @@ with tab2:
 
                             if not month_info.empty:
                                 working_days = month_info['working_days'].iloc[0]
-                                holidays = month_info['holidays'].iloc[0]
-                                allocated_hours = (working_days - holidays) * row['allocated_fte'] * 8
+                                allocated_hours = working_days * row['allocated_fte'] * 8
                             else:
                                 allocated_hours = 21 * row['allocated_fte'] * 8
 

@@ -353,12 +353,11 @@ with tab3:
 
                             if not month_info.empty:
                                 working_days = month_info['working_days'].iloc[0]
-                                holidays = month_info['holidays'].iloc[0]
 
                                 month_revenue = 0
                                 for _, alloc in month_allocs.iterrows():
                                     if pd.notna(alloc.get('bill_rate')) and pd.notna(alloc.get('allocated_fte')):
-                                        hours = (working_days - holidays) * alloc['allocated_fte'] * 8
+                                        hours = working_days * alloc['allocated_fte'] * 8
                                         month_revenue += hours * alloc['bill_rate']
 
                                 projected_monthly[month_num] = month_revenue

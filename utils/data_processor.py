@@ -1103,14 +1103,6 @@ class DataProcessor:
         allocations_df['month'] = allocations_df['allocation_date'].dt.month
         allocations_df['month_name'] = allocations_df['allocation_date'].dt.strftime('%B %Y')
 
-        # TODO: This might have been a heavy-handed fix
-        # Filter to only include current and future months (projected = forward-looking)
-        # This prevents double-counting past months that already have actuals
-        ##from datetime import datetime
-        ##current_date = datetime.now()
-        ##first_of_current_month = pd.Timestamp(current_date.year, current_date.month, 1)
-        ##allocations_df = allocations_df[allocations_df['allocation_date'] >= first_of_current_month]
-
         if allocations_df.empty:
             return {}
 
@@ -1129,9 +1121,10 @@ class DataProcessor:
             allocations_df['holidays'] = 0
 
         # Calculate projected hours and revenue
-        # Formula: hours = (working_days - holidays) × allocated_fte × 8
+        # TODO: Factor PTO?
+        # Formula: hours = (working_days) × allocated_fte × 8
         allocations_df['hours'] = (
-            (allocations_df['working_days'] - allocations_df['holidays']) *
+            (allocations_df['working_days']) *
             allocations_df['allocated_fte'] *
             8
         )
@@ -1254,9 +1247,10 @@ class DataProcessor:
         cross_join = employees_df.merge(months_in_range, on='key').drop('key', axis=1)
 
         # Calculate possible hours
-        # Formula: (working_days - holidays) × (target_allocation - overhead_allocation) × 8
+        # TODO: Factor PTO?
+        # Formula: (working_days) × (target_allocation - overhead_allocation) × 8
         cross_join['hours'] = (
-            (cross_join['working_days'] - cross_join['holidays']) *
+            (cross_join['working_days']) *
             (cross_join['target_allocation'] - cross_join['overhead_allocation']) *
             8
         )
@@ -1358,8 +1352,7 @@ class DataProcessor:
 
             if not month_info.empty:
                 working_days = int(month_info['working_days'].iloc[0])
-                holidays = int(month_info['holidays'].iloc[0])
-                expected_working_days = working_days - holidays
+                expected_working_days = working_days
             else:
                 # Fallback to default if month not in database
                 logger.warning(f"Month {month_name} not found in months_df, using defaults")
