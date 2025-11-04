@@ -1,5 +1,7 @@
 import streamlit as st
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -173,6 +175,47 @@ with tab2:
                 if not pto_entries.empty:
                     pto_by_employee = pto_entries.groupby('employee_id')['hours'].sum().to_dict()
 
+            # Helper function to get project breakdown for an employee
+            def get_employee_project_breakdown(employee_id, time_entries_df):
+                """Generate project-level breakdown for a specific employee"""
+                # Filter time entries for this employee
+                emp_entries = time_entries_df[time_entries_df['employee_id'] == employee_id]
+
+                if emp_entries.empty:
+                    return pd.DataFrame(columns=['Project', 'Billable Hrs', 'Non-billable Hrs', 'Total Hrs', '% of Total'])
+
+                # Group by project and billable status
+                breakdown = emp_entries.groupby(['project_name', 'billable'])['hours'].sum().reset_index()
+
+                # Pivot to get billable and non-billable columns
+                breakdown_pivot = breakdown.pivot(index='project_name', columns='billable', values='hours').reset_index()
+                breakdown_pivot.columns.name = None
+
+                # Rename columns - billable=0 is non-billable, billable=1 is billable
+                column_map = {'project_name': 'Project'}
+                if 0 in breakdown_pivot.columns:
+                    column_map[0] = 'Non-billable Hrs'
+                if 1 in breakdown_pivot.columns:
+                    column_map[1] = 'Billable Hrs'
+
+                breakdown_pivot = breakdown_pivot.rename(columns=column_map)
+
+                # Fill NaN values with 0
+                if 'Billable Hrs' not in breakdown_pivot.columns:
+                    breakdown_pivot['Billable Hrs'] = 0
+                if 'Non-billable Hrs' not in breakdown_pivot.columns:
+                    breakdown_pivot['Non-billable Hrs'] = 0
+
+                # Calculate total and percentage
+                breakdown_pivot['Total Hrs'] = breakdown_pivot['Billable Hrs'] + breakdown_pivot['Non-billable Hrs']
+                total_hours = breakdown_pivot['Total Hrs'].sum()
+                breakdown_pivot['% of Total'] = (breakdown_pivot['Total Hrs'] / total_hours * 100).round(1)
+
+                # Sort by total hours descending
+                breakdown_pivot = breakdown_pivot.sort_values('Total Hrs', ascending=False)
+
+                return breakdown_pivot
+
             # Build utilization DataFrame
             util_data = []
 
@@ -341,7 +384,7 @@ with tab2:
 
             # Display table
             display_df = filtered_df[[
-                'name', 'possible_hours',
+                'employee_id', 'name', 'possible_hours',
                 'actual_hours', 'actual_billable_hours', 'pto_hours', 'other_nonbillable_hours', 'utilization_pct', 'status'
             ]].copy()
 
@@ -375,6 +418,7 @@ with tab2:
                 else:
                     return 'background-color: #cce5ff'  # Blue
 
+            # Apply styling to display_df
             styled_df = display_df.style.applymap(color_utilization_status, subset=['Billable Utilization %'])
 
             # Show the logic behind the table for reference
@@ -395,9 +439,96 @@ with tab2:
 **Notes:**
 - Possible hours are adjusted only for employees hired or terminated mid-month, not based on which days they logged time entries.
 - Actual Billable Hrs shows only time entries marked as billable=1 in the database.
+- Click on any row to view project-level breakdown.
 """)
 
-            st.dataframe(styled_df, use_container_width=True, hide_index=True, height=500)
+            # Display table with row selection
+            st.info("👆 Click on any row to view detailed project breakdown for that employee")
+
+            selection = st.dataframe(
+                styled_df,
+                use_container_width=True,
+                hide_index=True,
+                height=500,
+                on_select="rerun",
+                selection_mode="single-row",
+                key="employee_utilization_table",
+                column_config={
+                    "employee_id": None  # Hide employee_id column
+                }
+            )
+
+            # Handle row selection to show project breakdown
+            if selection and selection.selection.rows:
+                selected_idx = selection.selection.rows[0]
+                selected_row = display_df.iloc[selected_idx]
+                emp_id = selected_row['employee_id']
+                emp_name = selected_row['Employee']
+
+                st.markdown("---")
+
+                with st.expander(f"📊 {emp_name} - Project Breakdown", expanded=True):
+                    st.markdown(f"**{month_key}**")
+
+                    # Get project breakdown
+                    breakdown_df = get_employee_project_breakdown(emp_id, time_entries_df)
+
+                    if not breakdown_df.empty:
+                        col1, col2 = st.columns([1, 1])
+
+                        with col1:
+                            # Display breakdown table
+                            st.markdown("##### Hours by Project")
+
+                            # Format the breakdown table for display
+                            breakdown_display = breakdown_df.copy()
+                            breakdown_display['Billable Hrs'] = breakdown_display['Billable Hrs'].round(1)
+                            breakdown_display['Non-billable Hrs'] = breakdown_display['Non-billable Hrs'].round(1)
+                            breakdown_display['Total Hrs'] = breakdown_display['Total Hrs'].round(1)
+
+                            st.dataframe(
+                                breakdown_display,
+                                use_container_width=True,
+                                hide_index=True
+                            )
+
+                        with col2:
+                            # Create pie chart
+                            st.markdown("##### Distribution")
+
+                            # Prepare data for pie chart - separate billable and non-billable
+                            chart_data = []
+                            for _, proj_row in breakdown_df.iterrows():
+                                if proj_row['Billable Hrs'] > 0:
+                                    chart_data.append({
+                                        'Category': f"{proj_row['Project']} (Billable)",
+                                        'Hours': proj_row['Billable Hrs'],
+                                        'Type': 'Billable'
+                                    })
+                                if proj_row['Non-billable Hrs'] > 0:
+                                    chart_data.append({
+                                        'Category': f"{proj_row['Project']} (Non-billable)",
+                                        'Hours': proj_row['Non-billable Hrs'],
+                                        'Type': 'Non-billable'
+                                    })
+
+                            chart_df = pd.DataFrame(chart_data)
+
+                            if not chart_df.empty:
+                                fig = px.pie(
+                                    chart_df,
+                                    values='Hours',
+                                    names='Category',
+                                    color='Type',
+                                    color_discrete_map={
+                                        'Billable': '#2E7D32',
+                                        'Non-billable': '#FFA726'
+                                    }
+                                )
+                                fig.update_layout(height=350, showlegend=True)
+                                st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.info(f"No time entries found for {emp_name} in {month_key}")
 
             # Summary totals
             st.markdown("##### Summary Totals")
@@ -412,8 +543,9 @@ with tab2:
                 avg_util = filtered_df['utilization_pct'].mean()
                 st.metric("Avg Utilization", f"{avg_util:.1f}%")
 
-            # CSV Export
-            csv = display_df.to_csv(index=False)
+            # CSV Export (without employee_id column)
+            csv_df = display_df.drop(columns=['employee_id'])
+            csv = csv_df.to_csv(index=False)
             st.download_button(
                 label="📥 Download Utilization Report",
                 data=csv,
