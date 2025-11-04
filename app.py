@@ -145,7 +145,17 @@ with st.sidebar:
         st.metric("Total Projects", len(projects_df))
         st.metric("Active Projects", len(projects_df[projects_df['status'] == 'Active']))
     if not employees_df.empty:
-        st.metric("Total Employees", len(employees_df))
+        # Filter for active, billable, salary employees
+        current_date = datetime.now().date()
+        billable_employees = employees_df[
+            (employees_df['billable'] == 1) &
+            (employees_df['pay_type'] == 'Salary') &
+            (
+                (pd.isna(employees_df['term_date'])) |
+                (pd.to_datetime(employees_df['term_date']).dt.date >= current_date)
+            )
+        ]
+        st.metric("Total Billable Employees", len(billable_employees))
 
 # Run the selected page
 pg.run()
