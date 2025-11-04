@@ -380,29 +380,6 @@ with tab2:
 
             util_df = pd.DataFrame(util_data)
 
-            # Summary cards
-            st.markdown("### 📊 Utilization Summary")
-
-            col1, col2, col3, col4 = st.columns(4)
-
-            with col1:
-                over_util = len(util_df[util_df['utilization_pct'] > 120])
-                st.metric("🔴 Over-Utilized (>120%)", over_util)
-
-            with col2:
-                high_util = len(util_df[(util_df['utilization_pct'] >= 100) & (util_df['utilization_pct'] <= 120)])
-                st.metric("🟡 High Utilization (100-120%)", high_util)
-
-            with col3:
-                good_util = len(util_df[(util_df['utilization_pct'] >= 80) & (util_df['utilization_pct'] < 100)])
-                st.metric("🟢 Well-Utilized (80-100%)", good_util)
-
-            with col4:
-                under_util = len(util_df[util_df['utilization_pct'] < 80])
-                st.metric("🔵 Under-Utilized (<80%)", under_util)
-
-            st.divider()
-
             # Filters
             col1, col2, col3 = st.columns(3)
 
@@ -447,8 +424,28 @@ with tab2:
             elif sort_by == "Variance":
                 filtered_df = filtered_df.sort_values('variance', ascending=False)
 
-            st.markdown("---")
             st.markdown(f"### 📋 Detailed Utilization - {month_key}")
+
+            # Summary cards
+            st.markdown("#### Utilization Summary")
+
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                over_util = len(util_df[util_df['utilization_pct'] > 120])
+                st.metric("🔴 Over-Utilized (>120%)", over_util)
+
+            with col2:
+                high_util = len(util_df[(util_df['utilization_pct'] >= 100) & (util_df['utilization_pct'] <= 120)])
+                st.metric("🟡 High Utilization (100-120%)", high_util)
+
+            with col3:
+                good_util = len(util_df[(util_df['utilization_pct'] >= 80) & (util_df['utilization_pct'] < 100)])
+                st.metric("🟢 Well-Utilized (80-100%)", good_util)
+
+            with col4:
+                under_util = len(util_df[util_df['utilization_pct'] < 80])
+                st.metric("🔵 Under-Utilized (<80%)", under_util)
 
             # Display table
             display_df = filtered_df[[
@@ -489,9 +486,14 @@ with tab2:
             # Apply styling to display_df
             styled_df = display_df.style.applymap(color_utilization_status, subset=['Billable Utilization %'])
 
+            st.markdown("#### Utilization Report")
+
+            col1, col2 = st.columns([1, 3])
+
             # Show the logic behind the table for reference
-            with st.popover("💡Logic for Utilization Table"):
-                st.markdown("""For each employee in the utilization table:
+            with col1:
+                with st.popover("💡Logic for Utilization Table"):
+                    st.markdown("""For each employee in the utilization table:
 
   | Column                  | Source                                                  | Calculation                                                                          |
   |-------------------------|---------------------------------------------------------|--------------------------------------------------------------------------------------|
@@ -511,7 +513,8 @@ with tab2:
 """)
 
             # Display table with row selection
-            st.info("👆 Click on any row to view detailed project breakdown for that employee")
+            with col2:
+                st.info("👆 Click on any row to view detailed project breakdown for that employee")
 
             selection = st.dataframe(
                 styled_df,
