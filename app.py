@@ -156,6 +156,7 @@ with st.sidebar:
         ].copy()
 
         total_contract_value_avg = 0
+        projects_ytd_count = 0
         if not eligible_projects.empty:
             for _, project in eligible_projects.iterrows():
                 # Skip if any required fields are null/NaN
@@ -194,9 +195,10 @@ with st.sidebar:
 
                 prorated_value = (contract_value / total_months) * overlap_months
                 total_contract_value_avg += prorated_value
+                projects_ytd_count += 1
 
         st.metric("Total Contract Value (AVG)", f"${total_contract_value_avg:,.0f}")
-        st.metric("Active Projects", len(projects_df[projects_df['status'] == 'Active']))
+        st.metric("Total Projects YTD", projects_ytd_count)
     if not employees_df.empty:
         # Filter for active, billable, salary employees
         current_date = datetime.now().date()
