@@ -347,7 +347,7 @@ with tab2:
 
             display_df = display_df.rename(columns={
                 'name': 'Employee',
-                'possible_hours': 'Possible Hrs',
+                'possible_hours': 'Possible Billable Hrs',
                 'actual_hours': 'Actual Hrs',
                 'actual_billable_hours': 'Actual Billable Hrs',
                 'pto_hours': 'PTO Hrs',
@@ -357,7 +357,7 @@ with tab2:
             })
 
             # Format columns
-            display_df['Possible Hrs'] = display_df['Possible Hrs'].round(1)
+            display_df['Possible Billable Hrs'] = display_df['Possible Billable Hrs'].round(1)
             display_df['Actual Hrs'] = display_df['Actual Hrs'].round(1)
             display_df['Actual Billable Hrs'] = display_df['Actual Billable Hrs'].round(1)
             display_df['PTO Hrs'] = display_df['PTO Hrs'].round(1)
@@ -384,10 +384,10 @@ with tab2:
   | Column                  | Source                                                  | Calculation                                                                          |
   |-------------------------|---------------------------------------------------------|--------------------------------------------------------------------------------------|
   | Employee                | employees_df['name']                                    | Direct from employees table                                                          |
-  | Possible Hrs            | metrics['possible'][month_key][emp_id]['hours']         | From employees table: (working_days) × (target_allocation - overhead_allocation) × 8 |
+  | Possible Billable Hrs   | metrics['possible'][month_key][emp_id]['hours']         | From employees table: (working_days) × (target_allocation - overhead_allocation) × 8 |
   | Actual Hrs              | metrics['actuals'][month_key][emp_id]['hours']          | From time_entries table: sum of ALL hours logged (billable + non-billable)           |
   | Actual Billable Hrs     | metrics['actuals'][month_key][emp_id]['billable_hours'] | From time_entries table: sum of hours where billable=1                               |
-  | PTO Hrs                 | time_entries_df where project_id='FRINGE.PTO'          | Sum of hours from time_entries for PTO project                                       |
+  | PTO Hrs                 | time_entries_df where project_id='FRINGE.PTO'           | Sum of hours from time_entries for PTO project                                       |
   | Other Non-billable Hrs  | Calculated                                              | (actual_hours - actual_billable_hours) - pto_hours                                   |
   | Billable Utilization %  | Calculated                                              | (actual_billable_hours / adjusted_possible_hours) × 100                              |
   | Status                  | Calculated                                              | Based on Billable Utilization %: 🔴 >120%, 🟡 100-120%, 🟢 80-100%, 🔵 <80%         |
