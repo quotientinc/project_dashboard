@@ -341,7 +341,7 @@ with tab2:
 
 """)
 
-            st.dataframe(filtered_df, use_container_width=True, hide_index=True, height=500)
+            st.dataframe(styled_df, use_container_width=True, hide_index=True, height=500)
 
             # Summary totals
             st.markdown("##### Summary Totals")
