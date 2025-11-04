@@ -324,6 +324,23 @@ with tab2:
             styled_df = display_df.style.applymap(color_utilization_status, subset=['Utilization %'])
             styled_df = styled_df.applymap(color_variance, subset=['Variance'])
 
+            # Show the logic behind the table for reference
+            with st.popover("💡Logic for Utilization Table"):
+                st.markdown("""For each employee in the utilization table:
+
+  | Column        | Source                                           | Calculation                                                                                                |
+  |---------------|--------------------------------------------------|------------------------------------------------------------------------------------------------------------|
+  | Employee      | employees_df['name']                             | Direct from employees table                                                                                |
+  | Role          | employees_df['role']                             | Direct from employees table                                                                                |
+  | Possible Hrs  | metrics['possible'][month_key][emp_id]['hours']  | From employees table: (working_days - holidays) × (target_allocation - overhead_allocation) × 8 (line 165) |
+  | Projected Hrs | metrics['projected'][month_key][emp_id]['hours'] | From allocations table: (working_days - holidays) × allocated_fte × 8 (line 177)                           |
+  | Actual Hrs    | metrics['actuals'][month_key][emp_id]['hours']   | From time_entries table: sum of actual hours logged (line 176)                                             |
+  | Utilization % | Calculated                                       | (actual_hours / adjusted_possible_hours) × 100 (line 179)                                                  |
+  | Variance      | Calculated                                       | actual_hours - projected_hours (line 180)                                                                  |
+  | Status        | Calculated                                       | Based on Utilization %: 🔴 >120%, 🟡 100-120%, 🟢 80-100%, 🔵 <80% (lines 182-194)                         |
+
+""")
+
             st.dataframe(styled_df, use_container_width=True, hide_index=True, height=500)
 
             # Summary totals
