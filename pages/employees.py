@@ -216,6 +216,74 @@ with tab2:
 
                 return breakdown_pivot
 
+            # Dialog function for showing employee project breakdown
+            @st.dialog("Employee Project Breakdown", width="large")
+            def show_project_breakdown(emp_id, emp_name, month_key, time_entries_df):
+                """Display project-level breakdown for a selected employee in a modal dialog"""
+                st.markdown(f"### {emp_name}")
+                st.caption(f"{month_key}")
+
+                # Get project breakdown
+                breakdown_df = get_employee_project_breakdown(emp_id, time_entries_df)
+
+                if not breakdown_df.empty:
+                    col1, col2 = st.columns([1, 1])
+
+                    with col1:
+                        # Display breakdown table
+                        st.markdown("#### Hours by Project")
+
+                        # Format the breakdown table for display
+                        breakdown_display = breakdown_df.copy()
+                        breakdown_display['Billable Hrs'] = breakdown_display['Billable Hrs'].round(1)
+                        breakdown_display['Non-billable Hrs'] = breakdown_display['Non-billable Hrs'].round(1)
+                        breakdown_display['Total Hrs'] = breakdown_display['Total Hrs'].round(1)
+
+                        st.dataframe(
+                            breakdown_display,
+                            use_container_width=True,
+                            hide_index=True,
+                            height=400
+                        )
+
+                    with col2:
+                        # Create pie chart
+                        st.markdown("#### Distribution")
+
+                        # Prepare data for pie chart - separate billable and non-billable
+                        chart_data = []
+                        for _, proj_row in breakdown_df.iterrows():
+                            if proj_row['Billable Hrs'] > 0:
+                                chart_data.append({
+                                    'Category': f"{proj_row['Project']} (Billable)",
+                                    'Hours': proj_row['Billable Hrs'],
+                                    'Type': 'Billable'
+                                })
+                            if proj_row['Non-billable Hrs'] > 0:
+                                chart_data.append({
+                                    'Category': f"{proj_row['Project']} (Non-billable)",
+                                    'Hours': proj_row['Non-billable Hrs'],
+                                    'Type': 'Non-billable'
+                                })
+
+                        chart_df = pd.DataFrame(chart_data)
+
+                        if not chart_df.empty:
+                            fig = px.pie(
+                                chart_df,
+                                values='Hours',
+                                names='Category',
+                                color='Type',
+                                color_discrete_map={
+                                    'Billable': '#2E7D32',
+                                    'Non-billable': '#FFA726'
+                                }
+                            )
+                            fig.update_layout(height=400, showlegend=True)
+                            st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info(f"No time entries found for {emp_name} in {month_key}")
+
             # Build utilization DataFrame
             util_data = []
 
@@ -458,77 +526,15 @@ with tab2:
                 }
             )
 
-            # Handle row selection to show project breakdown
+            # Handle row selection - open dialog to show project breakdown
             if selection and selection.selection.rows:
                 selected_idx = selection.selection.rows[0]
                 selected_row = display_df.iloc[selected_idx]
                 emp_id = selected_row['employee_id']
                 emp_name = selected_row['Employee']
 
-                st.markdown("---")
-
-                with st.expander(f"📊 {emp_name} - Project Breakdown", expanded=True):
-                    st.markdown(f"**{month_key}**")
-
-                    # Get project breakdown
-                    breakdown_df = get_employee_project_breakdown(emp_id, time_entries_df)
-
-                    if not breakdown_df.empty:
-                        col1, col2 = st.columns([1, 1])
-
-                        with col1:
-                            # Display breakdown table
-                            st.markdown("##### Hours by Project")
-
-                            # Format the breakdown table for display
-                            breakdown_display = breakdown_df.copy()
-                            breakdown_display['Billable Hrs'] = breakdown_display['Billable Hrs'].round(1)
-                            breakdown_display['Non-billable Hrs'] = breakdown_display['Non-billable Hrs'].round(1)
-                            breakdown_display['Total Hrs'] = breakdown_display['Total Hrs'].round(1)
-
-                            st.dataframe(
-                                breakdown_display,
-                                use_container_width=True,
-                                hide_index=True
-                            )
-
-                        with col2:
-                            # Create pie chart
-                            st.markdown("##### Distribution")
-
-                            # Prepare data for pie chart - separate billable and non-billable
-                            chart_data = []
-                            for _, proj_row in breakdown_df.iterrows():
-                                if proj_row['Billable Hrs'] > 0:
-                                    chart_data.append({
-                                        'Category': f"{proj_row['Project']} (Billable)",
-                                        'Hours': proj_row['Billable Hrs'],
-                                        'Type': 'Billable'
-                                    })
-                                if proj_row['Non-billable Hrs'] > 0:
-                                    chart_data.append({
-                                        'Category': f"{proj_row['Project']} (Non-billable)",
-                                        'Hours': proj_row['Non-billable Hrs'],
-                                        'Type': 'Non-billable'
-                                    })
-
-                            chart_df = pd.DataFrame(chart_data)
-
-                            if not chart_df.empty:
-                                fig = px.pie(
-                                    chart_df,
-                                    values='Hours',
-                                    names='Category',
-                                    color='Type',
-                                    color_discrete_map={
-                                        'Billable': '#2E7D32',
-                                        'Non-billable': '#FFA726'
-                                    }
-                                )
-                                fig.update_layout(height=350, showlegend=True)
-                                st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        st.info(f"No time entries found for {emp_name} in {month_key}")
+                # Open modal dialog with employee project breakdown
+                show_project_breakdown(emp_id, emp_name, month_key, time_entries_df)
 
             # Summary totals
             st.markdown("##### Summary Totals")
