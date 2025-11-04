@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Builds the Quotient Project Dashboard
+set -e
+
+readonly TARGET_IMAGE='qpd'
+readonly TAG="${1:-latest}"
+
+cd "$(dirname "$0")/.."
+
+args=()
+hash="$(git rev-parse --short HEAD)"
+if [[ -n "${hash}" ]]; then
+  args+=(--label "git.head=${hash}")
+fi
+
+docker build -f ./docker/Dockerfile -t "${TARGET_IMAGE}:${TAG}" "${args[@]}" .
