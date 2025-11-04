@@ -142,7 +142,60 @@ with st.sidebar:
     employees_df = db.get_employees()
 
     if not projects_df.empty:
-        st.metric("Total Projects", len(projects_df))
+        # Calculate Total Contract Value (AVG) for current year
+        current_year = datetime.now().year
+        current_year_start = datetime(current_year, 1, 1).date()
+        current_year_end = datetime(current_year, 12, 31).date()
+
+        # Filter for Active/Completed billable projects that overlap with current year
+        eligible_projects = projects_df[
+            (projects_df['status'].isin(['Active', 'Completed'])) &
+            (projects_df['billable'] == 1) &
+            (pd.to_datetime(projects_df['start_date']).dt.date <= current_year_end) &
+            (pd.to_datetime(projects_df['end_date']).dt.date >= current_year_start)
+        ].copy()
+
+        total_contract_value_avg = 0
+        if not eligible_projects.empty:
+            for _, project in eligible_projects.iterrows():
+                # Skip if any required fields are null/NaN
+                if pd.isna(project['start_date']) or pd.isna(project['end_date']) or pd.isna(project['contract_value']):
+                    continue
+
+                start_date = pd.to_datetime(project['start_date']).date()
+                end_date = pd.to_datetime(project['end_date']).date()
+                contract_value = float(project['contract_value'])
+
+                # Skip if contract_value is 0 or negative
+                if contract_value <= 0:
+                    continue
+
+                # Calculate total project duration in days
+                total_days = (end_date - start_date).days + 1
+
+                # Skip if duration is invalid
+                if total_days <= 0:
+                    continue
+
+                # Calculate overlap with current year in days
+                overlap_start = max(start_date, current_year_start)
+                overlap_end = min(end_date, current_year_end)
+                overlap_days = (overlap_end - overlap_start).days + 1
+
+                # Skip if no overlap
+                if overlap_days <= 0:
+                    continue
+
+                # Calculate prorated value using day-based calculation
+                # Convert days to months using average days per month (365.25 / 12)
+                avg_days_per_month = 365.25 / 12
+                total_months = total_days / avg_days_per_month
+                overlap_months = overlap_days / avg_days_per_month
+
+                prorated_value = (contract_value / total_months) * overlap_months
+                total_contract_value_avg += prorated_value
+
+        st.metric("Total Contract Value (AVG)", f"${total_contract_value_avg:,.0f}")
         st.metric("Active Projects", len(projects_df[projects_df['status'] == 'Active']))
     if not employees_df.empty:
         # Filter for active, billable, salary employees
