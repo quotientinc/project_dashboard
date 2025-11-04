@@ -119,14 +119,39 @@ with tab2:
                     end_date=end_date
                 )
 
-            # Helper function to adjust possible hours for hire/term dates
-            def adjust_possible_hours_for_employee(emp_id, possible_hours, possible_days, actual_days):
-                """Adjust possible hours based on actual days worked (for partial months)"""
-                if possible_days > 0 and actual_days != possible_days:
-                    # Calculate daily rate and adjust
-                    daily_rate = possible_hours / possible_days
-                    return daily_rate * actual_days
-                return possible_hours
+            # Helper function to calculate working days in a month range
+            def get_working_days_in_range(start_date, end_date, months_df, year, month):
+                """Calculate working days between start and end date for a specific month"""
+                # Get month info
+                month_info = months_df[
+                    (months_df['year'] == year) &
+                    (months_df['month'] == month)
+                ]
+
+                if month_info.empty:
+                    return 21  # Default fallback
+
+                working_days_in_month = int(month_info['working_days'].iloc[0])
+
+                # Calculate the actual working days the employee was active
+                month_start = datetime(year, month, 1).date()
+                month_end = datetime(year, month, calendar.monthrange(year, month)[1]).date()
+
+                # Determine actual start and end dates for this employee in this month
+                actual_start = max(start_date, month_start)
+                actual_end = min(end_date, month_end)
+
+                # If they worked the entire month, return full working days
+                if actual_start == month_start and actual_end == month_end:
+                    return working_days_in_month
+
+                # Calculate proportion of month worked
+                days_in_month = (month_end - month_start).days + 1
+                days_worked = (actual_end - actual_start).days + 1
+                proportion = days_worked / days_in_month
+
+                # Return prorated working days
+                return int(working_days_in_month * proportion)
 
             # Extract month key (should only be one month)
             month_key = f"{month_names[selected_month - 1]} {selected_year}"
@@ -135,46 +160,59 @@ with tab2:
             first_day_of_month = datetime(selected_year, selected_month, 1).date()
             last_day_of_month = datetime(selected_year, selected_month, last_day).date()
 
+            # Get months data for working days calculation
+            months_df = db.get_months()
+
             # Build utilization DataFrame
             util_data = []
 
             for _, emp in employees_df.iterrows():
                 emp_id_str = str(emp['id'])
 
-                # Check if employee was active during the report month
-                # Skip if hired after the month ended
+                # Skip non-billable employees
+                if emp.get('billable', 0) != 1:
+                    continue
+
+                # Determine employee's active date range
                 if pd.notna(emp.get('hire_date')):
                     hire_date = pd.to_datetime(emp['hire_date']).date()
                     if hire_date > last_day_of_month:
                         continue  # Skip - hired after this month
+                else:
+                    hire_date = first_day_of_month  # Assume active from start of month
 
-                # Skip if termed before the month started
                 if pd.notna(emp.get('term_date')):
                     term_date = pd.to_datetime(emp['term_date']).date()
                     if term_date < first_day_of_month:
                         continue  # Skip - terminated before this month
+                else:
+                    term_date = last_day_of_month  # Assume active through end of month
 
                 # Get data from metrics
                 actuals = metrics['actuals'].get(month_key, {}).get(emp_id_str, {'hours': 0, 'revenue': 0, 'worked_days': 0})
                 projected = metrics['projected'].get(month_key, {}).get(emp_id_str, {'hours': 0, 'revenue': 0, 'worked_days': 0})
                 possible = metrics['possible'].get(month_key, {}).get(emp_id_str, {'hours': 0, 'revenue': 0, 'worked_days': 0})
 
-                # Adjust possible hours for hire/term dates
-                actual_worked_days = actuals['worked_days']
-                possible_worked_days = possible['worked_days']
+                # Adjust possible hours based on hire/term dates (not time entry days)
                 possible_hours = possible['hours']
+                possible_worked_days = possible['worked_days']
 
-                # Adjust if employee worked partial month
-                if actual_worked_days > 0 and actual_worked_days != possible_worked_days:
-                    adjusted_possible_hours = adjust_possible_hours_for_employee(
-                        emp['id'], possible_hours, possible_worked_days, actual_worked_days
-                    )
+                # Calculate actual working days based on hire/term dates
+                actual_working_days_in_month = get_working_days_in_range(
+                    hire_date, term_date, months_df, selected_year, selected_month
+                )
+
+                # Adjust possible hours if employee worked partial month
+                if actual_working_days_in_month != possible_worked_days and possible_worked_days > 0:
+                    daily_rate = possible_hours / possible_worked_days
+                    adjusted_possible_hours = daily_rate * actual_working_days_in_month
                 else:
                     adjusted_possible_hours = possible_hours
 
                 # Calculate utilization metrics
                 actual_hours = actuals['hours']
                 projected_hours = projected['hours']
+                actual_worked_days = actuals['worked_days']  # Days with time entries (for display only)
 
                 utilization_pct = (actual_hours / adjusted_possible_hours * 100) if adjusted_possible_hours > 0 else 0
                 variance = actual_hours - projected_hours
@@ -197,6 +235,7 @@ with tab2:
                     'employee_id': emp['id'],
                     'name': emp['name'],
                     'role': emp['role'],
+                    'pay_type': emp.get('pay_type', 'Hourly'),
                     'possible_hours': adjusted_possible_hours,
                     'projected_hours': projected_hours,
                     'actual_hours': actual_hours,
@@ -236,10 +275,11 @@ with tab2:
             col1, col2, col3 = st.columns(3)
 
             with col1:
-                role_filter = st.selectbox(
-                    "Filter by Role",
-                    ["All"] + sorted(util_df['role'].dropna().unique().tolist()),
-                    key="util_role_filter"
+                pay_type_filter = st.selectbox(
+                    "Filter by Pay Type",
+                    ["All", "Hourly", "Salary"],
+                    index=2,  # Default to "Salary"
+                    key="util_pay_type_filter"
                 )
 
             with col2:
@@ -259,8 +299,8 @@ with tab2:
             # Apply filters
             filtered_df = util_df.copy()
 
-            if role_filter != "All":
-                filtered_df = filtered_df[filtered_df['role'] == role_filter]
+            if pay_type_filter != "All":
+                filtered_df = filtered_df[filtered_df['pay_type'] == pay_type_filter]
 
             if status_filter != "All":
                 filtered_df = filtered_df[filtered_df['status'] == status_filter]
@@ -328,17 +368,18 @@ with tab2:
             with st.popover("💡Logic for Utilization Table"):
                 st.markdown("""For each employee in the utilization table:
 
-  | Column        | Source                                           | Calculation                                                                                                |
-  |---------------|--------------------------------------------------|------------------------------------------------------------------------------------------------------------|
-  | Employee      | employees_df['name']                             | Direct from employees table                                                                                |
-  | Role          | employees_df['role']                             | Direct from employees table                                                                                |
-  | Possible Hrs  | metrics['possible'][month_key][emp_id]['hours']  | From employees table: (working_days) × (target_allocation - overhead_allocation) × 8 (line 165) |
-  | Projected Hrs | metrics['projected'][month_key][emp_id]['hours'] | From allocations table: (working_days) × allocated_fte × 8 (line 177)                           |
-  | Actual Hrs    | metrics['actuals'][month_key][emp_id]['hours']   | From time_entries table: sum of actual hours logged (line 176)                                             |
-  | Utilization % | Calculated                                       | (actual_hours / adjusted_possible_hours) × 100 (line 179)                                                  |
-  | Variance      | Calculated                                       | actual_hours - projected_hours (line 180)                                                                  |
-  | Status        | Calculated                                       | Based on Utilization %: 🔴 >120%, 🟡 100-120%, 🟢 80-100%, 🔵 <80% (lines 182-194)                         |
+  | Column        | Source                                           | Calculation                                                                          |
+  |---------------|--------------------------------------------------|--------------------------------------------------------------------------------------|
+  | Employee      | employees_df['name']                             | Direct from employees table                                                          |
+  | Role          | employees_df['role']                             | Direct from employees table                                                          |
+  | Possible Hrs  | metrics['possible'][month_key][emp_id]['hours']  | From employees table: (working_days) × (target_allocation - overhead_allocation) × 8 |
+  | Projected Hrs | metrics['projected'][month_key][emp_id]['hours'] | From allocations table: (working_days) × allocated_fte × 8                           |
+  | Actual Hrs    | metrics['actuals'][month_key][emp_id]['hours']   | From time_entries table: sum of actual hours logged                                  |
+  | Utilization % | Calculated                                       | (actual_hours / adjusted_possible_hours) × 100                                       |
+  | Variance      | Calculated                                       | actual_hours - projected_hours                                                       |
+  | Status        | Calculated                                       | Based on Utilization %: 🔴 >120%, 🟡 100-120%, 🟢 80-100%, 🔵 <80%                  |
 
+**Note:** Possible hours are adjusted only for employees hired or terminated mid-month, not based on which days they logged time entries.
 """)
 
             st.dataframe(styled_df, use_container_width=True, hide_index=True, height=500)
