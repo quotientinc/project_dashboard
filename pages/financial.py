@@ -3,306 +3,491 @@ import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
 from datetime import datetime, timedelta
+from utils.logger import get_logger
 
+logger = get_logger(__name__)
 
 db = st.session_state.db_manager
 processor = st.session_state.data_processor
-filters = st.session_state.filters
 
-st.markdown("### 💰 Financial Analysis")
+# Get current year
+current_year = datetime.now().year
 
-# Load data
+# Year selector (default to current year)
+selected_year = st.selectbox(
+    "Select Year",
+    options=[current_year - 1, current_year, current_year + 1],
+    index=1,  # Default to current year
+    help="Financial analysis for the selected calendar year"
+)
+
+st.markdown(f"### 💰 Financial Analysis - {selected_year}")
+
+# Load data filtered to selected year
 projects_df = db.get_projects()
-expenses_df = db.get_expenses()
-time_entries_df = db.get_time_entries()
-allocations_df = db.get_allocations()
 
-# Key Financial Metrics
-st.markdown("#### Key Financial Metrics")
+# Filter projects active in selected year (start or end date within year)
+year_start = f"{selected_year}-01-01"
+year_end = f"{selected_year}-12-31"
+
+if not projects_df.empty:
+    projects_df['start_date_dt'] = pd.to_datetime(projects_df['start_date'])
+    projects_df['end_date_dt'] = pd.to_datetime(projects_df['end_date'])
+
+    # Keep projects that overlap with selected year
+    projects_df = projects_df[
+        (projects_df['start_date_dt'] <= year_end) &
+        (projects_df['end_date_dt'] >= year_start)
+    ]
+
+# Get time entries for selected year
+time_entries_df = db.get_time_entries()
+if not time_entries_df.empty:
+    time_entries_df['date'] = pd.to_datetime(time_entries_df['date'])
+    time_entries_df = time_entries_df[time_entries_df['date'].dt.year == selected_year]
+
+# Get expenses for selected year
+expenses_df = db.get_expenses()
+if not expenses_df.empty:
+    expenses_df['date'] = pd.to_datetime(expenses_df['date'])
+    expenses_df = expenses_df[expenses_df['date'].dt.year == selected_year]
+
+# Get allocations for selected year
+allocations_df = db.get_allocations()
+if not allocations_df.empty:
+    allocations_df['allocation_date'] = pd.to_datetime(allocations_df['allocation_date'])
+    allocations_df = allocations_df[allocations_df['allocation_date'].dt.year == selected_year]
+
+# Calculate YTD actuals from time_entries
+ytd_revenue = 0
+ytd_labor_cost = 0
+
+if not time_entries_df.empty:
+    # Revenue calculation
+    def calculate_entry_revenue(row):
+        if pd.notna(row.get('amount')) and row['amount'] != 0:
+            return row['amount']
+        elif pd.notna(row.get('hourly_rate')) and pd.notna(row.get('hours')):
+            return row['hours'] * row['hourly_rate']
+        return 0
+
+    time_entries_df['revenue'] = time_entries_df.apply(calculate_entry_revenue, axis=1)
+    ytd_revenue = time_entries_df['revenue'].sum()
+    ytd_labor_cost = ytd_revenue  # Labor cost equals revenue for billable work
+
+# Expense costs
+ytd_expense_cost = expenses_df['amount'].sum() if not expenses_df.empty else 0
+ytd_total_cost = ytd_labor_cost + ytd_expense_cost
+
+# Metrics
+ytd_profit = ytd_revenue - ytd_total_cost
+ytd_margin = (ytd_profit / ytd_revenue * 100) if ytd_revenue > 0 else 0
+
+# Display key metrics
+st.markdown("#### Year-to-Date Performance")
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-    total_revenue = projects_df['revenue_actual'].sum()
-    st.metric("Total Revenue", f"${total_revenue:,.0f}")
-
+    st.metric("YTD Revenue", f"${ytd_revenue:,.0f}")
 with col2:
-    total_costs = projects_df['budget_used'].sum()
-    st.metric("Total Costs", f"${total_costs:,.0f}")
-
+    st.metric("YTD Costs", f"${ytd_total_cost:,.0f}",
+              help=f"Labor: ${ytd_labor_cost:,.0f} | Expenses: ${ytd_expense_cost:,.0f}")
 with col3:
-    gross_profit = total_revenue - total_costs
-    st.metric("Gross Profit", f"${gross_profit:,.0f}")
-
+    st.metric("YTD Profit", f"${ytd_profit:,.0f}")
 with col4:
-    profit_margin = (gross_profit / total_revenue * 100) if total_revenue > 0 else 0
-    st.metric("Profit Margin", f"{profit_margin:.1f}%")
+    st.metric("YTD Margin", f"{ytd_margin:.1f}%")
 
 st.markdown("---")
 
-# Tabs for different financial views
-tab1, tab2, tab3, tab4 = st.tabs(["Revenue Analysis", "Cost Analysis", "Burn Rate", "Cash Flow"])
+# Tabs for focused analysis
+tab1, tab2, tab3 = st.tabs(["Monthly Trends", "Client Analysis", "Full Year Forecast"])
 
 with tab1:
-    st.markdown("#### Revenue Analysis")
-    
-    if not projects_df.empty:
-        # Revenue by project
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            name='Projected',
-            x=projects_df['name'],
-            y=projects_df['revenue_projected'],
-            marker_color='lightblue'
-        ))
-        fig.add_trace(go.Bar(
-            name='Actual',
-            x=projects_df['name'],
-            y=projects_df['revenue_actual'],
-            marker_color='darkblue'
-        ))
-        fig.update_layout(
-            title="Revenue: Projected vs Actual",
-            barmode='group',
-            height=400,
-            xaxis_tickangle=-45
-        )
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Revenue by client
-        client_revenue = projects_df.groupby('client')['revenue_actual'].sum().reset_index()
-        fig = px.pie(
-            client_revenue,
-            values='revenue_actual',
-            names='client',
-            title="Revenue by Client"
-        )
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Revenue trends
-        if not time_entries_df.empty:
-            time_entries_df['date'] = pd.to_datetime(time_entries_df['date'])
-            time_entries_df['revenue'] = time_entries_df['hours'] * time_entries_df['hourly_rate']
-            # Group by month using to_timestamp to avoid Period serialization issues
-            time_entries_df['month'] = time_entries_df['date'].dt.to_period('M').dt.to_timestamp()
-            monthly_revenue = time_entries_df.groupby('month')['revenue'].sum().reset_index()
-            monthly_revenue.columns = ['date', 'revenue']
+    st.markdown("#### 📈 Monthly Trends")
 
-            fig = px.line(
-                monthly_revenue,
-                x='date',
-                y='revenue',
-                title="Monthly Revenue Trend",
-                markers=True
-            )
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
+    if not time_entries_df.empty:
+        # Prepare monthly data
+        monthly_df = time_entries_df.copy()
+        monthly_df['month'] = monthly_df['date'].dt.to_period('M').astype(str)
 
-with tab2:
-    st.markdown("#### Cost Analysis")
-    
-    # Cost breakdown
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if not time_entries_df.empty:
-            labor_costs = (time_entries_df['hours'] * time_entries_df['hourly_rate']).sum()
-        else:
-            labor_costs = 0
-        
+        # Calculate monthly revenue
+        monthly_revenue = monthly_df.groupby('month')['revenue'].sum().reset_index()
+        monthly_revenue.columns = ['Month', 'Revenue']
+
+        # Calculate monthly labor costs (same as revenue for billable)
+        monthly_labor = monthly_df.groupby('month')['revenue'].sum().reset_index()
+        monthly_labor.columns = ['Month', 'Labor Cost']
+
+        # Calculate monthly expenses
         if not expenses_df.empty:
-            expense_costs = expenses_df['amount'].sum()
+            exp_df = expenses_df.copy()
+            exp_df['month'] = exp_df['date'].dt.to_period('M').astype(str)
+            monthly_expenses = exp_df.groupby('month')['amount'].sum().reset_index()
+            monthly_expenses.columns = ['Month', 'Expenses']
         else:
-            expense_costs = 0
-        
-        total_costs = labor_costs + expense_costs
-        
-        cost_data = pd.DataFrame({
-            'Category': ['Labor', 'Expenses'],
-            'Amount': [labor_costs, expense_costs]
-        })
-        
-        fig = px.pie(
-            cost_data,
-            values='Amount',
-            names='Category',
-            title="Cost Distribution"
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col2:
-        if not expenses_df.empty:
-            category_costs = expenses_df.groupby('category')['amount'].sum().reset_index()
-            fig = px.bar(
-                category_costs,
-                x='category',
-                y='amount',
-                title="Expenses by Category"
-            )
-            fig.update_layout(xaxis_tickangle=-45)
-            st.plotly_chart(fig, use_container_width=True)
-    
-    # Project costs comparison
-    if not projects_df.empty:
-        project_costs = []
-        for _, project in projects_df.iterrows():
-            costs = processor.calculate_project_costs(
-                project['id'],
-                allocations_df,
-                expenses_df,
-                time_entries_df
-            )
-            project_costs.append({
-                'Project': project['name'],
-                'Labor Cost': costs['labor_cost'],
-                'Expense Cost': costs['expense_cost'],
-                'Total Cost': costs['total_cost']
-            })
-        
-        costs_df = pd.DataFrame(project_costs)
-        
-        fig = go.Figure()
-        fig.add_trace(go.Bar(name='Labor', x=costs_df['Project'], y=costs_df['Labor Cost']))
-        fig.add_trace(go.Bar(name='Expenses', x=costs_df['Project'], y=costs_df['Expense Cost']))
-        fig.update_layout(
-            title="Cost Breakdown by Project",
-            barmode='stack',
-            height=400,
-            xaxis_tickangle=-45
-        )
-        st.plotly_chart(fig, use_container_width=True)
+            monthly_expenses = pd.DataFrame(columns=['Month', 'Expenses'])
 
-with tab3:
-    st.markdown("#### Burn Rate Analysis")
-    
-    if not expenses_df.empty:
-        # Calculate burn rate
-        time_period = st.selectbox("Time Period", ["Daily", "Weekly", "Monthly"])
-        period_map = {"Daily": "daily", "Weekly": "weekly", "Monthly": "monthly"}
-        
-        burn_rate_df = processor.calculate_burn_rate(expenses_df, period_map[time_period])
-        
-        if not burn_rate_df.empty:
-            # Burn rate chart
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=burn_rate_df['period'].astype(str),
-                y=burn_rate_df['burn_rate'],
-                mode='lines+markers',
-                name='Burn Rate',
-                line=dict(color='orange', width=2)
-            ))
-            fig.add_trace(go.Scatter(
-                x=burn_rate_df['period'].astype(str),
-                y=burn_rate_df['cumulative_burn'],
-                mode='lines',
-                name='Cumulative',
-                line=dict(color='red', width=2, dash='dash'),
-                yaxis='y2'
-            ))
-            fig.update_layout(
-                title=f"{time_period} Burn Rate",
-                height=400,
-                yaxis=dict(title="Burn Rate ($)"),
-                yaxis2=dict(title="Cumulative ($)", overlaying='y', side='right')
-            )
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Burn rate metrics
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                avg_burn = burn_rate_df['burn_rate'].mean()
-                st.metric("Average Burn Rate", f"${avg_burn:,.0f}")
-            with col2:
-                max_burn = burn_rate_df['burn_rate'].max()
-                st.metric("Max Burn Rate", f"${max_burn:,.0f}")
-            with col3:
-                total_burn = burn_rate_df['burn_rate'].sum()
-                st.metric("Total Burned", f"${total_burn:,.0f}")
-    else:
-        st.info("No expense data available for burn rate analysis")
+        # Merge all monthly data
+        monthly_combined = monthly_revenue.merge(monthly_labor, on='Month', how='outer')
+        monthly_combined = monthly_combined.merge(monthly_expenses, on='Month', how='outer').fillna(0)
+        monthly_combined['Total Cost'] = monthly_combined['Labor Cost'] + monthly_combined['Expenses']
+        monthly_combined['Profit'] = monthly_combined['Revenue'] - monthly_combined['Total Cost']
+        monthly_combined['Margin %'] = (monthly_combined['Profit'] / monthly_combined['Revenue'] * 100).fillna(0)
 
-with tab4:
-    st.markdown("#### Cash Flow Analysis")
-    
-    # Create cash flow data
-    if not projects_df.empty and not expenses_df.empty:
-        # Simplified cash flow calculation
-        projects_df['start_date'] = pd.to_datetime(projects_df['start_date'])
-        expenses_df['date'] = pd.to_datetime(expenses_df['date'])
-        
-        # Monthly cash flow
-        date_range = pd.date_range(
-            start=projects_df['start_date'].min(),
-            end=datetime.now(),
-            freq='M'
-        )
-        
-        cash_flow_data = []
-        for date in date_range:
-            month_start = date.replace(day=1)
-            month_end = (month_start + pd.DateOffset(months=1)) - pd.DateOffset(days=1)
-            
-            # Income (simplified - distributed evenly)
-            monthly_income = projects_df['revenue_actual'].sum() / len(date_range)
-            
-            # Expenses
-            month_expenses = expenses_df[
-                (expenses_df['date'] >= month_start) &
-                (expenses_df['date'] <= month_end)
-            ]['amount'].sum()
-            
-            net_cash_flow = monthly_income - month_expenses
-            
-            cash_flow_data.append({
-                'Month': date.strftime('%Y-%m'),
-                'Income': monthly_income,
-                'Expenses': month_expenses,
-                'Net Cash Flow': net_cash_flow
-            })
-        
-        cash_flow_df = pd.DataFrame(cash_flow_data)
-        cash_flow_df['Cumulative'] = cash_flow_df['Net Cash Flow'].cumsum()
-        
-        # Cash flow chart
+        # Sort by month
+        monthly_combined = monthly_combined.sort_values('Month')
+
+        # Chart: Revenue, Cost, and Profit by Month
         fig = go.Figure()
+
         fig.add_trace(go.Bar(
-            name='Income',
-            x=cash_flow_df['Month'],
-            y=cash_flow_df['Income'],
-            marker_color='green'
+            name='Revenue',
+            x=monthly_combined['Month'],
+            y=monthly_combined['Revenue'],
+            marker_color='#2E86C1'
         ))
+
         fig.add_trace(go.Bar(
-            name='Expenses',
-            x=cash_flow_df['Month'],
-            y=-cash_flow_df['Expenses'],
-            marker_color='red'
+            name='Total Cost',
+            x=monthly_combined['Month'],
+            y=monthly_combined['Total Cost'],
+            marker_color='#E74C3C'
         ))
+
         fig.add_trace(go.Scatter(
-            name='Cumulative',
-            x=cash_flow_df['Month'],
-            y=cash_flow_df['Cumulative'],
-            mode='lines',
-            line=dict(color='blue', width=2),
+            name='Profit',
+            x=monthly_combined['Month'],
+            y=monthly_combined['Profit'],
+            mode='lines+markers',
+            line=dict(color='#27AE60', width=3),
             yaxis='y2'
         ))
+
         fig.update_layout(
-            title="Monthly Cash Flow",
-            barmode='relative',
+            title=f"Monthly Revenue, Costs & Profit - {selected_year}",
+            xaxis_title="Month",
+            yaxis_title="Revenue & Costs ($)",
+            yaxis2=dict(
+                title="Profit ($)",
+                overlaying='y',
+                side='right'
+            ),
+            barmode='group',
             height=400,
-            yaxis=dict(title="Amount ($)"),
-            yaxis2=dict(title="Cumulative ($)", overlaying='y', side='right')
+            hovermode='x unified'
         )
+
         st.plotly_chart(fig, use_container_width=True)
-        
-        # Cash flow metrics
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Avg Monthly Income", f"${cash_flow_df['Income'].mean():,.0f}")
-        with col2:
-            st.metric("Avg Monthly Expenses", f"${cash_flow_df['Expenses'].mean():,.0f}")
-        with col3:
-            st.metric("Avg Net Cash Flow", f"${cash_flow_df['Net Cash Flow'].mean():,.0f}")
-        with col4:
-            st.metric("Current Balance", f"${cash_flow_df['Cumulative'].iloc[-1]:,.0f}")
+
+        # Display monthly breakdown table
+        st.markdown("##### Monthly Breakdown")
+        display_monthly = monthly_combined.copy()
+        display_monthly['Revenue'] = display_monthly['Revenue'].apply(lambda x: f"${x:,.0f}")
+        display_monthly['Total Cost'] = display_monthly['Total Cost'].apply(lambda x: f"${x:,.0f}")
+        display_monthly['Profit'] = display_monthly['Profit'].apply(lambda x: f"${x:,.0f}")
+        display_monthly['Margin %'] = display_monthly['Margin %'].apply(lambda x: f"{x:.1f}%")
+
+        st.dataframe(display_monthly, use_container_width=True, hide_index=True)
     else:
-        st.info("Insufficient data for cash flow analysis")
+        st.info(f"No time entry data found for {selected_year}")
+
+with tab2:
+    st.markdown("#### 🏢 Client Analysis")
+
+    if not time_entries_df.empty and not projects_df.empty:
+        # Join time_entries with projects to get client info
+        client_df = time_entries_df.merge(
+            projects_df[['id', 'client']],
+            left_on='project_id',
+            right_on='id',
+            how='left'
+        )
+
+        # Calculate revenue by client
+        client_revenue = client_df.groupby('client')['revenue'].sum().reset_index()
+        client_revenue.columns = ['Client', 'Revenue']
+
+        # Get labor costs by client (same as revenue for billable)
+        client_labor = client_df.groupby('client')['revenue'].sum().reset_index()
+        client_labor.columns = ['Client', 'Labor Cost']
+
+        # Get expenses by client (via project)
+        if not expenses_df.empty:
+            exp_client = expenses_df.merge(
+                projects_df[['id', 'client']],
+                left_on='project_id',
+                right_on='id',
+                how='left'
+            )
+            client_expenses = exp_client.groupby('client')['amount'].sum().reset_index()
+            client_expenses.columns = ['Client', 'Expenses']
+        else:
+            client_expenses = pd.DataFrame(columns=['Client', 'Expenses'])
+
+        # Combine client data
+        client_summary = client_revenue.merge(client_labor, on='Client', how='outer')
+        client_summary = client_summary.merge(client_expenses, on='Client', how='outer').fillna(0)
+        client_summary['Total Cost'] = client_summary['Labor Cost'] + client_summary['Expenses']
+        client_summary['Profit'] = client_summary['Revenue'] - client_summary['Total Cost']
+        client_summary['Margin %'] = (client_summary['Profit'] / client_summary['Revenue'] * 100).fillna(0)
+
+        # Sort by revenue descending
+        client_summary = client_summary.sort_values('Revenue', ascending=False)
+
+        # Chart 1: Revenue by Client (Pie)
+        col1, col2 = st.columns(2)
+
+        with col1:
+            fig_pie = px.pie(
+                client_summary,
+                values='Revenue',
+                names='Client',
+                title=f"Revenue by Client - {selected_year}"
+            )
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+        with col2:
+            # Chart 2: Profit Margin by Client (Bar)
+            fig_margin = go.Figure()
+            fig_margin.add_trace(go.Bar(
+                x=client_summary['Client'],
+                y=client_summary['Margin %'],
+                marker_color=client_summary['Margin %'].apply(
+                    lambda x: '#27AE60' if x > 20 else '#F39C12' if x > 0 else '#E74C3C'
+                ),
+                text=client_summary['Margin %'].apply(lambda x: f"{x:.1f}%"),
+                textposition='outside'
+            ))
+            fig_margin.update_layout(
+                title=f"Profit Margin by Client - {selected_year}",
+                xaxis_title="Client",
+                yaxis_title="Margin %",
+                height=400
+            )
+            st.plotly_chart(fig_margin, use_container_width=True)
+
+        # Client summary table
+        st.markdown("##### Client Summary")
+        display_client = client_summary.copy()
+        display_client['Revenue'] = display_client['Revenue'].apply(lambda x: f"${x:,.0f}")
+        display_client['Total Cost'] = display_client['Total Cost'].apply(lambda x: f"${x:,.0f}")
+        display_client['Profit'] = display_client['Profit'].apply(lambda x: f"${x:,.0f}")
+        display_client['Margin %'] = display_client['Margin %'].apply(lambda x: f"{x:.1f}%")
+
+        st.dataframe(display_client, use_container_width=True, hide_index=True)
+    else:
+        st.info(f"No data found for {selected_year}")
+
+with tab3:
+    st.markdown("#### 🔮 Full Year Forecast")
+
+    # Projection method toggle
+    projection_method = st.radio(
+        "Projection Method",
+        options=["Allocations-Based", "Simple Average"],
+        horizontal=True,
+        help="Allocations-Based uses planned allocations for future months. Simple Average uses YTD monthly average."
+    )
+
+    # Get current month
+    current_month = datetime.now().month
+
+    # Only show forecast for current year
+    if selected_year == current_year:
+        # Calculate YTD months and remaining months
+        ytd_months = current_month
+        remaining_months = 12 - current_month
+
+        if not time_entries_df.empty:
+            # YTD actuals by month
+            ytd_df = time_entries_df.copy()
+            ytd_df['month_num'] = ytd_df['date'].dt.month
+            ytd_monthly = ytd_df.groupby('month_num')['revenue'].sum().to_dict()
+
+            # Calculate projections
+            forecast_data = []
+
+            if projection_method == "Simple Average":
+                # Simple average of YTD months
+                ytd_avg = ytd_revenue / ytd_months if ytd_months > 0 else 0
+                projected_remaining = ytd_avg * remaining_months
+
+                # Build full year forecast
+                for month in range(1, 13):
+                    if month <= current_month:
+                        # Actual data
+                        revenue = ytd_monthly.get(month, 0)
+                        data_type = 'Actual'
+                    else:
+                        # Projected
+                        revenue = ytd_avg
+                        data_type = 'Projected (Avg)'
+
+                    forecast_data.append({
+                        'Month': month,
+                        'Month Name': datetime(selected_year, month, 1).strftime('%B'),
+                        'Revenue': revenue,
+                        'Type': data_type
+                    })
+
+            else:  # Allocations-Based
+                # Use allocations for smart projections
+                if not allocations_df.empty:
+                    # Get projected data from allocations
+                    projected_monthly = {}
+
+                    for month_num in range(current_month + 1, 13):
+                        month_str = f"{selected_year}-{month_num:02d}"
+                        month_allocs = allocations_df[
+                            allocations_df['allocation_date'].dt.strftime('%Y-%m') == month_str
+                        ]
+
+                        if not month_allocs.empty:
+                            # Calculate projected revenue from allocations
+                            # allocated_fte × bill_rate × working_days × 8 hours/day
+                            months_df = db.get_months()
+                            month_info = months_df[
+                                (months_df['year'] == selected_year) &
+                                (months_df['month'] == month_num)
+                            ]
+
+                            if not month_info.empty:
+                                working_days = month_info['working_days'].iloc[0]
+
+                                month_revenue = 0
+                                for _, alloc in month_allocs.iterrows():
+                                    if pd.notna(alloc.get('bill_rate')) and pd.notna(alloc.get('allocated_fte')):
+                                        hours = working_days * alloc['allocated_fte'] * 8
+                                        month_revenue += hours * alloc['bill_rate']
+
+                                projected_monthly[month_num] = month_revenue
+
+                    # Build full year forecast
+                    for month in range(1, 13):
+                        if month <= current_month:
+                            # Actual data
+                            revenue = ytd_monthly.get(month, 0)
+                            data_type = 'Actual'
+                        else:
+                            # Projected from allocations
+                            revenue = projected_monthly.get(month, 0)
+                            data_type = 'Projected (Alloc)'
+
+                        forecast_data.append({
+                            'Month': month,
+                            'Month Name': datetime(selected_year, month, 1).strftime('%B'),
+                            'Revenue': revenue,
+                            'Type': data_type
+                        })
+                else:
+                    st.warning("No allocation data available for future months. Using Simple Average instead.")
+                    # Fall back to simple average
+                    ytd_avg = ytd_revenue / ytd_months if ytd_months > 0 else 0
+
+                    for month in range(1, 13):
+                        if month <= current_month:
+                            revenue = ytd_monthly.get(month, 0)
+                            data_type = 'Actual'
+                        else:
+                            revenue = ytd_avg
+                            data_type = 'Projected (Avg)'
+
+                        forecast_data.append({
+                            'Month': month,
+                            'Month Name': datetime(selected_year, month, 1).strftime('%B'),
+                            'Revenue': revenue,
+                            'Type': data_type
+                        })
+
+            forecast_df = pd.DataFrame(forecast_data)
+
+            # Calculate full year projection
+            full_year_projected = forecast_df['Revenue'].sum()
+            projected_remaining_rev = forecast_df[forecast_df['Type'].str.contains('Projected')]['Revenue'].sum()
+
+            # Display forecast metrics
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("YTD Actual", f"${ytd_revenue:,.0f}")
+            with col2:
+                st.metric("Projected Remaining", f"${projected_remaining_rev:,.0f}")
+            with col3:
+                st.metric("Full Year Forecast", f"${full_year_projected:,.0f}")
+
+            # Chart: Full year forecast
+            fig = go.Figure()
+
+            # Actual bars
+            actual_data = forecast_df[forecast_df['Type'] == 'Actual']
+            fig.add_trace(go.Bar(
+                name='Actual',
+                x=actual_data['Month Name'],
+                y=actual_data['Revenue'],
+                marker_color='#2E86C1'
+            ))
+
+            # Projected bars
+            projected_data = forecast_df[forecast_df['Type'].str.contains('Projected')]
+            fig.add_trace(go.Bar(
+                name='Projected',
+                x=projected_data['Month Name'],
+                y=projected_data['Revenue'],
+                marker_color='#85C1E2',
+                marker_pattern_shape="/"
+            ))
+
+            fig.update_layout(
+                title=f"Full Year Revenue Forecast - {selected_year}",
+                xaxis_title="Month",
+                yaxis_title="Revenue ($)",
+                height=400,
+                hovermode='x unified'
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Forecast table
+            st.markdown("##### Monthly Forecast")
+            display_forecast = forecast_df.copy()
+            display_forecast['Revenue'] = display_forecast['Revenue'].apply(lambda x: f"${x:,.0f}")
+            display_forecast = display_forecast[['Month Name', 'Revenue', 'Type']]
+            display_forecast.columns = ['Month', 'Revenue', 'Data Type']
+
+            st.dataframe(display_forecast, use_container_width=True, hide_index=True)
+        else:
+            st.info(f"No data found for {selected_year}")
+    else:
+        # For past/future years, just show actuals
+        st.info(f"Forecast is only available for the current year ({current_year}). Showing actual data for {selected_year}.")
+
+        if not time_entries_df.empty:
+            # Show actual monthly revenue for selected year
+            ytd_df = time_entries_df.copy()
+            ytd_df['month_num'] = ytd_df['date'].dt.month
+            monthly_actual = ytd_df.groupby('month_num')['revenue'].sum().reset_index()
+            monthly_actual['Month Name'] = monthly_actual['month_num'].apply(
+                lambda x: datetime(selected_year, x, 1).strftime('%B')
+            )
+            monthly_actual = monthly_actual.rename(columns={'revenue': 'Revenue'})
+
+            # Chart
+            fig = go.Figure()
+            fig.add_trace(go.Bar(
+                x=monthly_actual['Month Name'],
+                y=monthly_actual['Revenue'],
+                marker_color='#2E86C1'
+            ))
+
+            fig.update_layout(
+                title=f"Actual Revenue by Month - {selected_year}",
+                xaxis_title="Month",
+                yaxis_title="Revenue ($)",
+                height=400
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Table
+            display_actual = monthly_actual[['Month Name', 'Revenue']].copy()
+            display_actual['Revenue'] = display_actual['Revenue'].apply(lambda x: f"${x:,.0f}")
+            st.dataframe(display_actual, use_container_width=True, hide_index=True)

@@ -1,0 +1,15 @@
+# Streamlit Configuration Template
+# Copy this file to config.toml and customize as needed
+# Note: config.toml is gitignored, but this template is committed
+
+[logger]
+# Set the log level for Streamlit's internal logger
+# Options: "error", "warning", "info", "debug"
+level = "info"
+
+# Format for log messages
+messageFormat = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+[server]
+# Run the server in headless mode (no browser popup)
+headless = true

@@ -1,10 +1,14 @@
 import random
 from datetime import datetime, timedelta
 import pandas as pd
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 def generate_sample_data(db_manager):
     """Generate sample data for the dashboard"""
-    
+
     # Calculate current dates for realistic project timelines
     today = datetime.now()
 
@@ -76,188 +80,108 @@ def generate_sample_data(db_manager):
             'project_manager': 'Charlie Brown'
         }
     ]
-    
+
     # Sample employees
     employees = [
         {
-            'name': 'John Smith',
-            'email': 'john.smith@company.com',
-            'department': 'Management',
-            'role': 'Project Manager',
-            'hourly_rate': 150,
-            'fte': 1.0,
-            'utilization': 85,
-            'skills': 'Project Management, Agile, Scrum',
+            'name': 'John Smith',            'role': 'Project Manager',            'skills': 'Project Management, Agile, Scrum',
             'hire_date': '2020-01-15'
         },
         {
-            'name': 'Jane Doe',
-            'email': 'jane.doe@company.com',
-            'department': 'Management',
-            'role': 'Senior Project Manager',
-            'hourly_rate': 175,
-            'fte': 1.0,
-            'utilization': 90,
-            'skills': 'Project Management, Risk Management, Stakeholder Management',
+            'name': 'Jane Doe',            'role': 'Senior Project Manager',            'skills': 'Project Management, Risk Management, Stakeholder Management',
             'hire_date': '2019-03-20'
         },
         {
-            'name': 'Bob Wilson',
-            'email': 'bob.wilson@company.com',
-            'department': 'Engineering',
-            'role': 'Senior Developer',
-            'hourly_rate': 140,
-            'fte': 1.0,
-            'utilization': 75,
-            'skills': 'Python, JavaScript, React, Node.js',
+            'name': 'Bob Wilson',            'role': 'Senior Developer',            'skills': 'Python, JavaScript, React, Node.js',
             'hire_date': '2021-06-01'
         },
         {
-            'name': 'Alice Johnson',
-            'email': 'alice.johnson@company.com',
-            'department': 'Engineering',
-            'role': 'Full Stack Developer',
-            'hourly_rate': 120,
-            'fte': 1.0,
-            'utilization': 80,
-            'skills': 'Java, Spring, Angular, PostgreSQL',
+            'name': 'Alice Johnson',            'role': 'Full Stack Developer',            'skills': 'Java, Spring, Angular, PostgreSQL',
             'hire_date': '2022-02-15'
         },
         {
-            'name': 'Charlie Brown',
-            'email': 'charlie.brown@company.com',
-            'department': 'Engineering',
-            'role': 'DevOps Engineer',
-            'hourly_rate': 130,
-            'fte': 1.0,
-            'utilization': 70,
-            'skills': 'AWS, Docker, Kubernetes, CI/CD',
+            'name': 'Charlie Brown',            'role': 'DevOps Engineer',            'skills': 'AWS, Docker, Kubernetes, CI/CD',
             'hire_date': '2021-09-01'
         },
         {
-            'name': 'Emma Davis',
-            'email': 'emma.davis@company.com',
-            'department': 'Design',
-            'role': 'UX Designer',
-            'hourly_rate': 110,
-            'fte': 1.0,
-            'utilization': 65,
-            'skills': 'Figma, Sketch, User Research, Prototyping',
+            'name': 'Emma Davis',            'role': 'UX Designer',            'skills': 'Figma, Sketch, User Research, Prototyping',
             'hire_date': '2022-11-15'
         },
         {
-            'name': 'Frank Miller',
-            'email': 'frank.miller@company.com',
-            'department': 'Engineering',
-            'role': 'Backend Developer',
-            'hourly_rate': 125,
-            'fte': 0.8,
-            'utilization': 85,
-            'skills': 'Python, Django, Redis, MongoDB',
+            'name': 'Frank Miller',            'role': 'Backend Developer',            'skills': 'Python, Django, Redis, MongoDB',
             'hire_date': '2023-01-10'
         },
         {
-            'name': 'Grace Lee',
-            'email': 'grace.lee@company.com',
-            'department': 'QA',
-            'role': 'QA Engineer',
-            'hourly_rate': 100,
-            'fte': 1.0,
-            'utilization': 75,
-            'skills': 'Selenium, Jest, Cypress, Test Automation',
+            'name': 'Grace Lee',            'role': 'QA Engineer',            'skills': 'Selenium, Jest, Cypress, Test Automation',
             'hire_date': '2023-04-20'
         },
         {
-            'name': 'Henry Taylor',
-            'email': 'henry.taylor@company.com',
-            'department': 'Data',
-            'role': 'Data Analyst',
-            'hourly_rate': 115,
-            'fte': 1.0,
-            'utilization': 70,
-            'skills': 'SQL, Python, Tableau, Power BI',
+            'name': 'Henry Taylor',            'role': 'Data Analyst',            'skills': 'SQL, Python, Tableau, Power BI',
             'hire_date': '2022-08-01'
         },
         {
-            'name': 'Iris Wang',
-            'email': 'iris.wang@company.com',
-            'department': 'Engineering',
-            'role': 'Frontend Developer',
-            'hourly_rate': 115,
-            'fte': 1.0,
-            'utilization': 78,
-            'skills': 'React, TypeScript, CSS, Redux',
+            'name': 'Iris Wang',            'role': 'Frontend Developer',            'skills': 'React, TypeScript, CSS, Redux',
             'hire_date': '2023-06-15'
         }
     ]
-    
+
     # Insert projects and employees
     project_ids = []
     for project in projects:
         project_id = db_manager.add_project(project)
         project_ids.append(project_id)
-    
+
     employee_ids = []
     for employee in employees:
         employee_id = db_manager.add_employee(employee)
         employee_ids.append(employee_id)
-    
+
     # Generate allocations with current dates
     allocations = [
         # Website Redesign
-        {'project_id': project_ids[0], 'employee_id': employee_ids[0], 'allocation_percent': 50,
-         'hours_projected': 520, 'hours_actual': 450,
+        {'project_id': project_ids[0], 'employee_id': employee_ids[0], 'allocated_fte': 0.50,
          'start_date': (today - timedelta(days=120)).strftime('%Y-%m-%d'),
          'end_date': (today + timedelta(days=60)).strftime('%Y-%m-%d'),
          'role': 'Project Manager'},
-        {'project_id': project_ids[0], 'employee_id': employee_ids[2], 'allocation_percent': 80,
-         'hours_projected': 832, 'hours_actual': 720,
+        {'project_id': project_ids[0], 'employee_id': employee_ids[2], 'allocated_fte': 0.80,
          'start_date': (today - timedelta(days=120)).strftime('%Y-%m-%d'),
          'end_date': (today + timedelta(days=60)).strftime('%Y-%m-%d'),
          'role': 'Senior Developer'},
-        {'project_id': project_ids[0], 'employee_id': employee_ids[5], 'allocation_percent': 60,
-         'hours_projected': 624, 'hours_actual': 500,
+        {'project_id': project_ids[0], 'employee_id': employee_ids[5], 'allocated_fte': 0.60,
          'start_date': (today - timedelta(days=120)).strftime('%Y-%m-%d'),
          'end_date': (today + timedelta(days=60)).strftime('%Y-%m-%d'),
          'role': 'UX Designer'},
 
         # Mobile App Development
-        {'project_id': project_ids[1], 'employee_id': employee_ids[1], 'allocation_percent': 40,
-         'hours_projected': 624, 'hours_actual': 400,
+        {'project_id': project_ids[1], 'employee_id': employee_ids[1], 'allocated_fte': 0.40,
          'start_date': (today - timedelta(days=90)).strftime('%Y-%m-%d'),
          'end_date': (today + timedelta(days=90)).strftime('%Y-%m-%d'),
          'role': 'Project Manager'},
-        {'project_id': project_ids[1], 'employee_id': employee_ids[3], 'allocation_percent': 100,
-         'hours_projected': 1248, 'hours_actual': 800,
+        {'project_id': project_ids[1], 'employee_id': employee_ids[3], 'allocated_fte': 1.00,
          'start_date': (today - timedelta(days=90)).strftime('%Y-%m-%d'),
          'end_date': (today + timedelta(days=90)).strftime('%Y-%m-%d'),
          'role': 'Full Stack Developer'},
-        {'project_id': project_ids[1], 'employee_id': employee_ids[9], 'allocation_percent': 70,
-         'hours_projected': 874, 'hours_actual': 560,
+        {'project_id': project_ids[1], 'employee_id': employee_ids[9], 'allocated_fte': 0.70,
          'start_date': (today - timedelta(days=90)).strftime('%Y-%m-%d'),
          'end_date': (today + timedelta(days=90)).strftime('%Y-%m-%d'),
          'role': 'Frontend Developer'},
 
         # Data Migration (Completed)
-        {'project_id': project_ids[2], 'employee_id': employee_ids[2], 'allocation_percent': 60,
-         'hours_projected': 480, 'hours_actual': 500,
+        {'project_id': project_ids[2], 'employee_id': employee_ids[2], 'allocated_fte': 0.60,
          'start_date': (today - timedelta(days=240)).strftime('%Y-%m-%d'),
          'end_date': (today - timedelta(days=60)).strftime('%Y-%m-%d'),
          'role': 'Senior Developer'},
-        {'project_id': project_ids[2], 'employee_id': employee_ids[8], 'allocation_percent': 50,
-         'hours_projected': 400, 'hours_actual': 420,
+        {'project_id': project_ids[2], 'employee_id': employee_ids[8], 'allocated_fte': 0.50,
          'start_date': (today - timedelta(days=240)).strftime('%Y-%m-%d'),
          'end_date': (today - timedelta(days=60)).strftime('%Y-%m-%d'),
          'role': 'Data Analyst'},
 
         # API Integration
-        {'project_id': project_ids[3], 'employee_id': employee_ids[3], 'allocation_percent': 50,
-         'hours_projected': 390, 'hours_actual': 200,
+        {'project_id': project_ids[3], 'employee_id': employee_ids[3], 'allocated_fte': 0.50,
          'start_date': (today - timedelta(days=60)).strftime('%Y-%m-%d'),
          'end_date': (today + timedelta(days=30)).strftime('%Y-%m-%d'),
          'role': 'Lead Developer'},
-        {'project_id': project_ids[3], 'employee_id': employee_ids[6], 'allocation_percent': 60,
-         'hours_projected': 468, 'hours_actual': 240,
+        {'project_id': project_ids[3], 'employee_id': employee_ids[6], 'allocated_fte': 0.60,
          'start_date': (today - timedelta(days=60)).strftime('%Y-%m-%d'),
          'end_date': (today + timedelta(days=30)).strftime('%Y-%m-%d'),
          'role': 'Backend Developer'},
@@ -308,5 +232,125 @@ def generate_sample_data(db_manager):
                 'approved': random.choice([0, 1, 1])  # 67% approved
             }
             db_manager.add_expense(expense)
-    
-    print("Sample data generated successfully!")
+
+    # Add NIA (OY2) project data
+    logger.info("Adding NIA project data...")
+
+    # NIA Project
+    nia_project = {
+        'name': 'NIA (OY2) 202800.Y2.000',
+        'description': 'NIA Option Year 2 - Web Development Services',
+        'status': 'Active',
+        'start_date': '2024-11-01',
+        'end_date': '2025-10-31',
+        'budget_allocated': 327145,
+        'budget_used': 50000,
+        'revenue_projected': 327145,
+        'revenue_actual': 50000,
+        'client': 'NIA/NIH',
+        'project_manager': 'Jennifer Johns'
+    }
+
+    nia_project_id = db_manager.add_project(nia_project)
+    project_ids.append(nia_project_id)
+
+    # NIA Employees
+    nia_employees = [
+        {
+            'name': 'Jennifer Johns',            'role': 'Web Project Manager',            'skills': 'Project Management, Agile, Web Development',
+            'hire_date': '2023-01-15'
+        },
+        {
+            'name': 'Matt Canton',            'role': 'Web Software Developer',            'skills': 'Full Stack Development, JavaScript, Python, React',
+            'hire_date': '2023-02-01'
+        },
+        {
+            'name': 'Jacob Coleman',            'role': 'Web Software Developer',            'skills': 'Full Stack Development, Node.js, Database Design',
+            'hire_date': '2022-09-15'
+        },
+        {
+            'name': 'Caleb Andree',            'role': 'Application Specialist 1',            'skills': 'Application Support, Testing, Documentation',
+            'hire_date': '2024-01-10'
+        }
+    ]
+
+    nia_employee_ids = []
+    for employee in nia_employees:
+        employee_id = db_manager.add_employee(employee)
+        nia_employee_ids.append(employee_id)
+        employee_ids.append(employee_id)
+
+    # NIA Allocations (monthly allocations with varying FTE)
+    # Sample months from Nov 2024 through Nov 2025
+    nia_months = [
+        '2024-11-01', '2024-12-01', '2025-01-01', '2025-02-01', '2025-03-01',
+        '2025-04-01', '2025-05-01', '2025-06-01', '2025-07-01', '2025-08-01',
+        '2025-09-01', '2025-10-01'
+    ]
+
+
+    # Monthly FTE allocations for each employee (from Hours CSV)
+    # FTE varies by month; actual hours for past/current months only
+    # Working days from CSV (project-specific - NIA started late November)
+    # Possible, Projected, and Total hours are calculated by build_hours_sheet_data()
+
+    # Working days per month from Hours CSV header
+    nia_working_days_by_month = [1, 21, 21, 19, 21, 22, 21, 20, 22, 21, 21, 22]
+
+    nia_allocations_data = [
+        # Jennifer Johns (PM) - FTE varies: 20%, 15%, 10%, 10%, 10%, 10%, 10%, 10%, 10%, 7%, 7%, 7%
+        {'employee_idx': 0, 'fte_by_month': [20, 15, 10, 10, 10, 10, 10, 10, 10, 7, 7, 7],
+         'actual_hours': [0.5, 8.75, 9.3, 17.3, 18.25, 13.8, 11.75, 14.25, 10.5, 9.25, 13.25, 0]},
+        # Matt Canton - FTE varies: 65%, 50%, 50%, 50%, 50%, 50%, 50%, 50%, 20%, 15%, 15%, 15%
+        {'employee_idx': 1, 'fte_by_month': [65, 50, 50, 50, 50, 50, 50, 50, 20, 15, 15, 15],
+         'actual_hours': [5.5, 71.5, 72, 76.75, 90, 75.75, 38.5, 44.75, 68.75, 24.5, 22.5, 0]},
+        # Jacob Coleman - FTE varies: 45%, then 100% for remaining months
+        {'employee_idx': 2, 'fte_by_month': [45, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100],
+         'actual_hours': [0, 120, 120, 152, 168, 176, 134.5, 150.5, 159, 146, 114, 0]},
+        # Caleb Andree - FTE varies: 12.5% initially, then 1% from August onwards
+        {'employee_idx': 3, 'fte_by_month': [12.5, 12.5, 12.5, 12.5, 12.5, 12.5, 12.5, 12.5, 1, 1, 1, 1],
+         'actual_hours': [0, 74, 74, 85.75, 94.75, 110.25, 92, 23.5, 2.75, 2, 0, 0]}
+    ]
+
+    for emp_data in nia_allocations_data:
+        for month_idx, month_date in enumerate(nia_months):
+            # Create monthly allocation record with month-specific FTE and working days
+            allocation = {
+                'project_id': nia_project_id,
+                'employee_id': nia_employee_ids[emp_data['employee_idx']],
+                'allocated_fte': emp_data['fte_by_month'][month_idx] / 100,  # Convert percentage to FTE
+                'allocation_date': month_date,
+                'start_date': month_date,
+                'end_date': month_date,
+                'role': nia_employees[emp_data['employee_idx']]['role'],
+                'project_rate': nia_employees[emp_data['employee_idx']]['hourly_rate'],
+                'working_days': nia_working_days_by_month[month_idx]
+            }
+            db_manager.add_allocation(allocation)
+
+            # Create time entry for actual hours (past months - Nov 2024 through March 2025)
+            if month_idx < 5 and emp_data['actual_hours'][month_idx] > 0:
+                time_entry = {
+                    'employee_id': nia_employee_ids[emp_data['employee_idx']],
+                    'project_id': nia_project_id,
+                    'date': month_date,
+                    'hours': emp_data['actual_hours'][month_idx],
+                    'description': f'NIA web development work - {month_date}',
+                    'billable': 1
+                }
+                db_manager.add_time_entry(time_entry)
+            # Create projected hours for future months (April 2025 onwards)
+            elif month_idx >= 5 and emp_data['actual_hours'][month_idx] > 0:
+                time_entry = {
+                    'employee_id': nia_employee_ids[emp_data['employee_idx']],
+                    'project_id': nia_project_id,
+                    'date': month_date,
+                    'hours': emp_data['actual_hours'][month_idx],
+                    'description': f'NIA web development work (projected) - {month_date}',
+                    'billable': 1
+                }
+                db_manager.add_time_entry(time_entry)
+
+    logger.info(f"Added NIA project with {len(nia_employees)} employees and monthly allocations")
+
+    logger.info("Sample data generated successfully!")

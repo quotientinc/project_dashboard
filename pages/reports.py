@@ -3,7 +3,9 @@ import pandas as pd
 from datetime import datetime
 import plotly.graph_objects as go
 import plotly.express as px
+from utils.logger import get_logger
 
+logger = get_logger(__name__)
 
 db = st.session_state.db_manager
 processor = st.session_state.data_processor
@@ -47,9 +49,9 @@ def generate_executive_summary(db, processor):
 
         # Project summary
         st.markdown("#### Project Summary")
-        summary_df = projects_df[['name', 'status', 'budget_allocated', 'budget_used', 'revenue_actual']]
-        summary_df['Budget Variance'] = summary_df['budget_allocated'] - summary_df['budget_used']
-        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+        summary_df = projects_df[['name', 'status', 'contract_value', 'budget_used', 'revenue_actual']].copy()
+        summary_df['Budget Variance'] = summary_df['contract_value'] - summary_df['budget_used']
+        st.dataframe(summary_df, width='stretch', hide_index=True)
 
         # Download option
         if st.button("Download Report"):
@@ -84,7 +86,7 @@ def generate_project_status_report(db, processor):
             col1, col2, col3 = st.columns(3)
 
             with col1:
-                budget_progress = (project['budget_used'] / project['budget_allocated'] * 100) if project['budget_allocated'] > 0 else 0
+                budget_progress = (project['budget_used'] / project['contract_value'] * 100) if project['contract_value'] > 0 else 0
                 st.metric("Budget Progress", f"{budget_progress:.1f}%")
                 st.progress(min(budget_progress / 100, 1.0))
 
@@ -104,22 +106,60 @@ def generate_project_status_report(db, processor):
             if not allocations_df.empty:
                 st.markdown("#### Team Allocation")
                 st.dataframe(
-                    allocations_df[['employee_name', 'role', 'allocation_percent', 'hours_projected', 'hours_actual']],
-                    use_container_width=True,
+                    allocations_df[['employee_name', 'role', 'allocated_fte']],
+                    width='stretch',
                     hide_index=True
                 )
 
 def generate_resource_report(db, processor):
     st.markdown("#### Resource Utilization Report")
 
-    period = st.selectbox("Select Period", ["Current Month", "Last Month", "Last Quarter", "Custom"])
+    period = st.selectbox("Select Period", ["Current Month", "Last Month", "Past 90 Days", "Custom"])
+
+    # Set date range based on period selection
+    today = datetime.now()
+
+    # Initialize dates
+    start_date = None
+    end_date = None
+
+    if period == "Current Month":
+        start_date = datetime(today.year, today.month, 1)
+        end_date = today
+    elif period == "Last Month":
+        # Get first day of last month
+        first_day_this_month = datetime(today.year, today.month, 1)
+        last_day_last_month = first_day_this_month - pd.Timedelta(days=1)
+        start_date = datetime(last_day_last_month.year, last_day_last_month.month, 1)
+        end_date = last_day_last_month
+    elif period == "Past 90 Days":
+        # Get quarter start (simplified to last 90 days)
+        end_date = today
+        start_date = today - pd.Timedelta(days=90)
+
+    # Show custom date inputs if Custom period is selected
+    if period == "Custom":
+        col1, col2 = st.columns(2)
+        with col1:
+            start_date = st.date_input("Start Date", value=today - pd.Timedelta(days=30))
+        with col2:
+            end_date = st.date_input("End Date", value=today)
+    else:
+        # Show selected period range for non-custom periods
+        st.info(f"Report Period: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
 
     if st.button("Generate Report"):
         employees_df = db.get_employees()
         allocations_df = db.get_allocations()
-        time_entries_df = db.get_time_entries()
+
+        # Filter time entries by the selected period
+        time_entries_df = db.get_time_entries(
+            start_date=start_date.strftime('%Y-%m-%d'),
+            end_date=end_date.strftime('%Y-%m-%d')
+        )
 
         if not employees_df.empty:
+            # TODO: This is not accurate
             utilization_df = processor.calculate_employee_utilization(
                 employees_df, allocations_df, time_entries_df
             )
@@ -137,18 +177,17 @@ def generate_resource_report(db, processor):
 
             # Detailed table
             st.markdown("#### Employee Details")
-            display_df = utilization_df[['name', 'department', 'utilization_rate', 'billable_hours', 'revenue_generated']]
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            display_df = utilization_df[['name', 'utilization_rate', 'billable_hours', 'revenue_generated']]
+            st.dataframe(display_df, width='stretch', hide_index=True)
 
             # Utilization chart
             fig = px.bar(
                 utilization_df,
                 x='name',
                 y='utilization_rate',
-                color='department',
                 title="Utilization by Employee"
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
 def generate_financial_report(db, processor):
     st.markdown("#### Financial Report")
@@ -185,7 +224,7 @@ def generate_financial_report(db, processor):
         financial_df = projects_df[['name', 'revenue_actual', 'budget_used']].copy()
         financial_df['Profit'] = financial_df['revenue_actual'] - financial_df['budget_used']
         financial_df['Margin %'] = (financial_df['Profit'] / financial_df['revenue_actual'] * 100).round(1)
-        st.dataframe(financial_df, use_container_width=True, hide_index=True)
+        st.dataframe(financial_df, width='stretch', hide_index=True)
 
         # Expense breakdown
         if not expenses_df.empty:
@@ -198,7 +237,7 @@ def generate_financial_report(db, processor):
                 names='category',
                 title="Expenses by Category"
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
 def generate_custom_report(db, processor):
     st.markdown("#### Custom Report Builder")
@@ -260,7 +299,7 @@ def generate_custom_report(db, processor):
         for section, data in report_data.items():
             if not data.empty:
                 st.markdown(f"#### {section}")
-                st.dataframe(data, use_container_width=True, hide_index=True)
+                st.dataframe(data, width='stretch', hide_index=True)
 
                 # Download option for each section
                 csv = data.to_csv(index=False)
