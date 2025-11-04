@@ -87,9 +87,115 @@ if billable_project_ids:
         allocations_df = allocations_df[allocations_df['project_id'].isin(billable_project_ids)].copy()
 
 # Calculate monthly utilization trend (for the current year)
-utilization_trend_df = processor.calculate_monthly_utilization_trend(
-    employees_df, allocations_df, time_entries_df, months_df
-)
+# Filter to billable employees only (billable=1, pay_type='Salary', active)
+billable_employees_df = employees_df[
+    (employees_df['billable'] == 1) &
+    (employees_df['pay_type'] == 'Salary') &
+    (
+        (pd.isna(employees_df['term_date'])) |
+        (pd.to_datetime(employees_df['term_date']).dt.date >= current_date.date())
+    )
+].copy()
+
+# Get performance metrics for YTD
+ytd_start = datetime(current_date.year, 1, 1).strftime('%Y-%m-%d')
+ytd_end = datetime(current_date.year, 12, 31).strftime('%Y-%m-%d')
+
+if not billable_employees_df.empty:
+    performance_data = processor.get_performance_metrics(
+        start_date=ytd_start,
+        end_date=ytd_end,
+        constraint=None
+    )
+
+    # Transform performance metrics to utilization trend DataFrame
+    month_names = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    ]
+
+    utilization_data = []
+    current_month = current_date.month
+
+    for month_num in range(1, 13):
+        month_name = f"{month_names[month_num - 1]} {current_date.year}"
+
+        # Determine if this is actual or projected
+        if month_num < current_month:
+            data_type = 'Actual'
+            # Use actuals only for past months
+            month_data = performance_data['actuals'].get(month_name, {})
+            possible_data = performance_data['possible'].get(month_name, {})
+
+            total_billable_hours = sum(emp_data.get('billable_hours', 0) for emp_data in month_data.values())
+            total_possible_hours = sum(emp_data.get('hours', 0) for emp_data in possible_data.values())
+
+        elif month_num == current_month:
+            # Use smart blending for current month
+            # Get month info for working days calculation
+            month_info = months_df[
+                (months_df['year'] == current_date.year) &
+                (months_df['month'] == current_month)
+            ]
+
+            if not month_info.empty:
+                working_days = int(month_info['working_days'].iloc[0])
+                days_so_far = current_date.day
+                days_remaining = working_days - days_so_far
+
+                # Get actual and projected data for this month
+                actual_month_data = performance_data['actuals'].get(month_name, {})
+                projected_month_data = performance_data['projected'].get(month_name, {})
+                possible_month_data = performance_data['possible'].get(month_name, {})
+
+                # Calculate blended billable hours
+                actual_billable = sum(emp_data.get('billable_hours', 0) for emp_data in actual_month_data.values())
+
+                # For remaining days, estimate from projected
+                if working_days > 0 and days_remaining > 0:
+                    projected_total = sum(emp_data.get('hours', 0) for emp_data in projected_month_data.values())
+                    projected_remaining = (projected_total / working_days) * days_remaining
+                    total_billable_hours = actual_billable + projected_remaining
+                else:
+                    total_billable_hours = actual_billable
+
+                total_possible_hours = sum(emp_data.get('hours', 0) for emp_data in possible_month_data.values())
+
+                # Determine type based on whether we have significant actuals
+                data_type = 'Actual' if actual_billable > 0 else 'Projected'
+            else:
+                # Fallback if no month info available
+                actual_month_data = performance_data['actuals'].get(month_name, {})
+                possible_month_data = performance_data['possible'].get(month_name, {})
+                total_billable_hours = sum(emp_data.get('billable_hours', 0) for emp_data in actual_month_data.values())
+                total_possible_hours = sum(emp_data.get('hours', 0) for emp_data in possible_month_data.values())
+                data_type = 'Actual'
+
+        else:
+            data_type = 'Projected'
+            # Use projected only for future months
+            month_data = performance_data['projected'].get(month_name, {})
+            possible_data = performance_data['possible'].get(month_name, {})
+
+            total_billable_hours = sum(emp_data.get('hours', 0) for emp_data in month_data.values())
+            total_possible_hours = sum(emp_data.get('hours', 0) for emp_data in possible_data.values())
+
+        # Calculate utilization percentage
+        if total_possible_hours > 0:
+            avg_utilization = (total_billable_hours / total_possible_hours) * 100
+        else:
+            avg_utilization = 0
+
+        utilization_data.append({
+            'month': month_num,
+            'month_name': month_names[month_num - 1],
+            'avg_utilization': avg_utilization,
+            'type': data_type
+        })
+
+    utilization_trend_df = pd.DataFrame(utilization_data)
+else:
+    utilization_trend_df = pd.DataFrame()
 
 # Calculate YTD average utilization
 if not utilization_trend_df.empty:
