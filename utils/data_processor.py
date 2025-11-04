@@ -980,6 +980,7 @@ class DataProcessor:
                 t.date,
                 t.hours,
                 t.amount,
+                t.billable,
                 t.bill_rate as time_entry_bill_rate,
                 COALESCE(
                     (SELECT a.bill_rate
@@ -1033,7 +1034,7 @@ class DataProcessor:
             # Default to employee grouping (when filter_type is 'project' or None)
             group_key = 'employee_id'
 
-        # Group by month and employee/project
+        # Group by month and employee/project for total hours
         grouped = time_entries_df.groupby(['month_name', group_key]).agg({
             'hours': 'sum',
             'revenue': 'sum',
@@ -1041,6 +1042,23 @@ class DataProcessor:
         }).reset_index()
 
         grouped.columns = ['month_name', group_key, 'hours', 'revenue', 'worked_days']
+
+        # Calculate billable hours separately
+        billable_entries = time_entries_df[time_entries_df['billable'] == 1]
+        if not billable_entries.empty:
+            billable_grouped = billable_entries.groupby(['month_name', group_key]).agg({
+                'hours': 'sum'
+            }).reset_index()
+            billable_grouped.columns = ['month_name', group_key, 'billable_hours']
+        else:
+            billable_grouped = pd.DataFrame(columns=['month_name', group_key, 'billable_hours'])
+
+        # Merge total and billable hours
+        if not billable_grouped.empty:
+            grouped = grouped.merge(billable_grouped, on=['month_name', group_key], how='left')
+            grouped['billable_hours'] = grouped['billable_hours'].fillna(0)
+        else:
+            grouped['billable_hours'] = 0
 
         # Build nested dictionary structure
         actuals = {}
@@ -1053,6 +1071,7 @@ class DataProcessor:
 
             actuals[month][key] = {
                 'hours': float(row['hours']),
+                'billable_hours': float(row['billable_hours']),
                 'revenue': float(row['revenue']),
                 'worked_days': int(row['worked_days'])
             }

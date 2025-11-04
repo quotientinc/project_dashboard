@@ -189,7 +189,7 @@ with tab2:
                     term_date = last_day_of_month  # Assume active through end of month
 
                 # Get data from metrics
-                actuals = metrics['actuals'].get(month_key, {}).get(emp_id_str, {'hours': 0, 'revenue': 0, 'worked_days': 0})
+                actuals = metrics['actuals'].get(month_key, {}).get(emp_id_str, {'hours': 0, 'billable_hours': 0, 'revenue': 0, 'worked_days': 0})
                 projected = metrics['projected'].get(month_key, {}).get(emp_id_str, {'hours': 0, 'revenue': 0, 'worked_days': 0})
                 possible = metrics['possible'].get(month_key, {}).get(emp_id_str, {'hours': 0, 'revenue': 0, 'worked_days': 0})
 
@@ -211,10 +211,11 @@ with tab2:
 
                 # Calculate utilization metrics
                 actual_hours = actuals['hours']
+                actual_billable_hours = actuals['billable_hours']
                 projected_hours = projected['hours']
                 actual_worked_days = actuals['worked_days']  # Days with time entries (for display only)
 
-                utilization_pct = (actual_hours / adjusted_possible_hours * 100) if adjusted_possible_hours > 0 else 0
+                utilization_pct = (actual_billable_hours / adjusted_possible_hours * 100) if adjusted_possible_hours > 0 else 0
                 variance = actual_hours - projected_hours
 
                 # Determine status
@@ -239,6 +240,7 @@ with tab2:
                     'possible_hours': adjusted_possible_hours,
                     'projected_hours': projected_hours,
                     'actual_hours': actual_hours,
+                    'actual_billable_hours': actual_billable_hours,
                     'utilization_pct': utilization_pct,
                     'variance': variance,
                     'status': status,
@@ -321,7 +323,7 @@ with tab2:
             # Display table
             display_df = filtered_df[[
                 'name', 'role', 'possible_hours', 'projected_hours',
-                'actual_hours', 'utilization_pct', 'variance', 'status'
+                'actual_hours', 'actual_billable_hours', 'utilization_pct', 'variance', 'status'
             ]].copy()
 
             display_df = display_df.rename(columns={
@@ -330,7 +332,8 @@ with tab2:
                 'possible_hours': 'Possible Hrs',
                 'projected_hours': 'Projected Hrs',
                 'actual_hours': 'Actual Hrs',
-                'utilization_pct': 'Utilization %',
+                'actual_billable_hours': 'Actual Billable Hrs',
+                'utilization_pct': 'Billable Utilization %',
                 'variance': 'Variance',
                 'status': 'Status'
             })
@@ -339,7 +342,8 @@ with tab2:
             display_df['Possible Hrs'] = display_df['Possible Hrs'].round(1)
             display_df['Projected Hrs'] = display_df['Projected Hrs'].round(1)
             display_df['Actual Hrs'] = display_df['Actual Hrs'].round(1)
-            display_df['Utilization %'] = display_df['Utilization %'].round(1)
+            display_df['Actual Billable Hrs'] = display_df['Actual Billable Hrs'].round(1)
+            display_df['Billable Utilization %'] = display_df['Billable Utilization %'].round(1)
             display_df['Variance'] = display_df['Variance'].round(1)
 
             # Conditional formatting
@@ -361,25 +365,28 @@ with tab2:
                 else:
                     return 'background-color: #ffcccc; color: #cc0000'  # Red
 
-            styled_df = display_df.style.applymap(color_utilization_status, subset=['Utilization %'])
+            styled_df = display_df.style.applymap(color_utilization_status, subset=['Billable Utilization %'])
             styled_df = styled_df.applymap(color_variance, subset=['Variance'])
 
             # Show the logic behind the table for reference
             with st.popover("💡Logic for Utilization Table"):
                 st.markdown("""For each employee in the utilization table:
 
-  | Column        | Source                                           | Calculation                                                                          |
-  |---------------|--------------------------------------------------|--------------------------------------------------------------------------------------|
-  | Employee      | employees_df['name']                             | Direct from employees table                                                          |
-  | Role          | employees_df['role']                             | Direct from employees table                                                          |
-  | Possible Hrs  | metrics['possible'][month_key][emp_id]['hours']  | From employees table: (working_days) × (target_allocation - overhead_allocation) × 8 |
-  | Projected Hrs | metrics['projected'][month_key][emp_id]['hours'] | From allocations table: (working_days) × allocated_fte × 8                           |
-  | Actual Hrs    | metrics['actuals'][month_key][emp_id]['hours']   | From time_entries table: sum of actual hours logged                                  |
-  | Utilization % | Calculated                                       | (actual_hours / adjusted_possible_hours) × 100                                       |
-  | Variance      | Calculated                                       | actual_hours - projected_hours                                                       |
-  | Status        | Calculated                                       | Based on Utilization %: 🔴 >120%, 🟡 100-120%, 🟢 80-100%, 🔵 <80%                  |
+  | Column                  | Source                                                  | Calculation                                                                          |
+  |-------------------------|---------------------------------------------------------|--------------------------------------------------------------------------------------|
+  | Employee                | employees_df['name']                                    | Direct from employees table                                                          |
+  | Role                    | employees_df['role']                                    | Direct from employees table                                                          |
+  | Possible Hrs            | metrics['possible'][month_key][emp_id]['hours']         | From employees table: (working_days) × (target_allocation - overhead_allocation) × 8 |
+  | Projected Hrs           | metrics['projected'][month_key][emp_id]['hours']        | From allocations table: (working_days) × allocated_fte × 8                           |
+  | Actual Hrs              | metrics['actuals'][month_key][emp_id]['hours']          | From time_entries table: sum of ALL hours logged (billable + non-billable)           |
+  | Actual Billable Hrs     | metrics['actuals'][month_key][emp_id]['billable_hours'] | From time_entries table: sum of hours where billable=1                               |
+  | Billable Utilization %  | Calculated                                              | (actual_billable_hours / adjusted_possible_hours) × 100                              |
+  | Variance                | Calculated                                              | actual_hours - projected_hours                                                       |
+  | Status                  | Calculated                                              | Based on Billable Utilization %: 🔴 >120%, 🟡 100-120%, 🟢 80-100%, 🔵 <80%         |
 
-**Note:** Possible hours are adjusted only for employees hired or terminated mid-month, not based on which days they logged time entries.
+**Notes:**
+- Possible hours are adjusted only for employees hired or terminated mid-month, not based on which days they logged time entries.
+- Actual Billable Hrs shows only time entries marked as billable=1 in the database.
 """)
 
             st.dataframe(styled_df, use_container_width=True, hide_index=True, height=500)
