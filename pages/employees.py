@@ -116,8 +116,16 @@ with tab2:
         # Get performance metrics
         try:
             with st.spinner("Loading utilization data..."):
+                # Get monthly metrics for selected month
                 metrics = processor.get_performance_metrics(
                     start_date=start_date,
+                    end_date=end_date
+                )
+
+                # Get YTD metrics (January 1st through end of selected month)
+                ytd_start_date = f"{selected_year}-01-01"
+                ytd_metrics = processor.get_performance_metrics(
+                    start_date=ytd_start_date,
                     end_date=end_date
                 )
 
@@ -346,6 +354,25 @@ with tab2:
                 utilization_pct = (actual_billable_hours / adjusted_possible_hours * 100) if adjusted_possible_hours > 0 else 0
                 variance = actual_hours - projected_hours
 
+                # Calculate YTD metrics (sum across all months from Jan to selected month)
+                ytd_possible_hours = 0
+                ytd_actual_billable_hours = 0
+
+                for month_num in range(1, selected_month + 1):
+                    ytd_month_date = datetime(selected_year, month_num, 1)
+                    ytd_month_key = ytd_month_date.strftime('%B %Y')
+
+                    # Get YTD possible hours for this month
+                    ytd_possible_emp = ytd_metrics['possible'].get(ytd_month_key, {}).get(emp_id_str, {})
+                    ytd_possible_hours += ytd_possible_emp.get('hours', 0)
+
+                    # Get YTD actual billable hours for this month
+                    ytd_actuals_emp = ytd_metrics['actuals'].get(ytd_month_key, {}).get(emp_id_str, {})
+                    ytd_actual_billable_hours += ytd_actuals_emp.get('billable_hours', 0)
+
+                # Calculate YTD utilization percentage
+                ytd_utilization_pct = (ytd_actual_billable_hours / ytd_possible_hours * 100) if ytd_possible_hours > 0 else 0
+
                 # Determine status
                 if utilization_pct > 120:
                     status = "🔴 Over"
@@ -374,6 +401,9 @@ with tab2:
                     'utilization_pct': utilization_pct,
                     'variance': variance,
                     'status': status,
+                    'ytd_possible_hours': ytd_possible_hours,
+                    'ytd_actual_billable_hours': ytd_actual_billable_hours,
+                    'ytd_utilization_pct': ytd_utilization_pct,
                     'status_num': status_num,
                     'worked_days': actual_worked_days
                 })
@@ -450,7 +480,8 @@ with tab2:
             # Display table
             display_df = filtered_df[[
                 'employee_id', 'name', 'possible_hours',
-                'actual_hours', 'actual_billable_hours', 'pto_hours', 'other_nonbillable_hours', 'utilization_pct', 'status'
+                'actual_hours', 'actual_billable_hours', 'pto_hours', 'other_nonbillable_hours', 'utilization_pct', 'status',
+                'ytd_possible_hours', 'ytd_actual_billable_hours', 'ytd_utilization_pct'
             ]].copy()
 
             display_df = display_df.rename(columns={
@@ -461,16 +492,11 @@ with tab2:
                 'pto_hours': 'PTO Hrs',
                 'other_nonbillable_hours': 'Other Non-billable Hrs',
                 'utilization_pct': 'Billable Utilization %',
-                'status': 'Status'
+                'status': 'Status',
+                'ytd_possible_hours': '📅 YTD Possible Billable Hrs',
+                'ytd_actual_billable_hours': '📅 YTD Actual Billable Hrs',
+                'ytd_utilization_pct': '📅 YTD Billable Utilization %'
             })
-
-            # Format columns
-            display_df['Possible Billable Hrs'] = display_df['Possible Billable Hrs'].round(1)
-            display_df['Actual Hrs'] = display_df['Actual Hrs'].round(1)
-            display_df['Actual Billable Hrs'] = display_df['Actual Billable Hrs'].round(1)
-            display_df['PTO Hrs'] = display_df['PTO Hrs'].round(1)
-            display_df['Other Non-billable Hrs'] = display_df['Other Non-billable Hrs'].round(1)
-            display_df['Billable Utilization %'] = display_df['Billable Utilization %'].round(1)
 
             # Conditional formatting
             def color_utilization_status(val):
@@ -483,8 +509,29 @@ with tab2:
                 else:
                     return 'background-color: #cce5ff'  # Blue
 
-            # Apply styling to display_df
+            def ytd_background(val):
+                return 'background-color: #f0f0f0'  # Light gray for YTD columns
+
+            # Apply styling and formatting to display_df
             styled_df = display_df.style.applymap(color_utilization_status, subset=['Billable Utilization %'])
+            styled_df = styled_df.applymap(ytd_background, subset=[
+                '📅 YTD Possible Billable Hrs',
+                '📅 YTD Actual Billable Hrs',
+                '📅 YTD Billable Utilization %'
+            ])
+
+            # Format numeric columns to 2 decimal places
+            styled_df = styled_df.format({
+                'Possible Billable Hrs': '{:.2f}',
+                'Actual Hrs': '{:.2f}',
+                'Actual Billable Hrs': '{:.2f}',
+                'PTO Hrs': '{:.2f}',
+                'Other Non-billable Hrs': '{:.2f}',
+                'Billable Utilization %': '{:.2f}',
+                '📅 YTD Possible Billable Hrs': '{:.2f}',
+                '📅 YTD Actual Billable Hrs': '{:.2f}',
+                '📅 YTD Billable Utilization %': '{:.2f}'
+            })
 
             st.markdown("#### Utilization Report")
 
@@ -495,21 +542,25 @@ with tab2:
                 with st.popover("💡Logic for Utilization Table"):
                     st.markdown("""For each employee in the utilization table:
 
-  | Column                  | Source                                                  | Calculation                                                                          |
-  |-------------------------|---------------------------------------------------------|--------------------------------------------------------------------------------------|
-  | Employee                | employees_df['name']                                    | Direct from employees table                                                          |
-  | Possible Billable Hrs   | metrics['possible'][month_key][emp_id]['hours']         | From employees table: (working_days) × (target_allocation - overhead_allocation) × 8 |
-  | Actual Hrs              | metrics['actuals'][month_key][emp_id]['hours']          | From time_entries table: sum of ALL hours logged (billable + non-billable)           |
-  | Actual Billable Hrs     | metrics['actuals'][month_key][emp_id]['billable_hours'] | From time_entries table: sum of hours where billable=1                               |
-  | PTO Hrs                 | time_entries_df where project_id='FRINGE.PTO'           | Sum of hours from time_entries for PTO project                                       |
-  | Other Non-billable Hrs  | Calculated                                              | (actual_hours - actual_billable_hours) - pto_hours                                   |
-  | Billable Utilization %  | Calculated                                              | (actual_billable_hours / adjusted_possible_hours) × 100                              |
-  | Status                  | Calculated                                              | Based on Billable Utilization %: 🔴 >120%, 🟡 100-120%, 🟢 80-100%, 🔵 <80%         |
+  | Column                           | Source                                                  | Calculation                                                                          |
+  |----------------------------------|---------------------------------------------------------|--------------------------------------------------------------------------------------|
+  | Employee                         | employees_df['name']                                    | Direct from employees table                                                          |
+  | Possible Billable Hrs            | metrics['possible'][month_key][emp_id]['hours']         | From employees table: (working_days) × (target_allocation - overhead_allocation) × 8 |
+  | Actual Hrs                       | metrics['actuals'][month_key][emp_id]['hours']          | From time_entries table: sum of ALL hours logged (billable + non-billable)           |
+  | Actual Billable Hrs              | metrics['actuals'][month_key][emp_id]['billable_hours'] | From time_entries table: sum of hours where billable=1                               |
+  | PTO Hrs                          | time_entries_df where project_id='FRINGE.PTO'           | Sum of hours from time_entries for PTO project                                       |
+  | Other Non-billable Hrs           | Calculated                                              | (actual_hours - actual_billable_hours) - pto_hours                                   |
+  | Billable Utilization %           | Calculated                                              | (actual_billable_hours / adjusted_possible_hours) × 100                              |
+  | Status                           | Calculated                                              | Based on Billable Utilization %: 🔴 >120%, 🟡 100-120%, 🟢 80-100%, 🔵 <80%         |
+  | 📅 YTD Possible Billable Hrs    | ytd_metrics['possible']                                 | Sum of possible hours from Jan 1 to end of selected month                            |
+  | 📅 YTD Actual Billable Hrs      | ytd_metrics['actuals']                                  | Sum of actual billable hours from Jan 1 to end of selected month                     |
+  | 📅 YTD Billable Utilization %   | Calculated                                              | (ytd_actual_billable_hours / ytd_possible_hours) × 100                               |
 
 **Notes:**
 - Possible hours are adjusted only for employees hired or terminated mid-month, not based on which days they logged time entries.
 - Actual Billable Hrs shows only time entries marked as billable=1 in the database.
 - Click on any row to view project-level breakdown.
+- YTD columns show cumulative data from January 1st through the end of the selected month.
 """)
 
             # Display table with row selection
