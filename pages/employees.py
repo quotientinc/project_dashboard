@@ -322,29 +322,24 @@ with tab2:
 
             # Display table
             display_df = filtered_df[[
-                'name', 'role', 'possible_hours', 'projected_hours',
-                'actual_hours', 'actual_billable_hours', 'utilization_pct', 'variance', 'status'
+                'name', 'possible_hours',
+                'actual_hours', 'actual_billable_hours', 'utilization_pct', 'status'
             ]].copy()
 
             display_df = display_df.rename(columns={
                 'name': 'Employee',
-                'role': 'Role',
                 'possible_hours': 'Possible Hrs',
-                'projected_hours': 'Projected Hrs',
                 'actual_hours': 'Actual Hrs',
                 'actual_billable_hours': 'Actual Billable Hrs',
                 'utilization_pct': 'Billable Utilization %',
-                'variance': 'Variance',
                 'status': 'Status'
             })
 
             # Format columns
             display_df['Possible Hrs'] = display_df['Possible Hrs'].round(1)
-            display_df['Projected Hrs'] = display_df['Projected Hrs'].round(1)
             display_df['Actual Hrs'] = display_df['Actual Hrs'].round(1)
             display_df['Actual Billable Hrs'] = display_df['Actual Billable Hrs'].round(1)
             display_df['Billable Utilization %'] = display_df['Billable Utilization %'].round(1)
-            display_df['Variance'] = display_df['Variance'].round(1)
 
             # Conditional formatting
             def color_utilization_status(val):
@@ -357,16 +352,7 @@ with tab2:
                 else:
                     return 'background-color: #cce5ff'  # Blue
 
-            def color_variance(val):
-                if val > 10:
-                    return 'background-color: #ffd9b3; color: #cc6600'  # Orange
-                elif val >= -10:
-                    return 'background-color: #ccffcc'  # Green
-                else:
-                    return 'background-color: #ffcccc; color: #cc0000'  # Red
-
             styled_df = display_df.style.applymap(color_utilization_status, subset=['Billable Utilization %'])
-            styled_df = styled_df.applymap(color_variance, subset=['Variance'])
 
             # Show the logic behind the table for reference
             with st.popover("💡Logic for Utilization Table"):
@@ -375,13 +361,10 @@ with tab2:
   | Column                  | Source                                                  | Calculation                                                                          |
   |-------------------------|---------------------------------------------------------|--------------------------------------------------------------------------------------|
   | Employee                | employees_df['name']                                    | Direct from employees table                                                          |
-  | Role                    | employees_df['role']                                    | Direct from employees table                                                          |
   | Possible Hrs            | metrics['possible'][month_key][emp_id]['hours']         | From employees table: (working_days) × (target_allocation - overhead_allocation) × 8 |
-  | Projected Hrs           | metrics['projected'][month_key][emp_id]['hours']        | From allocations table: (working_days) × allocated_fte × 8                           |
   | Actual Hrs              | metrics['actuals'][month_key][emp_id]['hours']          | From time_entries table: sum of ALL hours logged (billable + non-billable)           |
   | Actual Billable Hrs     | metrics['actuals'][month_key][emp_id]['billable_hours'] | From time_entries table: sum of hours where billable=1                               |
   | Billable Utilization %  | Calculated                                              | (actual_billable_hours / adjusted_possible_hours) × 100                              |
-  | Variance                | Calculated                                              | actual_hours - projected_hours                                                       |
   | Status                  | Calculated                                              | Based on Billable Utilization %: 🔴 >120%, 🟡 100-120%, 🟢 80-100%, 🔵 <80%         |
 
 **Notes:**
