@@ -535,7 +535,7 @@ with tab1:
 
         # Summary totals
         st.markdown("##### Summary Totals")
-        summary_cols = st.columns(5)
+        summary_cols = st.columns(6)
         with summary_cols[0]:
             st.metric("Employees", len(filtered_df))
         with summary_cols[1]:
@@ -545,6 +545,8 @@ with tab1:
         with summary_cols[3]:
             st.metric("Total Actual Billable Hrs", f"{filtered_df['actual_billable_hours'].sum():.0f}")
         with summary_cols[4]:
+            st.metric("Total PTO Hrs", f"{filtered_df['pto_hours'].sum():.0f}")
+        with summary_cols[5]:
             avg_util = filtered_df['utilization_pct'].mean()
             st.metric("Avg Utilization", f"{avg_util:.1f}%")
 
