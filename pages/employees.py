@@ -228,6 +228,10 @@ with tab2:
                 # Get PTO hours for this employee
                 pto_hours = pto_by_employee.get(emp['id'], 0)
 
+                # Calculate other non-billable hours (excluding PTO)
+                total_nonbillable_hours = actual_hours - actual_billable_hours
+                other_nonbillable_hours = total_nonbillable_hours - pto_hours
+
                 utilization_pct = (actual_billable_hours / adjusted_possible_hours * 100) if adjusted_possible_hours > 0 else 0
                 variance = actual_hours - projected_hours
 
@@ -255,6 +259,7 @@ with tab2:
                     'actual_hours': actual_hours,
                     'actual_billable_hours': actual_billable_hours,
                     'pto_hours': pto_hours,
+                    'other_nonbillable_hours': other_nonbillable_hours,
                     'utilization_pct': utilization_pct,
                     'variance': variance,
                     'status': status,
@@ -337,7 +342,7 @@ with tab2:
             # Display table
             display_df = filtered_df[[
                 'name', 'possible_hours',
-                'actual_hours', 'actual_billable_hours', 'pto_hours', 'utilization_pct', 'status'
+                'actual_hours', 'actual_billable_hours', 'pto_hours', 'other_nonbillable_hours', 'utilization_pct', 'status'
             ]].copy()
 
             display_df = display_df.rename(columns={
@@ -346,6 +351,7 @@ with tab2:
                 'actual_hours': 'Actual Hrs',
                 'actual_billable_hours': 'Actual Billable Hrs',
                 'pto_hours': 'PTO Hrs',
+                'other_nonbillable_hours': 'Other Non-billable Hrs',
                 'utilization_pct': 'Billable Utilization %',
                 'status': 'Status'
             })
@@ -355,6 +361,7 @@ with tab2:
             display_df['Actual Hrs'] = display_df['Actual Hrs'].round(1)
             display_df['Actual Billable Hrs'] = display_df['Actual Billable Hrs'].round(1)
             display_df['PTO Hrs'] = display_df['PTO Hrs'].round(1)
+            display_df['Other Non-billable Hrs'] = display_df['Other Non-billable Hrs'].round(1)
             display_df['Billable Utilization %'] = display_df['Billable Utilization %'].round(1)
 
             # Conditional formatting
@@ -381,6 +388,7 @@ with tab2:
   | Actual Hrs              | metrics['actuals'][month_key][emp_id]['hours']          | From time_entries table: sum of ALL hours logged (billable + non-billable)           |
   | Actual Billable Hrs     | metrics['actuals'][month_key][emp_id]['billable_hours'] | From time_entries table: sum of hours where billable=1                               |
   | PTO Hrs                 | time_entries_df where project_id='FRINGE.PTO'          | Sum of hours from time_entries for PTO project                                       |
+  | Other Non-billable Hrs  | Calculated                                              | (actual_hours - actual_billable_hours) - pto_hours                                   |
   | Billable Utilization %  | Calculated                                              | (actual_billable_hours / adjusted_possible_hours) × 100                              |
   | Status                  | Calculated                                              | Based on Billable Utilization %: 🔴 >120%, 🟡 100-120%, 🟢 80-100%, 🔵 <80%         |
 
