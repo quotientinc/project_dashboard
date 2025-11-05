@@ -342,9 +342,10 @@ with tab1:
 
     # Project Reference CSV Import
     st.markdown("##### 📋 Import Project Reference CSV")
-    st.markdown("Import project reference data from CSV file (e.g., ProjectReference.csv from Deltek).")
+    st.info("Import project reference data from CSV file (e.g., ProjectReference.csv from Deltek).")
     with st.expander("Project Reference CSV Import", expanded=False):
-        st.markdown("""**Project CSV Format:**
+        st.markdown("""
+        **Project CSV Format:**
         - **Project**: Project ID and name combined (e.g., "101715.Y2.000.00 NIH CC OY2")
         - **POP Start Date**: Format MM/DD/YYYY
         - **POP End Date**: Format MM/DD/YYYY
@@ -466,74 +467,325 @@ with tab1:
 
     st.divider()
 
-    # Standard Import Section
-    st.markdown("##### 📁 Standard CSV Import")
-    data_type = st.selectbox(
-        "Select Data Type to Import",
-        ["Projects", "Employees", "Allocations", "Expenses", "Months"]
-    )
+    # Allocation CSV Import Section
+    st.markdown("##### 📅 Import Allocation CSV")
+    st.info("Import allocation data from CSV format. This will incrementally update allocations by replacing data in overlapping months.")
 
-    st.markdown("""
-    **CSV Format Requirements:**
-    - **Projects**: name, description, status, start_date, end_date, contract_value, budget_used, revenue_projected, revenue_actual, client, project_manager, billable
-    - **Employees**: name, role, skills, hire_date, term_date, pay_type, cost_rate, annual_salary, pto_accrual, holidays, billable, overhead_allocation, target_allocation
-    - **Allocations**: project_id, employee_id, allocated_fte, start_date, end_date, role, bill_rate, allocation_date, working_days, remaining_days
-    - **Expenses**: project_id, category, description, amount, date, approved
-    - **Months**: year, month, month_name, quarter, total_days, working_days, holidays
+    with st.expander("Allocation CSV Import", expanded=False):
+        st.markdown("""
+        **Allocation CSV Format:**
+        - **Required Columns:** employee_id, project_id, allocation_date, allocated_fte
+        - **Optional Columns:** bill_rate, role
+        - **allocation_date:** Format YYYY-MM (e.g., "2024-12", "2025-01")
+        - **allocated_fte:** Full-time equivalent (e.g., 0.25, 0.5, 1.0)
+        - **bill_rate:** Hourly billing rate (optional)
+        - **role:** Role for this allocation, overrides employee's base role (optional)
 
-    **Note:** For time entries, use the Timesheet CSV Import above.
-    """)
+        **Import Behavior:**
+        - Validates all employee_id and project_id references exist
+        - Fails entire import if any foreign key references are invalid
+        - Incremental import: Only replaces allocations in months covered by CSV
+        - Uses INSERT OR REPLACE strategy for duplicate handling
+        """)
 
-    uploaded_file = st.file_uploader(
-        "Choose a CSV file",
-        type=['csv'],
-        help="Upload a CSV file with the required format"
-    )
+        allocation_file = st.file_uploader(
+            "Choose Allocation CSV file",
+            type=['csv'],
+            key="allocation_upload",
+            help="Upload a CSV file in Allocation format"
+        )
 
-    if uploaded_file is not None:
-        # Preview the data
-        try:
-            df = pd.read_csv(uploaded_file)
-            st.markdown("##### Data Preview")
-            st.dataframe(df.head(), width='stretch')
+        if allocation_file is not None:
+            try:
+                from utils.csv_importer import AllocationCSVImporter
 
-            # Data validation
-            st.markdown("##### Data Validation")
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Rows", len(df))
-            with col2:
-                st.metric("Columns", len(df.columns))
+                # Parse and preview
+                importer = AllocationCSVImporter(allocation_file)
+                allocations, summary = importer.import_all()
 
-            # Import button
-            if st.button("Import Data"):
-                try:
-                    table_map = {
-                        "Projects": "projects",
-                        "Employees": "employees",
-                        "Allocations": "allocations",
-                        "Time Entries": "time_entries",
-                        "Expenses": "expenses",
-                        "Months": "months"
-                    }
+                # Check for validation errors
+                if summary['validation_errors']:
+                    st.error("⚠️ Validation Errors Found:")
+                    for error in summary['validation_errors']:
+                        st.write(f"- {error}")
+                    st.warning("Please fix these errors in your CSV before importing.")
+                else:
+                    # Validate foreign keys
+                    is_valid, fk_errors = db.validate_allocation_foreign_keys(allocations)
 
-                    # Reset file pointer
-                    uploaded_file.seek(0)
+                    if not is_valid:
+                        st.error("⚠️ Foreign Key Validation Failed:")
+                        st.markdown("The following employee or project IDs do not exist in the database:")
+                        for error in fk_errors:
+                            st.write(f"- {error}")
+                        st.warning("Please ensure all employees and projects exist before importing allocations.")
+                    else:
+                        # Show summary
+                        st.markdown("##### Import Preview")
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Total Allocations", summary['total_allocations'])
+                        with col2:
+                            st.metric("Employees", summary['unique_employees'])
+                        with col3:
+                            st.metric("Projects", summary['unique_projects'])
 
-                    # Import data
-                    db.import_csv(uploaded_file, table_map[data_type])
-                    st.success(f"Successfully imported {len(df)} records into {data_type}")
-                    st.balloons()
+                        col4, col5 = st.columns(2)
+                        with col4:
+                            st.write(f"**With Bill Rate:** {summary['with_bill_rate']}")
+                        with col5:
+                            st.write(f"**With Role:** {summary['with_role']}")
 
-                    # Refresh the page
-                    st.rerun()
+                        if summary['date_range']:
+                            st.write(f"**Date Range:** {summary['date_range'][0]} to {summary['date_range'][1]}")
 
-                except Exception as e:
-                    st.error(f"Error importing data: {str(e)}")
-                    st.write("Please ensure your CSV has the correct column names and data types.")
+                        # Show date range comparison
+                        if summary['date_range']:
+                            existing_range = db.get_existing_allocations_date_range()
 
-        except Exception as e:
-            st.error(f"Error reading file: {str(e)}")
+                            st.markdown("### 📅 Date Range Impact")
+                            col1, col2, col3 = st.columns(3)
+
+                            with col1:
+                                st.markdown("**Incoming CSV:**")
+                                st.info(f"{summary['date_range'][0]}\nto\n{summary['date_range'][1]}")
+
+                            with col2:
+                                st.markdown("**Current Database:**")
+                                if existing_range:
+                                    st.info(f"{existing_range[0]}\nto\n{existing_range[1]}")
+                                else:
+                                    st.info("No existing\nallocations")
+
+                            with col3:
+                                st.markdown("**Will Be Replaced:**")
+                                if existing_range:
+                                    # Calculate overlap
+                                    csv_start = summary['date_range'][0]
+                                    csv_end = summary['date_range'][1]
+                                    db_start = existing_range[0]
+                                    db_end = existing_range[1]
+
+                                    # Overlap is max(start1, start2) to min(end1, end2)
+                                    overlap_start = max(csv_start, db_start)
+                                    overlap_end = min(csv_end, db_end)
+
+                                    if overlap_start <= overlap_end:
+                                        st.warning(f"{overlap_start}\nto\n{overlap_end}")
+                                    else:
+                                        st.success("No overlap\n(safe import)")
+                                else:
+                                    st.success("No existing\ndata")
+
+                        # Show sample data
+                        st.markdown("**Sample Allocations:**")
+                        sample_df = pd.DataFrame(allocations[:10])
+                        display_cols = ['employee_id', 'project_id', 'allocation_date', 'allocated_fte', 'bill_rate', 'role']
+                        available_cols = [col for col in display_cols if col in sample_df.columns]
+                        st.dataframe(
+                            sample_df[available_cols],
+                            height=300,
+                            hide_index=True
+                        )
+
+                        # Confirmation checkbox
+                        if summary['date_range']:
+                            existing_range = db.get_existing_allocations_date_range()
+                            if existing_range:
+                                csv_start = summary['date_range'][0]
+                                csv_end = summary['date_range'][1]
+                                db_start = existing_range[0]
+                                db_end = existing_range[1]
+                                overlap_start = max(csv_start, db_start)
+                                overlap_end = min(csv_end, db_end)
+
+                                if overlap_start <= overlap_end:
+                                    confirm_text = f"I understand this will replace allocations from {overlap_start} to {overlap_end}"
+                                else:
+                                    confirm_text = "I understand this will import new allocation data (no existing data will be replaced)"
+                            else:
+                                confirm_text = "I understand this will import new allocation data (no existing data to replace)"
+                        else:
+                            confirm_text = "I understand this will import allocation data"
+
+                        confirm_import = st.checkbox(
+                            confirm_text,
+                            key="confirm_allocation_import"
+                        )
+
+                        if st.button("Import Allocation Data", type="primary", disabled=not confirm_import):
+                            try:
+                                progress_bar = st.progress(0, text="Starting import...")
+
+                                # Step 1: Delete overlapping allocations
+                                deleted_count = 0
+                                if summary['date_range']:
+                                    csv_start, csv_end = summary['date_range']
+                                    existing_range = db.get_existing_allocations_date_range()
+
+                                    if existing_range:
+                                        # Calculate overlap
+                                        db_start, db_end = existing_range
+                                        overlap_start = max(csv_start, db_start)
+                                        overlap_end = min(csv_end, db_end)
+
+                                        if overlap_start <= overlap_end:
+                                            progress_bar.progress(30, text=f"Clearing allocations from {overlap_start} to {overlap_end}...")
+                                            deleted_count = db.delete_allocations_by_date_range(overlap_start, overlap_end)
+                                        else:
+                                            progress_bar.progress(30, text="No overlapping allocations to clear...")
+                                    else:
+                                        progress_bar.progress(30, text="No existing allocations (first import)...")
+
+                                # Step 2: Insert new allocations
+                                progress_bar.progress(60, text=f"Importing {len(allocations)} allocations...")
+                                db.bulk_insert_allocations(allocations)
+
+                                progress_bar.progress(100, text="Import complete!")
+
+                                # Build success message
+                                success_msg = f"""
+                                ✅ Allocation import completed successfully!
+                                - Imported {len(allocations)} allocations
+                                - Employees: {summary['unique_employees']}
+                                - Projects: {summary['unique_projects']}
+                                - Date range: {summary['date_range'][0]} to {summary['date_range'][1]}
+                                """
+                                if deleted_count > 0:
+                                    success_msg += f"\n- Replaced {deleted_count} existing allocations in overlapping months"
+
+                                st.success(success_msg)
+                                st.balloons()
+
+                                # Wait a moment before reloading
+                                import time
+                                time.sleep(2)
+                                st.rerun()
+
+                            except Exception as e:
+                                st.error(f"Error importing allocation data: {str(e)}")
+                                st.exception(e)
+
+            except Exception as e:
+                st.error(f"Error parsing allocation CSV: {str(e)}")
+                st.exception(e)
+
+    st.divider()
+
+    # Months CSV Import Section
+    st.markdown("##### 📅 Import Months CSV")
+    st.info("Import month reference data (working days, holidays) for capacity planning. This will update existing months if they already exist.")
+
+    with st.expander("Months CSV Import", expanded=False):
+        st.markdown("""
+        **Months CSV Format:**
+        - **Required Columns:** year, month, month_name, total_days, working_days, holidays, quarter
+        - **year:** 4-digit year (e.g., 2024, 2025)
+        - **month:** Month number 1-12
+        - **month_name:** Full month name (e.g., "January")
+        - **total_days:** Total days in month (28-31)
+        - **working_days:** Number of working days (excluding weekends and holidays)
+        - **holidays:** Number of holidays in that month
+        - **quarter:** Quarter designation (e.g., "Q1", "Q2")
+
+        **Import Behavior:**
+        - Uses INSERT OR REPLACE to update existing months
+        - Essential for accurate capacity and utilization calculations
+        - Typically imported once per year to add new year's data
+        """)
+
+        months_file = st.file_uploader(
+            "Choose Months CSV file",
+            type=['csv'],
+            key="months_upload",
+            help="Upload a CSV file in Months format"
+        )
+
+        if months_file is not None:
+            try:
+                from utils.csv_importer import MonthsCSVImporter
+
+                # Parse and preview
+                importer = MonthsCSVImporter(months_file)
+                months, summary = importer.import_all()
+
+                # Check for validation errors
+                if summary['validation_errors']:
+                    st.error("⚠️ Validation Errors Found:")
+                    for error in summary['validation_errors']:
+                        st.write(f"- {error}")
+                    st.warning("Please fix these errors in your CSV before importing.")
+                else:
+                    # Show summary
+                    st.markdown("##### Import Preview")
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Total Months", summary['total_months'])
+                    with col2:
+                        st.metric("Years", summary['unique_years'])
+                    with col3:
+                        st.metric("Quarters", summary['unique_quarters'])
+
+                    col4, col5 = st.columns(2)
+                    with col4:
+                        st.write(f"**Total Working Days:** {summary['total_working_days']}")
+                    with col5:
+                        st.write(f"**Total Holidays:** {summary['total_holidays']}")
+
+                    if summary['year_range']:
+                        st.write(f"**Year Range:** {summary['year_range'][0]} to {summary['year_range'][1]}")
+
+                    # Show sample data
+                    st.markdown("**Sample Months:**")
+                    sample_df = pd.DataFrame(months[:12])
+                    display_cols = ['year', 'month', 'month_name', 'total_days', 'working_days', 'holidays', 'quarter']
+                    available_cols = [col for col in display_cols if col in sample_df.columns]
+                    st.dataframe(
+                        sample_df[available_cols],
+                        height=400,
+                        hide_index=True
+                    )
+
+                    # Confirmation checkbox
+                    confirm_import = st.checkbox(
+                        "I understand this will update month reference data (existing months will be replaced)",
+                        key="confirm_months_import"
+                    )
+
+                    if st.button("Import Months Data", type="primary", disabled=not confirm_import):
+                        try:
+                            progress_bar = st.progress(0, text="Starting import...")
+
+                            # Insert/update months
+                            progress_bar.progress(50, text=f"Importing {len(months)} months...")
+                            db.bulk_upsert_months(months)
+
+                            progress_bar.progress(100, text="Import complete!")
+
+                            # Build success message
+                            success_msg = f"""
+                            ✅ Months import completed successfully!
+                            - Imported {len(months)} months
+                            - Years: {summary['year_range'][0]} to {summary['year_range'][1]}
+                            - Total working days: {summary['total_working_days']}
+                            - Total holidays: {summary['total_holidays']}
+                            """
+
+                            st.success(success_msg)
+                            st.balloons()
+
+                            # Wait a moment before reloading
+                            import time
+                            time.sleep(2)
+                            st.rerun()
+
+                        except Exception as e:
+                            st.error(f"Error importing months data: {str(e)}")
+                            st.exception(e)
+
+            except Exception as e:
+                st.error(f"Error parsing months CSV: {str(e)}")
+                st.exception(e)
 
 with tab2:
     st.markdown("#### Export Data")

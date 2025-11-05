@@ -24,7 +24,7 @@ class TimesheetCSVImporter:
 
     def parse_csv(self):
         """Parse the CSV file"""
-        # Read CSV with correct column names
+        # Read CSV with correct column names, handling BOM
         self.df = pd.read_csv(
             self.csv_path,
             names=[
@@ -32,8 +32,15 @@ class TimesheetCSVImporter:
                 'Entered Hours', 'Comments', 'PLC ID', 'PLC Desc',
                 'Billing Rate', 'Amount'
             ],
-            skiprows=1  # Skip header row
+            skiprows=1,  # Skip header row
+            encoding='utf-8-sig'  # Handle UTF-8 BOM
         )
+
+        # Strip whitespace from column names (in case header has extra spaces)
+        self.df.columns = self.df.columns.str.strip()
+
+        # Remove rows where Employee ID is missing (subtotals, footer rows, etc.)
+        self.df = self.df.dropna(subset=['Employee ID'])
 
         # Clean up data
         self.df['Employee ID'] = self.df['Employee ID'].astype(int)
@@ -41,20 +48,39 @@ class TimesheetCSVImporter:
         self.df['Employee Name'] = self.df['Employee Name'].astype(str).str.strip()
         self.df['Entered Hours'] = pd.to_numeric(self.df['Entered Hours'], errors='coerce').fillna(0)
 
-        # Convert date format from "DD-MMM-YY" to "YYYY-MM-DD"
+        # Convert date format to "YYYY-MM-DD" (handles multiple input formats)
         self.df['date_parsed'] = self.df['Hours Date'].apply(self._parse_date)
 
         return self
 
     def _parse_date(self, date_str):
-        """Convert date from 'DD-MMM-YY' format to 'YYYY-MM-DD'"""
-        try:
-            # Parse date like "25-Dec-24"
-            dt = datetime.strptime(str(date_str), '%d-%b-%y')
-            return dt.strftime('%Y-%m-%d')
-        except Exception as e:
-            print(f"Error parsing date '{date_str}': {e}")
+        """
+        Convert date to 'YYYY-MM-DD' format.
+        Handles multiple input formats:
+        - 'DD-MMM-YY' (e.g., "25-Dec-24")
+        - 'MMM DD, YYYY' (e.g., "Dec 25, 2024")
+        """
+        if pd.isna(date_str) or str(date_str).strip() == '':
             return None
+
+        # Try multiple date formats
+        formats = [
+            '%d-%b-%y',      # "25-Dec-24"
+            '%b %d, %Y',     # "Dec 25, 2024"
+            '%m/%d/%Y',      # "12/25/2024"
+            '%Y-%m-%d'       # "2024-12-25" (already correct format)
+        ]
+
+        for fmt in formats:
+            try:
+                dt = datetime.strptime(str(date_str).strip(), fmt)
+                return dt.strftime('%Y-%m-%d')
+            except ValueError:
+                continue
+
+        # If no format worked, log error and return None
+        print(f"Error parsing date '{date_str}': No matching format found")
+        return None
 
     def _parse_employee_name(self, name_str):
         """
@@ -603,3 +629,301 @@ class ProjectReferenceCSVImporter:
         self.extract_projects()
 
         return self.projects, self.get_summary()
+
+
+class AllocationCSVImporter:
+    """
+    Imports allocation data from CSV files with format:
+    employee_id, project_id, allocation_date, bill_rate, allocated_fte, role (optional)
+
+    The allocation_date should be in YYYY-MM format (e.g., "2024-12", "2025-01")
+    """
+
+    def __init__(self, csv_path):
+        """Initialize importer with CSV file path"""
+        self.csv_path = csv_path
+        self.df = None
+        self.allocations = []
+        self.validation_errors = []
+
+    def parse_csv(self):
+        """Parse the CSV file"""
+        # Read CSV with encoding that handles BOM
+        self.df = pd.read_csv(self.csv_path, encoding='utf-8-sig')
+
+        # Clean up column names (strip whitespace)
+        self.df.columns = self.df.columns.str.strip()
+
+        # Validate required columns
+        required_columns = ['employee_id', 'project_id', 'allocation_date', 'allocated_fte']
+        missing_columns = [col for col in required_columns if col not in self.df.columns]
+        if missing_columns:
+            raise ValueError(f"Missing required columns: {missing_columns}")
+
+        # Clean up data
+        self.df['employee_id'] = pd.to_numeric(self.df['employee_id'], errors='coerce').fillna(0).astype(int)
+        self.df['project_id'] = self.df['project_id'].astype(str).str.strip()
+        self.df['allocated_fte'] = pd.to_numeric(self.df['allocated_fte'], errors='coerce').fillna(0.0)
+
+        # Parse bill_rate (optional field)
+        if 'bill_rate' in self.df.columns:
+            self.df['bill_rate'] = pd.to_numeric(self.df['bill_rate'], errors='coerce')
+
+        # Handle optional role column
+        if 'role' not in self.df.columns:
+            self.df['role'] = None
+
+        # Parse allocation_date to ensure YYYY-MM format
+        self.df['allocation_date_parsed'] = self.df['allocation_date'].apply(self._parse_allocation_date)
+
+        return self
+
+    def _parse_allocation_date(self, date_str):
+        """
+        Convert date to 'YYYY-MM' format
+        Handles various input formats: YYYY-MM, YYYY-M, M/YYYY, MM/YYYY, etc.
+        """
+        if pd.isna(date_str) or str(date_str).strip() == '':
+            return None
+
+        try:
+            date_str = str(date_str).strip()
+
+            # If already in YYYY-MM format, validate and return
+            if re.match(r'^\d{4}-\d{2}$', date_str):
+                # Validate it's a valid date
+                datetime.strptime(date_str + '-01', '%Y-%m-%d')
+                return date_str
+
+            # If in YYYY-M format (single digit month)
+            if re.match(r'^\d{4}-\d{1}$', date_str):
+                year, month = date_str.split('-')
+                return f"{year}-{month.zfill(2)}"
+
+            # If in M/YYYY or MM/YYYY format
+            if '/' in date_str:
+                parts = date_str.split('/')
+                if len(parts) == 2:
+                    month, year = parts
+                    return f"{year}-{month.zfill(2)}"
+
+            # Try to parse as full date and extract year-month
+            dt = datetime.strptime(date_str, '%Y-%m-%d')
+            return dt.strftime('%Y-%m')
+
+        except Exception as e:
+            print(f"Error parsing allocation_date '{date_str}': {e}")
+            return None
+
+    def extract_allocations(self):
+        """Extract allocation data from CSV and map to database format"""
+        now = datetime.now().isoformat()
+        self.allocations = []
+        self.validation_errors = []
+
+        for idx, row in self.df.iterrows():
+            # Skip rows with invalid data
+            if row['employee_id'] <= 0:
+                self.validation_errors.append(f"Row {idx + 2}: Invalid employee_id")
+                continue
+
+            if not row['project_id']:
+                self.validation_errors.append(f"Row {idx + 2}: Missing project_id")
+                continue
+
+            if not row['allocation_date_parsed']:
+                self.validation_errors.append(f"Row {idx + 2}: Invalid allocation_date")
+                continue
+
+            if row['allocated_fte'] <= 0:
+                self.validation_errors.append(f"Row {idx + 2}: Invalid allocated_fte (must be > 0)")
+                continue
+
+            # Build allocation record
+            allocation = {
+                'employee_id': int(row['employee_id']),
+                'project_id': str(row['project_id']),
+                'allocation_date': row['allocation_date_parsed'],
+                'allocated_fte': float(row['allocated_fte']),
+                'created_at': now,
+                'updated_at': now
+            }
+
+            # Add optional bill_rate
+            if 'bill_rate' in row and pd.notna(row['bill_rate']) and row['bill_rate'] > 0:
+                allocation['bill_rate'] = float(row['bill_rate'])
+            else:
+                allocation['bill_rate'] = None
+
+            # Add optional role
+            if 'role' in row and pd.notna(row['role']) and str(row['role']).strip():
+                allocation['role'] = str(row['role']).strip()
+            else:
+                allocation['role'] = None
+
+            self.allocations.append(allocation)
+
+        return self
+
+    def get_summary(self):
+        """Get summary statistics of the import"""
+        if self.df is None:
+            return {}
+
+        unique_employees = len(set(a['employee_id'] for a in self.allocations))
+        unique_projects = len(set(a['project_id'] for a in self.allocations))
+
+        # Get date range
+        date_range = None
+        if self.allocations:
+            dates = [a['allocation_date'] for a in self.allocations]
+            date_range = (min(dates), max(dates))
+
+        # Count allocations with bill_rate
+        with_bill_rate = sum(1 for a in self.allocations if a.get('bill_rate'))
+
+        # Count allocations with role
+        with_role = sum(1 for a in self.allocations if a.get('role'))
+
+        return {
+            'total_allocations': len(self.allocations),
+            'unique_employees': unique_employees,
+            'unique_projects': unique_projects,
+            'date_range': date_range,
+            'with_bill_rate': with_bill_rate,
+            'with_role': with_role,
+            'validation_errors': self.validation_errors
+        }
+
+    def import_all(self):
+        """
+        Parse CSV and extract all allocation data
+        Returns: (allocations, summary)
+        """
+        self.parse_csv()
+        self.extract_allocations()
+
+        return self.allocations, self.get_summary()
+
+
+class MonthsCSVImporter:
+    """
+    Imports month reference data from CSV files with format:
+    year, month, month_name, total_days, working_days, holidays, quarter
+
+    This data is essential for capacity planning and working day calculations.
+    """
+
+    def __init__(self, csv_path):
+        """Initialize importer with CSV file path"""
+        self.csv_path = csv_path
+        self.df = None
+        self.months = []
+        self.validation_errors = []
+
+    def parse_csv(self):
+        """Parse the CSV file"""
+        # Read CSV with encoding that handles BOM
+        self.df = pd.read_csv(self.csv_path, encoding='utf-8-sig')
+
+        # Clean up column names (strip whitespace)
+        self.df.columns = self.df.columns.str.strip()
+
+        # Validate required columns
+        required_columns = ['year', 'month', 'month_name', 'total_days', 'working_days', 'holidays', 'quarter']
+        missing_columns = [col for col in required_columns if col not in self.df.columns]
+        if missing_columns:
+            raise ValueError(f"Missing required columns: {missing_columns}")
+
+        # Clean up data
+        self.df['year'] = pd.to_numeric(self.df['year'], errors='coerce').fillna(0).astype(int)
+        self.df['month'] = pd.to_numeric(self.df['month'], errors='coerce').fillna(0).astype(int)
+        self.df['total_days'] = pd.to_numeric(self.df['total_days'], errors='coerce').fillna(0).astype(int)
+        self.df['working_days'] = pd.to_numeric(self.df['working_days'], errors='coerce').fillna(0).astype(int)
+        self.df['holidays'] = pd.to_numeric(self.df['holidays'], errors='coerce').fillna(0).astype(int)
+        self.df['month_name'] = self.df['month_name'].astype(str).str.strip()
+        self.df['quarter'] = self.df['quarter'].astype(str).str.strip()
+
+        return self
+
+    def extract_months(self):
+        """Extract month data from CSV and map to database format"""
+        now = datetime.now().isoformat()
+        self.months = []
+        self.validation_errors = []
+
+        for idx, row in self.df.iterrows():
+            # Validate data
+            if row['year'] < 2000 or row['year'] > 2100:
+                self.validation_errors.append(f"Row {idx + 2}: Invalid year {row['year']}")
+                continue
+
+            if row['month'] < 1 or row['month'] > 12:
+                self.validation_errors.append(f"Row {idx + 2}: Invalid month {row['month']}")
+                continue
+
+            if row['total_days'] < 28 or row['total_days'] > 31:
+                self.validation_errors.append(f"Row {idx + 2}: Invalid total_days {row['total_days']}")
+                continue
+
+            if row['working_days'] < 0 or row['working_days'] > 31:
+                self.validation_errors.append(f"Row {idx + 2}: Invalid working_days {row['working_days']}")
+                continue
+
+            if row['holidays'] < 0 or row['holidays'] > 10:
+                self.validation_errors.append(f"Row {idx + 2}: Invalid holidays {row['holidays']}")
+                continue
+
+            # Build month record
+            month = {
+                'year': int(row['year']),
+                'month': int(row['month']),
+                'month_name': str(row['month_name']),
+                'total_days': int(row['total_days']),
+                'working_days': int(row['working_days']),
+                'holidays': int(row['holidays']),
+                'quarter': str(row['quarter']),
+                'created_at': now,
+                'updated_at': now
+            }
+            self.months.append(month)
+
+        return self
+
+    def get_summary(self):
+        """Get summary statistics of the import"""
+        if self.df is None:
+            return {}
+
+        unique_years = len(set(m['year'] for m in self.months))
+        unique_quarters = len(set(m['quarter'] for m in self.months))
+
+        # Get year range
+        year_range = None
+        if self.months:
+            years = [m['year'] for m in self.months]
+            year_range = (min(years), max(years))
+
+        # Calculate totals
+        total_working_days = sum(m['working_days'] for m in self.months)
+        total_holidays = sum(m['holidays'] for m in self.months)
+
+        return {
+            'total_months': len(self.months),
+            'unique_years': unique_years,
+            'unique_quarters': unique_quarters,
+            'year_range': year_range,
+            'total_working_days': total_working_days,
+            'total_holidays': total_holidays,
+            'validation_errors': self.validation_errors
+        }
+
+    def import_all(self):
+        """
+        Parse CSV and extract all month data
+        Returns: (months, summary)
+        """
+        self.parse_csv()
+        self.extract_months()
+
+        return self.months, self.get_summary()
