@@ -10,6 +10,42 @@ logger = get_logger(__name__)
 db = st.session_state.db_manager
 processor = st.session_state.data_processor
 
+# Helper function to calculate working days in a month range
+def get_working_days_in_range(start_date, end_date, months_df, year, month):
+    """Calculate working days between start and end date for a specific month"""
+    import calendar
+
+    # Get month info
+    month_info = months_df[
+        (months_df['year'] == year) &
+        (months_df['month'] == month)
+    ]
+
+    if month_info.empty:
+        return 21  # Default fallback
+
+    working_days_in_month = int(month_info['working_days'].iloc[0])
+
+    # Calculate the actual working days the employee was active
+    month_start = datetime(year, month, 1).date()
+    month_end = datetime(year, month, calendar.monthrange(year, month)[1]).date()
+
+    # Determine actual start and end dates for this employee in this month
+    actual_start = max(start_date, month_start)
+    actual_end = min(end_date, month_end)
+
+    # If they worked the entire month, return full working days
+    if actual_start == month_start and actual_end == month_end:
+        return working_days_in_month
+
+    # Calculate proportion of month worked
+    days_in_month = (month_end - month_start).days + 1
+    days_worked = (actual_end - actual_start).days + 1
+    proportion = days_worked / days_in_month
+
+    # Return prorated working days
+    return int(working_days_in_month * proportion)
+
 # Date Range Filter
 st.markdown("### 📊 Dashboard Overview")
 col1, col2 = st.columns([4, 1])
@@ -21,7 +57,7 @@ with col2:
     date_range_option = st.selectbox(
         "Time Range",
         ["Last 30 Days", "Last Quarter", "YTD", "This Year", "All Time"],
-        index=3,  # Default to "This Year"
+        index=2,  # Default to "YTD"
         key="overview_date_range"
     )
 
@@ -87,24 +123,27 @@ if billable_project_ids:
         allocations_df = allocations_df[allocations_df['project_id'].isin(billable_project_ids)].copy()
 
 # Calculate monthly utilization trend (for the current year)
-# Filter to billable employees only (billable=1, pay_type='Salary', active)
+# Filter to billable employees only (billable=1, active)
 billable_employees_df = employees_df[
     (employees_df['billable'] == 1) &
-    (employees_df['pay_type'] == 'Salary') &
     (
         (pd.isna(employees_df['term_date'])) |
         (pd.to_datetime(employees_df['term_date']).dt.date >= current_date.date())
     )
 ].copy()
 
-# Get performance metrics for YTD
+# Get performance metrics for full year (for trend chart with projections)
+full_year_start = datetime(current_date.year, 1, 1).strftime('%Y-%m-%d')
+full_year_end = datetime(current_date.year, 12, 31).strftime('%Y-%m-%d')
+
+# Get performance metrics for YTD only (for KPI calculations)
 ytd_start = datetime(current_date.year, 1, 1).strftime('%Y-%m-%d')
-ytd_end = datetime(current_date.year, 12, 31).strftime('%Y-%m-%d')
+ytd_end = current_date.strftime('%Y-%m-%d')
 
 if not billable_employees_df.empty:
     performance_data = processor.get_performance_metrics(
-        start_date=ytd_start,
-        end_date=ytd_end,
+        start_date=full_year_start,
+        end_date=full_year_end,
         constraint=None
     )
 
@@ -197,10 +236,25 @@ if not billable_employees_df.empty:
 else:
     utilization_trend_df = pd.DataFrame()
 
-# Calculate YTD average utilization
+# Calculate YTD average utilization using aggregate formula (total billable / total possible)
 if not utilization_trend_df.empty:
-    ytd_data = utilization_trend_df[utilization_trend_df['type'] == 'Actual']
-    avg_employee_utilization = ytd_data['avg_utilization'].mean() if not ytd_data.empty else 0
+    # Sum up all billable and possible hours from actual months only
+    ytd_total_billable = 0
+    ytd_total_possible = 0
+
+    for month_num in range(1, current_date.month + 1):
+        month_name = f"{utilization_trend_df.iloc[month_num-1]['month_name']} {current_date.year}"
+
+        # Get actual billable hours from actuals
+        actual_month_data = performance_data['actuals'].get(month_name, {})
+        ytd_total_billable += sum(emp_data.get('billable_hours', 0) for emp_data in actual_month_data.values())
+
+        # Get possible hours
+        possible_month_data = performance_data['possible'].get(month_name, {})
+        ytd_total_possible += sum(emp_data.get('hours', 0) for emp_data in possible_month_data.values())
+
+    # Calculate aggregate utilization percentage
+    avg_employee_utilization = (ytd_total_billable / ytd_total_possible * 100) if ytd_total_possible > 0 else 0
 else:
     avg_employee_utilization = 0
 
@@ -322,18 +376,71 @@ with col2:
 col1, col2 = st.columns(2)
 
 with col1:
-    st.markdown("#### 👥 Employee Utilization (Individual)")
-    if not employees_df.empty:
-        utilization_df = processor.calculate_employee_utilization(
-            employees_df, allocations_df, time_entries_df
-        )
+    st.markdown("#### 👥 Employee Billable Utilization (Individual)")
+    if not billable_employees_df.empty and not utilization_trend_df.empty:
+        # Calculate billable utilization for each employee using YTD data
+        employee_util_data = []
+
+        for _, emp in billable_employees_df.iterrows():
+            emp_id_str = str(emp['id'])
+
+            # Sum billable and possible hours across all YTD months
+            ytd_billable = 0
+            ytd_possible = 0
+
+            for month_num in range(1, current_date.month + 1):
+                month_name = f"{utilization_trend_df.iloc[month_num-1]['month_name']} {current_date.year}"
+
+                # Get actual billable hours from actuals
+                actual_month_data = performance_data['actuals'].get(month_name, {})
+                emp_actual = actual_month_data.get(emp_id_str, {})
+                ytd_billable += emp_actual.get('billable_hours', 0)
+
+                # Get possible hours and adjust for hire/term dates
+                possible_month_data = performance_data['possible'].get(month_name, {})
+                emp_possible = possible_month_data.get(emp_id_str, {})
+                possible_hours = emp_possible.get('hours', 0)
+
+                # Adjust for hire/term dates
+                if pd.notna(emp.get('hire_date')):
+                    hire_date = pd.to_datetime(emp['hire_date']).date()
+                else:
+                    hire_date = datetime(current_date.year, 1, 1).date()
+
+                if pd.notna(emp.get('term_date')):
+                    term_date = pd.to_datetime(emp['term_date']).date()
+                else:
+                    term_date = datetime(current_date.year, 12, 31).date()
+
+                # Get working days for adjustment
+                working_days = get_working_days_in_range(hire_date, term_date, months_df, current_date.year, month_num)
+                possible_worked_days = emp_possible.get('worked_days', 21)
+
+                # Adjust possible hours if needed
+                if possible_worked_days > 0 and working_days != possible_worked_days:
+                    daily_rate = possible_hours / possible_worked_days
+                    adjusted_possible = daily_rate * working_days
+                else:
+                    adjusted_possible = possible_hours
+
+                ytd_possible += adjusted_possible
+
+            # Calculate utilization percentage
+            utilization_pct = (ytd_billable / ytd_possible * 100) if ytd_possible > 0 else 0
+
+            employee_util_data.append({
+                'name': emp['name'],
+                'utilization_rate': utilization_pct
+            })
+
+        utilization_df = pd.DataFrame(employee_util_data)
 
         # Sort by utilization rate descending
         utilization_df = utilization_df.sort_values('utilization_rate', ascending=False)
 
-        # Assign colors based on utilization rate
+        # Assign colors based on utilization rate (matching employees.py thresholds)
         colors = utilization_df['utilization_rate'].apply(
-            lambda x: '#2E7D32' if x >= 80 else ('#FFA726' if x >= 60 else '#E53935')
+            lambda x: '#ffcccc' if x > 120 else ('#fff9cc' if x >= 100 else ('#2E7D32' if x >= 80 else '#cce5ff'))
         )
 
         fig = go.Figure()
@@ -341,7 +448,7 @@ with col1:
             x=utilization_df['name'],
             y=utilization_df['utilization_rate'],
             marker_color=colors,
-            name='Utilization %',
+            name='Billable Utilization %',
             text=utilization_df['utilization_rate'].apply(lambda x: f"{x:.1f}%"),
             textposition='outside'
         ))
@@ -356,13 +463,13 @@ with col1:
         fig.update_layout(
             height=400,
             xaxis_tickangle=-45,
-            yaxis_title="Utilization %",
-            yaxis=dict(range=[0, 110]),
+            yaxis_title="Billable Utilization %",
+            yaxis=dict(range=[0, 150]),
             showlegend=False
         )
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("No employee data available")
+        st.info("No billable employee data available")
 
 with col2:
     st.markdown("#### 💰 Monthly Burn Rate (Labor + Expenses)")

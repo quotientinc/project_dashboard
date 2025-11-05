@@ -200,17 +200,26 @@ with st.sidebar:
         st.metric("Total Contract Value (AVG)", f"${total_contract_value_avg:,.0f}")
         st.metric("Total Projects YTD", projects_ytd_count)
     if not employees_df.empty:
-        # Filter for active, billable, salary employees
+        # Filter for active, billable employees (all pay types)
         current_date = datetime.now().date()
         billable_employees = employees_df[
             (employees_df['billable'] == 1) &
-            (employees_df['pay_type'] == 'Salary') &
             (
                 (pd.isna(employees_df['term_date'])) |
                 (pd.to_datetime(employees_df['term_date']).dt.date >= current_date)
             )
         ]
-        st.metric("Total Billable Employees", len(billable_employees))
+
+        # Calculate breakdown by pay type
+        salary_count = len(billable_employees[billable_employees['pay_type'] == 'Salary'])
+        hourly_count = len(billable_employees[billable_employees['pay_type'] == 'Hourly'])
+
+        st.metric(
+            "Total Billable Employees",
+            len(billable_employees),
+            delta=f"{salary_count} Salary, {hourly_count} Hourly",
+            delta_color="off"
+        )
 
 # Run the selected page
 pg.run()
