@@ -9,7 +9,7 @@ logger = get_logger(__name__)
 db = st.session_state.db_manager
 processor = st.session_state.data_processor
 
-st.markdown("### 🔮 What-If Scenario Analysis")
+st.markdown("### 🔮 What-If Scenario Analysis (🚨not ready yet)")
 
 # Function definitions
 def project_cost_scenarios(db, processor):

@@ -31,7 +31,7 @@ def safe_currency_display(value):
         return '-'
     return f"${value:,.0f}"
 
-st.markdown("### 🚀 Project Management")
+st.markdown("### 🚀 Project Management (🚨data is in progress)")
 
 # Tabs for different views
 tab1, tab2, tab3, tab4 = st.tabs(["Project List", "Project Details", "Edit Project", "Project Analytics"])

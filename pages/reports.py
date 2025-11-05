@@ -10,7 +10,7 @@ logger = get_logger(__name__)
 db = st.session_state.db_manager
 processor = st.session_state.data_processor
 
-st.markdown("### 📑 Reports")
+st.markdown("### 📑 Reports (🚨not ready yet)")
 
 # Function definitions
 def generate_executive_summary(db, processor):
