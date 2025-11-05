@@ -39,6 +39,9 @@ class TimesheetCSVImporter:
         # Strip whitespace from column names (in case header has extra spaces)
         self.df.columns = self.df.columns.str.strip()
 
+        # Remove rows where Employee ID is missing (subtotals, footer rows, etc.)
+        self.df = self.df.dropna(subset=['Employee ID'])
+
         # Clean up data
         self.df['Employee ID'] = self.df['Employee ID'].astype(int)
         self.df['Project ID'] = self.df['Project ID'].astype(str).str.strip()
