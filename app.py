@@ -156,6 +156,7 @@ with st.sidebar:
         ].copy()
 
         total_contract_value_avg = 0
+        new_contract_value = 0
         projects_ytd_count = 0
         if not eligible_projects.empty:
             for _, project in eligible_projects.iterrows():
@@ -197,8 +198,30 @@ with st.sidebar:
                 total_contract_value_avg += prorated_value
                 projects_ytd_count += 1
 
-        st.metric("Total Contract Value (AVG)", f"${total_contract_value_avg:,.0f}")
-        st.metric("Total Projects YTD", projects_ytd_count)
+                # Track contract value for projects that started this year
+                if start_date >= current_year_start:
+                    new_contract_value += prorated_value
+
+            # Calculate how many projects started in current year
+            new_projects_count = len(eligible_projects[
+                pd.to_datetime(eligible_projects['start_date']).dt.date >= current_year_start
+            ])
+        else:
+            new_projects_count = 0
+            new_contract_value = 0
+
+        st.metric(
+            "Total Contract Value (AVG)",
+            f"${total_contract_value_avg:,.0f}",
+            delta=f"${new_contract_value:,.0f} new this year",
+            delta_color="off"
+        )
+        st.metric(
+            "Total Projects YTD",
+            projects_ytd_count,
+            delta=f"{new_projects_count} started this year",
+            delta_color="off"
+        )
     if not employees_df.empty:
         # Filter for active, billable employees (all pay types)
         current_date = datetime.now().date()
