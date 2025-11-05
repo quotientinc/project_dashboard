@@ -609,6 +609,90 @@ class DatabaseManager:
         cursor.execute(query, list(updates.values()) + [allocation_id])
         self.conn.commit()
 
+    def get_existing_allocations_date_range(self):
+        """Get the date range of existing allocations in the database"""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT MIN(allocation_date) as min_date, MAX(allocation_date) as max_date
+            FROM allocations
+        """)
+        result = cursor.fetchone()
+        if result and result[0] and result[1]:
+            return (result[0], result[1])
+        return None
+
+    def delete_allocations_by_date_range(self, start_date, end_date):
+        """
+        Delete allocations within a specific date range (inclusive).
+        Used for incremental imports to clear overlapping data.
+        Returns the number of allocations deleted.
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            DELETE FROM allocations
+            WHERE allocation_date >= ? AND allocation_date <= ?
+        """, (start_date, end_date))
+        self.conn.commit()
+        return cursor.rowcount
+
+    def bulk_insert_allocations(self, allocations_data):
+        """
+        Bulk insert allocations from list of dicts.
+        Uses INSERT OR REPLACE to handle duplicates (replaces existing with new data).
+        """
+        if not allocations_data:
+            return
+
+        cursor = self.conn.cursor()
+
+        # Get column names from first record
+        columns = list(allocations_data[0].keys())
+        placeholders = ','.join('?' * len(columns))
+
+        # Use INSERT OR REPLACE to handle duplicates
+        query = f"INSERT OR REPLACE INTO allocations ({','.join(columns)}) VALUES ({placeholders})"
+
+        # Convert data to list of tuples
+        values = []
+        for allocation in allocations_data:
+            row_values = []
+            for col in columns:
+                value = allocation[col]
+                # Convert numpy types to Python types
+                if hasattr(value, 'item'):
+                    value = value.item()
+                row_values.append(value)
+            values.append(tuple(row_values))
+
+        cursor.executemany(query, values)
+        self.conn.commit()
+
+    def validate_allocation_foreign_keys(self, allocations_data):
+        """
+        Validate that all employee_id and project_id references exist in the database.
+        Returns a tuple of (is_valid, error_messages)
+        """
+        cursor = self.conn.cursor()
+        errors = []
+
+        # Get unique employee and project IDs
+        employee_ids = set(a['employee_id'] for a in allocations_data)
+        project_ids = set(a['project_id'] for a in allocations_data)
+
+        # Check employees exist
+        for employee_id in employee_ids:
+            cursor.execute("SELECT COUNT(*) FROM employees WHERE id = ?", (employee_id,))
+            if cursor.fetchone()[0] == 0:
+                errors.append(f"Employee ID {employee_id} does not exist in database")
+
+        # Check projects exist
+        for project_id in project_ids:
+            cursor.execute("SELECT COUNT(*) FROM projects WHERE id = ?", (project_id,))
+            if cursor.fetchone()[0] == 0:
+                errors.append(f"Project ID {project_id} does not exist in database")
+
+        return (len(errors) == 0, errors)
+
     # Time tracking methods
     def get_time_entries(self, start_date=None, end_date=None, employee_id=None, project_id=None):
         """Get time entries with filters"""

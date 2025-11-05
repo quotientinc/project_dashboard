@@ -603,3 +603,178 @@ class ProjectReferenceCSVImporter:
         self.extract_projects()
 
         return self.projects, self.get_summary()
+
+
+class AllocationCSVImporter:
+    """
+    Imports allocation data from CSV files with format:
+    employee_id, project_id, allocation_date, bill_rate, allocated_fte, role (optional)
+
+    The allocation_date should be in YYYY-MM format (e.g., "2024-12", "2025-01")
+    """
+
+    def __init__(self, csv_path):
+        """Initialize importer with CSV file path"""
+        self.csv_path = csv_path
+        self.df = None
+        self.allocations = []
+        self.validation_errors = []
+
+    def parse_csv(self):
+        """Parse the CSV file"""
+        # Read CSV with encoding that handles BOM
+        self.df = pd.read_csv(self.csv_path, encoding='utf-8-sig')
+
+        # Clean up column names (strip whitespace)
+        self.df.columns = self.df.columns.str.strip()
+
+        # Validate required columns
+        required_columns = ['employee_id', 'project_id', 'allocation_date', 'allocated_fte']
+        missing_columns = [col for col in required_columns if col not in self.df.columns]
+        if missing_columns:
+            raise ValueError(f"Missing required columns: {missing_columns}")
+
+        # Clean up data
+        self.df['employee_id'] = pd.to_numeric(self.df['employee_id'], errors='coerce').fillna(0).astype(int)
+        self.df['project_id'] = self.df['project_id'].astype(str).str.strip()
+        self.df['allocated_fte'] = pd.to_numeric(self.df['allocated_fte'], errors='coerce').fillna(0.0)
+
+        # Parse bill_rate (optional field)
+        if 'bill_rate' in self.df.columns:
+            self.df['bill_rate'] = pd.to_numeric(self.df['bill_rate'], errors='coerce')
+
+        # Handle optional role column
+        if 'role' not in self.df.columns:
+            self.df['role'] = None
+
+        # Parse allocation_date to ensure YYYY-MM format
+        self.df['allocation_date_parsed'] = self.df['allocation_date'].apply(self._parse_allocation_date)
+
+        return self
+
+    def _parse_allocation_date(self, date_str):
+        """
+        Convert date to 'YYYY-MM' format
+        Handles various input formats: YYYY-MM, YYYY-M, M/YYYY, MM/YYYY, etc.
+        """
+        if pd.isna(date_str) or str(date_str).strip() == '':
+            return None
+
+        try:
+            date_str = str(date_str).strip()
+
+            # If already in YYYY-MM format, validate and return
+            if re.match(r'^\d{4}-\d{2}$', date_str):
+                # Validate it's a valid date
+                datetime.strptime(date_str + '-01', '%Y-%m-%d')
+                return date_str
+
+            # If in YYYY-M format (single digit month)
+            if re.match(r'^\d{4}-\d{1}$', date_str):
+                year, month = date_str.split('-')
+                return f"{year}-{month.zfill(2)}"
+
+            # If in M/YYYY or MM/YYYY format
+            if '/' in date_str:
+                parts = date_str.split('/')
+                if len(parts) == 2:
+                    month, year = parts
+                    return f"{year}-{month.zfill(2)}"
+
+            # Try to parse as full date and extract year-month
+            dt = datetime.strptime(date_str, '%Y-%m-%d')
+            return dt.strftime('%Y-%m')
+
+        except Exception as e:
+            print(f"Error parsing allocation_date '{date_str}': {e}")
+            return None
+
+    def extract_allocations(self):
+        """Extract allocation data from CSV and map to database format"""
+        now = datetime.now().isoformat()
+        self.allocations = []
+        self.validation_errors = []
+
+        for idx, row in self.df.iterrows():
+            # Skip rows with invalid data
+            if row['employee_id'] <= 0:
+                self.validation_errors.append(f"Row {idx + 2}: Invalid employee_id")
+                continue
+
+            if not row['project_id']:
+                self.validation_errors.append(f"Row {idx + 2}: Missing project_id")
+                continue
+
+            if not row['allocation_date_parsed']:
+                self.validation_errors.append(f"Row {idx + 2}: Invalid allocation_date")
+                continue
+
+            if row['allocated_fte'] <= 0:
+                self.validation_errors.append(f"Row {idx + 2}: Invalid allocated_fte (must be > 0)")
+                continue
+
+            # Build allocation record
+            allocation = {
+                'employee_id': int(row['employee_id']),
+                'project_id': str(row['project_id']),
+                'allocation_date': row['allocation_date_parsed'],
+                'allocated_fte': float(row['allocated_fte']),
+                'created_at': now,
+                'updated_at': now
+            }
+
+            # Add optional bill_rate
+            if 'bill_rate' in row and pd.notna(row['bill_rate']) and row['bill_rate'] > 0:
+                allocation['bill_rate'] = float(row['bill_rate'])
+            else:
+                allocation['bill_rate'] = None
+
+            # Add optional role
+            if 'role' in row and pd.notna(row['role']) and str(row['role']).strip():
+                allocation['role'] = str(row['role']).strip()
+            else:
+                allocation['role'] = None
+
+            self.allocations.append(allocation)
+
+        return self
+
+    def get_summary(self):
+        """Get summary statistics of the import"""
+        if self.df is None:
+            return {}
+
+        unique_employees = len(set(a['employee_id'] for a in self.allocations))
+        unique_projects = len(set(a['project_id'] for a in self.allocations))
+
+        # Get date range
+        date_range = None
+        if self.allocations:
+            dates = [a['allocation_date'] for a in self.allocations]
+            date_range = (min(dates), max(dates))
+
+        # Count allocations with bill_rate
+        with_bill_rate = sum(1 for a in self.allocations if a.get('bill_rate'))
+
+        # Count allocations with role
+        with_role = sum(1 for a in self.allocations if a.get('role'))
+
+        return {
+            'total_allocations': len(self.allocations),
+            'unique_employees': unique_employees,
+            'unique_projects': unique_projects,
+            'date_range': date_range,
+            'with_bill_rate': with_bill_rate,
+            'with_role': with_role,
+            'validation_errors': self.validation_errors
+        }
+
+    def import_all(self):
+        """
+        Parse CSV and extract all allocation data
+        Returns: (allocations, summary)
+        """
+        self.parse_csv()
+        self.extract_allocations()
+
+        return self.allocations, self.get_summary()
