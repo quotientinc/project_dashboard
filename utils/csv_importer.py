@@ -24,7 +24,7 @@ class TimesheetCSVImporter:
 
     def parse_csv(self):
         """Parse the CSV file"""
-        # Read CSV with correct column names
+        # Read CSV with correct column names, handling BOM
         self.df = pd.read_csv(
             self.csv_path,
             names=[
@@ -32,8 +32,12 @@ class TimesheetCSVImporter:
                 'Entered Hours', 'Comments', 'PLC ID', 'PLC Desc',
                 'Billing Rate', 'Amount'
             ],
-            skiprows=1  # Skip header row
+            skiprows=1,  # Skip header row
+            encoding='utf-8-sig'  # Handle UTF-8 BOM
         )
+
+        # Strip whitespace from column names (in case header has extra spaces)
+        self.df.columns = self.df.columns.str.strip()
 
         # Clean up data
         self.df['Employee ID'] = self.df['Employee ID'].astype(int)
@@ -41,20 +45,39 @@ class TimesheetCSVImporter:
         self.df['Employee Name'] = self.df['Employee Name'].astype(str).str.strip()
         self.df['Entered Hours'] = pd.to_numeric(self.df['Entered Hours'], errors='coerce').fillna(0)
 
-        # Convert date format from "DD-MMM-YY" to "YYYY-MM-DD"
+        # Convert date format to "YYYY-MM-DD" (handles multiple input formats)
         self.df['date_parsed'] = self.df['Hours Date'].apply(self._parse_date)
 
         return self
 
     def _parse_date(self, date_str):
-        """Convert date from 'DD-MMM-YY' format to 'YYYY-MM-DD'"""
-        try:
-            # Parse date like "25-Dec-24"
-            dt = datetime.strptime(str(date_str), '%d-%b-%y')
-            return dt.strftime('%Y-%m-%d')
-        except Exception as e:
-            print(f"Error parsing date '{date_str}': {e}")
+        """
+        Convert date to 'YYYY-MM-DD' format.
+        Handles multiple input formats:
+        - 'DD-MMM-YY' (e.g., "25-Dec-24")
+        - 'MMM DD, YYYY' (e.g., "Dec 25, 2024")
+        """
+        if pd.isna(date_str) or str(date_str).strip() == '':
             return None
+
+        # Try multiple date formats
+        formats = [
+            '%d-%b-%y',      # "25-Dec-24"
+            '%b %d, %Y',     # "Dec 25, 2024"
+            '%m/%d/%Y',      # "12/25/2024"
+            '%Y-%m-%d'       # "2024-12-25" (already correct format)
+        ]
+
+        for fmt in formats:
+            try:
+                dt = datetime.strptime(str(date_str).strip(), fmt)
+                return dt.strftime('%Y-%m-%d')
+            except ValueError:
+                continue
+
+        # If no format worked, log error and return None
+        print(f"Error parsing date '{date_str}': No matching format found")
+        return None
 
     def _parse_employee_name(self, name_str):
         """
