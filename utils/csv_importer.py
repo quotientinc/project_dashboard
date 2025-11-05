@@ -778,3 +778,126 @@ class AllocationCSVImporter:
         self.extract_allocations()
 
         return self.allocations, self.get_summary()
+
+
+class MonthsCSVImporter:
+    """
+    Imports month reference data from CSV files with format:
+    year, month, month_name, total_days, working_days, holidays, quarter
+
+    This data is essential for capacity planning and working day calculations.
+    """
+
+    def __init__(self, csv_path):
+        """Initialize importer with CSV file path"""
+        self.csv_path = csv_path
+        self.df = None
+        self.months = []
+        self.validation_errors = []
+
+    def parse_csv(self):
+        """Parse the CSV file"""
+        # Read CSV with encoding that handles BOM
+        self.df = pd.read_csv(self.csv_path, encoding='utf-8-sig')
+
+        # Clean up column names (strip whitespace)
+        self.df.columns = self.df.columns.str.strip()
+
+        # Validate required columns
+        required_columns = ['year', 'month', 'month_name', 'total_days', 'working_days', 'holidays', 'quarter']
+        missing_columns = [col for col in required_columns if col not in self.df.columns]
+        if missing_columns:
+            raise ValueError(f"Missing required columns: {missing_columns}")
+
+        # Clean up data
+        self.df['year'] = pd.to_numeric(self.df['year'], errors='coerce').fillna(0).astype(int)
+        self.df['month'] = pd.to_numeric(self.df['month'], errors='coerce').fillna(0).astype(int)
+        self.df['total_days'] = pd.to_numeric(self.df['total_days'], errors='coerce').fillna(0).astype(int)
+        self.df['working_days'] = pd.to_numeric(self.df['working_days'], errors='coerce').fillna(0).astype(int)
+        self.df['holidays'] = pd.to_numeric(self.df['holidays'], errors='coerce').fillna(0).astype(int)
+        self.df['month_name'] = self.df['month_name'].astype(str).str.strip()
+        self.df['quarter'] = self.df['quarter'].astype(str).str.strip()
+
+        return self
+
+    def extract_months(self):
+        """Extract month data from CSV and map to database format"""
+        now = datetime.now().isoformat()
+        self.months = []
+        self.validation_errors = []
+
+        for idx, row in self.df.iterrows():
+            # Validate data
+            if row['year'] < 2000 or row['year'] > 2100:
+                self.validation_errors.append(f"Row {idx + 2}: Invalid year {row['year']}")
+                continue
+
+            if row['month'] < 1 or row['month'] > 12:
+                self.validation_errors.append(f"Row {idx + 2}: Invalid month {row['month']}")
+                continue
+
+            if row['total_days'] < 28 or row['total_days'] > 31:
+                self.validation_errors.append(f"Row {idx + 2}: Invalid total_days {row['total_days']}")
+                continue
+
+            if row['working_days'] < 0 or row['working_days'] > 31:
+                self.validation_errors.append(f"Row {idx + 2}: Invalid working_days {row['working_days']}")
+                continue
+
+            if row['holidays'] < 0 or row['holidays'] > 10:
+                self.validation_errors.append(f"Row {idx + 2}: Invalid holidays {row['holidays']}")
+                continue
+
+            # Build month record
+            month = {
+                'year': int(row['year']),
+                'month': int(row['month']),
+                'month_name': str(row['month_name']),
+                'total_days': int(row['total_days']),
+                'working_days': int(row['working_days']),
+                'holidays': int(row['holidays']),
+                'quarter': str(row['quarter']),
+                'created_at': now,
+                'updated_at': now
+            }
+            self.months.append(month)
+
+        return self
+
+    def get_summary(self):
+        """Get summary statistics of the import"""
+        if self.df is None:
+            return {}
+
+        unique_years = len(set(m['year'] for m in self.months))
+        unique_quarters = len(set(m['quarter'] for m in self.months))
+
+        # Get year range
+        year_range = None
+        if self.months:
+            years = [m['year'] for m in self.months]
+            year_range = (min(years), max(years))
+
+        # Calculate totals
+        total_working_days = sum(m['working_days'] for m in self.months)
+        total_holidays = sum(m['holidays'] for m in self.months)
+
+        return {
+            'total_months': len(self.months),
+            'unique_years': unique_years,
+            'unique_quarters': unique_quarters,
+            'year_range': year_range,
+            'total_working_days': total_working_days,
+            'total_holidays': total_holidays,
+            'validation_errors': self.validation_errors
+        }
+
+    def import_all(self):
+        """
+        Parse CSV and extract all month data
+        Returns: (months, summary)
+        """
+        self.parse_csv()
+        self.extract_months()
+
+        return self.months, self.get_summary()

@@ -671,74 +671,120 @@ with tab1:
 
     st.divider()
 
-    # Standard Import Section
-    st.markdown("##### 📁 Standard CSV Import")
-    data_type = st.selectbox(
-        "Select Data Type to Import",
-        ["Projects", "Employees", "Allocations", "Expenses", "Months"]
-    )
+    # Months CSV Import Section
+    st.markdown("##### 📅 Import Months CSV")
+    st.info("Import month reference data (working days, holidays) for capacity planning. This will update existing months if they already exist.")
 
-    st.markdown("""
-    **CSV Format Requirements:**
-    - **Projects**: name, description, status, start_date, end_date, contract_value, budget_used, revenue_projected, revenue_actual, client, project_manager, billable
-    - **Employees**: name, role, skills, hire_date, term_date, pay_type, cost_rate, annual_salary, pto_accrual, holidays, billable, overhead_allocation, target_allocation
-    - **Allocations**: project_id, employee_id, allocated_fte, start_date, end_date, role, bill_rate, allocation_date, working_days, remaining_days
-    - **Expenses**: project_id, category, description, amount, date, approved
-    - **Months**: year, month, month_name, quarter, total_days, working_days, holidays
+    with st.expander("Months CSV Import", expanded=False):
+        st.markdown("""
+        **Months CSV Format:**
+        - **Required Columns:** year, month, month_name, total_days, working_days, holidays, quarter
+        - **year:** 4-digit year (e.g., 2024, 2025)
+        - **month:** Month number 1-12
+        - **month_name:** Full month name (e.g., "January")
+        - **total_days:** Total days in month (28-31)
+        - **working_days:** Number of working days (excluding weekends and holidays)
+        - **holidays:** Number of holidays in that month
+        - **quarter:** Quarter designation (e.g., "Q1", "Q2")
 
-    **Note:** For time entries, use the Timesheet CSV Import above.
-    """)
+        **Import Behavior:**
+        - Uses INSERT OR REPLACE to update existing months
+        - Essential for accurate capacity and utilization calculations
+        - Typically imported once per year to add new year's data
+        """)
 
-    uploaded_file = st.file_uploader(
-        "Choose a CSV file",
-        type=['csv'],
-        help="Upload a CSV file with the required format"
-    )
+        months_file = st.file_uploader(
+            "Choose Months CSV file",
+            type=['csv'],
+            key="months_upload",
+            help="Upload a CSV file in Months format"
+        )
 
-    if uploaded_file is not None:
-        # Preview the data
-        try:
-            df = pd.read_csv(uploaded_file)
-            st.markdown("##### Data Preview")
-            st.dataframe(df.head(), width='stretch')
+        if months_file is not None:
+            try:
+                from utils.csv_importer import MonthsCSVImporter
 
-            # Data validation
-            st.markdown("##### Data Validation")
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Rows", len(df))
-            with col2:
-                st.metric("Columns", len(df.columns))
+                # Parse and preview
+                importer = MonthsCSVImporter(months_file)
+                months, summary = importer.import_all()
 
-            # Import button
-            if st.button("Import Data"):
-                try:
-                    table_map = {
-                        "Projects": "projects",
-                        "Employees": "employees",
-                        "Allocations": "allocations",
-                        "Time Entries": "time_entries",
-                        "Expenses": "expenses",
-                        "Months": "months"
-                    }
+                # Check for validation errors
+                if summary['validation_errors']:
+                    st.error("⚠️ Validation Errors Found:")
+                    for error in summary['validation_errors']:
+                        st.write(f"- {error}")
+                    st.warning("Please fix these errors in your CSV before importing.")
+                else:
+                    # Show summary
+                    st.markdown("##### Import Preview")
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Total Months", summary['total_months'])
+                    with col2:
+                        st.metric("Years", summary['unique_years'])
+                    with col3:
+                        st.metric("Quarters", summary['unique_quarters'])
 
-                    # Reset file pointer
-                    uploaded_file.seek(0)
+                    col4, col5 = st.columns(2)
+                    with col4:
+                        st.write(f"**Total Working Days:** {summary['total_working_days']}")
+                    with col5:
+                        st.write(f"**Total Holidays:** {summary['total_holidays']}")
 
-                    # Import data
-                    db.import_csv(uploaded_file, table_map[data_type])
-                    st.success(f"Successfully imported {len(df)} records into {data_type}")
-                    st.balloons()
+                    if summary['year_range']:
+                        st.write(f"**Year Range:** {summary['year_range'][0]} to {summary['year_range'][1]}")
 
-                    # Refresh the page
-                    st.rerun()
+                    # Show sample data
+                    st.markdown("**Sample Months:**")
+                    sample_df = pd.DataFrame(months[:12])
+                    display_cols = ['year', 'month', 'month_name', 'total_days', 'working_days', 'holidays', 'quarter']
+                    available_cols = [col for col in display_cols if col in sample_df.columns]
+                    st.dataframe(
+                        sample_df[available_cols],
+                        height=400,
+                        hide_index=True
+                    )
 
-                except Exception as e:
-                    st.error(f"Error importing data: {str(e)}")
-                    st.write("Please ensure your CSV has the correct column names and data types.")
+                    # Confirmation checkbox
+                    confirm_import = st.checkbox(
+                        "I understand this will update month reference data (existing months will be replaced)",
+                        key="confirm_months_import"
+                    )
 
-        except Exception as e:
-            st.error(f"Error reading file: {str(e)}")
+                    if st.button("Import Months Data", type="primary", disabled=not confirm_import):
+                        try:
+                            progress_bar = st.progress(0, text="Starting import...")
+
+                            # Insert/update months
+                            progress_bar.progress(50, text=f"Importing {len(months)} months...")
+                            db.bulk_upsert_months(months)
+
+                            progress_bar.progress(100, text="Import complete!")
+
+                            # Build success message
+                            success_msg = f"""
+                            ✅ Months import completed successfully!
+                            - Imported {len(months)} months
+                            - Years: {summary['year_range'][0]} to {summary['year_range'][1]}
+                            - Total working days: {summary['total_working_days']}
+                            - Total holidays: {summary['total_holidays']}
+                            """
+
+                            st.success(success_msg)
+                            st.balloons()
+
+                            # Wait a moment before reloading
+                            import time
+                            time.sleep(2)
+                            st.rerun()
+
+                        except Exception as e:
+                            st.error(f"Error importing months data: {str(e)}")
+                            st.exception(e)
+
+            except Exception as e:
+                st.error(f"Error parsing months CSV: {str(e)}")
+                st.exception(e)
 
 with tab2:
     st.markdown("#### Export Data")
