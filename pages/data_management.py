@@ -342,7 +342,7 @@ with tab1:
 
     # Project Reference CSV Import
     st.markdown("##### 📋 Import Project Reference CSV")
-    st.markdown("Import project reference data from CSV file (e.g., ProjectReference.csv from Deltek).")
+    st.info("Import project reference data from CSV file (e.g., ProjectReference.csv from Deltek).")
     with st.expander("Project Reference CSV Import", expanded=False):
         st.markdown("""**Project CSV Format:**
         - **Project**: Project ID and name combined (e.g., "101715.Y2.000.00 NIH CC OY2")
