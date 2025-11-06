@@ -298,6 +298,7 @@ with tab1:
             variance = actual_hours - projected_hours
 
             # Calculate YTD metrics (sum across all months from Jan to selected month)
+            # Account for hire_date and term_date when calculating possible hours
             ytd_possible_hours = 0
             ytd_actual_billable_hours = 0
 
@@ -307,7 +308,26 @@ with tab1:
 
                 # Get YTD possible hours for this month
                 ytd_possible_emp = ytd_metrics['possible'].get(ytd_month_key, {}).get(emp_id_str, {})
-                ytd_possible_hours += ytd_possible_emp.get('hours', 0)
+                ytd_possible_hours_raw = ytd_possible_emp.get('hours', 0)
+                ytd_possible_worked_days = ytd_possible_emp.get('worked_days', 0)
+
+                # Adjust possible hours based on hire/term dates (same logic as monthly calculation)
+                if ytd_possible_hours_raw > 0 and ytd_possible_worked_days > 0:
+                    # Calculate actual working days based on hire/term dates for this YTD month
+                    ytd_actual_working_days = get_working_days_in_range(
+                        hire_date, term_date, months_df, selected_year, month_num
+                    )
+
+                    # Prorate possible hours if employee worked partial month
+                    if ytd_actual_working_days != ytd_possible_worked_days:
+                        daily_rate = ytd_possible_hours_raw / ytd_possible_worked_days
+                        ytd_adjusted_possible_hours = daily_rate * ytd_actual_working_days
+                    else:
+                        ytd_adjusted_possible_hours = ytd_possible_hours_raw
+                else:
+                    ytd_adjusted_possible_hours = ytd_possible_hours_raw
+
+                ytd_possible_hours += ytd_adjusted_possible_hours
 
                 # Get YTD actual billable hours for this month
                 ytd_actuals_emp = ytd_metrics['actuals'].get(ytd_month_key, {}).get(emp_id_str, {})

@@ -1196,6 +1196,7 @@ class DataProcessor:
                 e.id as employee_id,
                 e.target_allocation,
                 e.overhead_allocation,
+                e.hire_date,
                 e.term_date
             FROM employees e
             WHERE e.billable = 1
@@ -1212,8 +1213,11 @@ class DataProcessor:
         if employees_df.empty:
             return {}
 
-        # Filter out terminated employees based on date range
+        # Parse hire_date and term_date as datetime
+        employees_df['hire_date'] = pd.to_datetime(employees_df['hire_date'], errors='coerce')
         employees_df['term_date'] = pd.to_datetime(employees_df['term_date'], errors='coerce')
+
+        # Filter out terminated employees based on date range
         # Keep employees who are either active (no term_date) or were terminated after start date
         employees_df = employees_df[
             (employees_df['term_date'].isna()) |
@@ -1265,13 +1269,54 @@ class DataProcessor:
         months_in_range['key'] = 1
         cross_join = employees_df.merge(months_in_range, on='key').drop('key', axis=1)
 
-        # Calculate possible hours
-        # TODO: Factor PTO?
-        # Formula: (working_days) × (target_allocation - overhead_allocation) × 8
+        # Create month_start and month_end dates for filtering
+        cross_join['month_start'] = pd.to_datetime(
+            cross_join['year'].astype(str) + '-' +
+            cross_join['month'].astype(str) + '-01'
+        )
+        cross_join['month_end'] = cross_join['month_start'] + pd.offsets.MonthEnd(0)
+
+        # Filter out months where employee wasn't active
+        # Keep only if: (no hire_date OR month_end >= hire_date) AND (no term_date OR month_start <= term_date)
+        cross_join = cross_join[
+            (cross_join['hire_date'].isna() | (cross_join['month_end'] >= cross_join['hire_date'])) &
+            (cross_join['term_date'].isna() | (cross_join['month_start'] <= cross_join['term_date']))
+        ]
+
+        if cross_join.empty:
+            return {}
+
+        # Calculate proration factor for partial months
+        def calculate_proration_factor(row):
+            """Calculate the proportion of the month the employee was active"""
+            month_start = row['month_start']
+            month_end = row['month_end']
+            hire_date = row['hire_date']
+            term_date = row['term_date']
+
+            # Determine actual start and end dates for this employee in this month
+            actual_start = month_start if pd.isna(hire_date) else max(month_start, hire_date)
+            actual_end = month_end if pd.isna(term_date) else min(month_end, term_date)
+
+            # If full month, return 1.0
+            if actual_start == month_start and actual_end == month_end:
+                return 1.0
+
+            # Calculate proportion of month worked
+            days_in_month = (month_end - month_start).days + 1
+            days_worked = (actual_end - actual_start).days + 1
+
+            return days_worked / days_in_month
+
+        cross_join['proration_factor'] = cross_join.apply(calculate_proration_factor, axis=1)
+
+        # Calculate possible hours with proration
+        # Formula: (working_days) × (target_allocation - overhead_allocation) × 8 × proration_factor
         cross_join['hours'] = (
             (cross_join['working_days']) *
             (cross_join['target_allocation'] - cross_join['overhead_allocation']) *
-            8
+            8 *
+            cross_join['proration_factor']
         )
 
         # Set revenue to 0 (as per user instruction)
