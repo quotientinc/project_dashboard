@@ -239,6 +239,176 @@ def generate_financial_report(db, processor):
             )
             st.plotly_chart(fig, width='stretch')
 
+@st.dialog("Generate Allocation CSV Template", width="large")
+def generate_allocation_csv_template(project_id, project_name, start_date, end_date):
+    """Generate a CSV template for allocations covering the entire project period"""
+    st.markdown(f"### {project_name}")
+    st.caption(f"Period: {start_date} to {end_date}")
+
+    # Generate month rows for the entire PoP
+    start = pd.to_datetime(start_date)
+    end = pd.to_datetime(end_date)
+
+    months = pd.date_range(
+        start=start.replace(day=1),
+        end=end + pd.DateOffset(months=1),
+        freq='MS'
+    )[:-1]  # Remove extra month
+
+    month_keys = [m.strftime('%Y-%m') for m in months]
+
+    st.info(f"📅 This template will cover **{len(month_keys)} months** from {month_keys[0]} to {month_keys[-1]}")
+
+    # Get existing allocations for this project
+    allocations_df = db.get_allocations(project_id=project_id)
+
+    # Determine employee selection
+    employees_df = db.get_employees()
+
+    if not allocations_df.empty:
+        # Project has some allocations - pre-select employees with existing allocations
+        existing_employees = allocations_df['employee_id'].unique().tolist()
+        existing_employee_names = employees_df[employees_df['id'].isin(existing_employees)]['name'].tolist()
+
+        st.success(f"✅ Found {len(existing_employees)} employee(s) with existing allocations")
+        st.write("**Pre-selected employees:**", ", ".join(existing_employee_names))
+
+        # Allow adding more employees
+        all_employee_options = employees_df['name'].tolist()
+        selected_employee_names = st.multiselect(
+            "Add or remove employees",
+            options=all_employee_options,
+            default=existing_employee_names,
+            help="Modify the list of employees to include in the CSV template"
+        )
+    else:
+        # No allocations yet - let user select from billable employees
+        billable_employees = employees_df[employees_df['billable'] == 1]
+
+        st.warning("⚠️ No existing allocations found for this project")
+
+        selected_employee_names = st.multiselect(
+            "Select employees to allocate",
+            options=billable_employees['name'].tolist(),
+            help="Select one or more billable employees to include in the allocation template"
+        )
+
+    if not selected_employee_names:
+        st.info("👆 Please select at least one employee to generate the CSV template")
+        return
+
+    # Get employee IDs and details
+    selected_employees = employees_df[employees_df['name'].isin(selected_employee_names)]
+
+    # Build CSV template
+    template_rows = []
+    existing_count = 0
+    new_count = 0
+
+    for _, emp in selected_employees.iterrows():
+        emp_id = emp['id']
+        emp_name = emp['name']
+        default_role = emp['role']
+        default_rate = emp.get('cost_rate', 0.0)
+
+        for month_key in month_keys:
+            # Check if allocation exists for this employee-month
+            existing_alloc = allocations_df[
+                (allocations_df['employee_id'] == emp_id) &
+                (allocations_df['allocation_date'] == month_key)
+            ]
+
+            if not existing_alloc.empty:
+                # Use existing allocation data
+                alloc = existing_alloc.iloc[0]
+                template_rows.append({
+                    'employee_id': emp_id,
+                    'employee_name': emp_name,  # For preview only, not in export
+                    'project_id': project_id,
+                    'allocation_date': month_key,
+                    'allocated_fte': alloc['allocated_fte'],
+                    'bill_rate': alloc.get('bill_rate', default_rate),
+                    'role': alloc.get('role', default_role) if pd.notna(alloc.get('role')) else default_role,
+                    'status': 'Existing'  # For preview only
+                })
+                existing_count += 1
+            else:
+                # Create placeholder row for missing allocation
+                template_rows.append({
+                    'employee_id': emp_id,
+                    'employee_name': emp_name,  # For preview only
+                    'project_id': project_id,
+                    'allocation_date': month_key,
+                    'allocated_fte': 0.0,  # User needs to fill this in
+                    'bill_rate': default_rate,
+                    'role': default_role,
+                    'status': 'New'  # For preview only
+                })
+                new_count += 1
+
+    template_df = pd.DataFrame(template_rows)
+
+    # Summary
+    st.markdown("#### Template Summary")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total Rows", len(template_df))
+    with col2:
+        st.metric("Existing Allocations", existing_count)
+    with col3:
+        st.metric("New Rows (Need FTE)", new_count)
+
+    st.write(f"**Formula:** {len(selected_employees)} employees × {len(month_keys)} months = {len(template_df)} rows")
+
+    # Preview
+    st.markdown("#### Preview")
+    st.caption("Rows marked 'New' have allocated_fte=0.0 and need to be filled in before import")
+
+    # Display preview with status column
+    st.dataframe(
+        template_df,
+        use_container_width=True,
+        hide_index=True,
+        height=400,
+        column_config={
+            "allocated_fte": st.column_config.NumberColumn(
+                "Allocated FTE",
+                format="%.2f",
+                help="0.0 = No allocation (fill this in!)"
+            ),
+            "bill_rate": st.column_config.NumberColumn(
+                "Bill Rate",
+                format="$%.2f"
+            ),
+            "status": st.column_config.TextColumn(
+                "Status",
+                help="Existing = from database, New = needs FTE value"
+            )
+        }
+    )
+
+    # Export CSV (remove preview-only columns)
+    export_df = template_df[['employee_id', 'project_id', 'allocation_date', 'allocated_fte', 'bill_rate', 'role']].copy()
+    csv = export_df.to_csv(index=False)
+
+    st.markdown("#### Download")
+    st.download_button(
+        label="📥 Download CSV Template",
+        data=csv,
+        file_name=f"allocations_{project_id}_{datetime.now().strftime('%Y%m%d')}.csv",
+        mime="text/csv",
+        type="primary",
+        use_container_width=True
+    )
+
+    st.info(
+        "💡 **Next Steps:**\n"
+        "1. Download the CSV template\n"
+        "2. Fill in `allocated_fte` values for rows marked 'New' (e.g., 0.5 for 50% allocation)\n"
+        "3. Adjust `bill_rate` and `role` if needed\n"
+        "4. Import via **Data Management → Import Data → Import Allocation CSV**"
+    )
+
 def generate_allocation_gaps_report(db, processor):
     st.markdown("#### Projects Lacking Allocations Report")
     st.caption("Analysis of allocation coverage for Active and Future projects")
@@ -427,11 +597,16 @@ def generate_allocation_gaps_report(db, processor):
     elif sort_by == "Start Date":
         filtered_df = filtered_df.sort_values('Start Date')
 
-    # Display table
-    st.dataframe(
+    # Display table with row selection for CSV template generation
+    st.caption("💡 Click on a row to generate an allocation CSV template for that project")
+
+    selection = st.dataframe(
         filtered_df,
         use_container_width=True,
         hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        key="allocation_gaps_table",
         column_config={
             "Coverage %": st.column_config.ProgressColumn(
                 "Coverage %",
@@ -445,6 +620,18 @@ def generate_allocation_gaps_report(db, processor):
             )
         }
     )
+
+    # Handle row selection - open dialog to generate CSV template
+    if selection and selection.selection.rows:
+        selected_idx = selection.selection.rows[0]
+        selected_row = filtered_df.iloc[selected_idx]
+        project_id = selected_row['Project ID']
+        project_name = selected_row['Project Name']
+        start_date = selected_row['Start Date']
+        end_date = selected_row['End Date']
+
+        # Open modal dialog for CSV template generation
+        generate_allocation_csv_template(project_id, project_name, start_date, end_date)
 
     # Show totals
     st.markdown("##### Summary Statistics")
