@@ -18,6 +18,7 @@ class DatabaseManager:
         self.migrate_allocation_bill_rate()
         self.migrate_time_entries_bill_rate()
         self.migrate_projects_schema_cleanup()
+        self.migrate_project_hierarchy()
 
     def create_tables(self):
         """Create all necessary tables"""
@@ -36,10 +37,15 @@ class DatabaseManager:
                 client TEXT,
                 project_manager TEXT,
                 billable INTEGER DEFAULT 0,
+                parent_id TEXT,
+                is_parent INTEGER DEFAULT 0,
                 created_at TEXT,
-                updated_at TEXT
+                updated_at TEXT,
+                FOREIGN KEY (parent_id) REFERENCES projects (id)
             )
         ''')
+
+        # Note: Index for parent_id is created in migrate_project_hierarchy() to ensure column exists first
 
         # Employees table - id is now INTEGER (not autoincrement) to store CSV Employee IDs like 100482
         # Removed: email, department, hourly_rate, fte, utilization (moved to allocations or removed)
@@ -405,9 +411,17 @@ class DatabaseManager:
                 client TEXT,
                 project_manager TEXT,
                 billable INTEGER DEFAULT 0,
+                parent_id TEXT,
+                is_parent INTEGER DEFAULT 0,
                 created_at TEXT,
-                updated_at TEXT
+                updated_at TEXT,
+                FOREIGN KEY (parent_id) REFERENCES projects (id)
             )
+        ''')
+
+        # Step 6b: Create index for parent_id
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_projects_parent_id ON projects(parent_id)
         ''')
 
         # Step 7: Restore data
@@ -421,6 +435,37 @@ class DatabaseManager:
         print("✅ Projects schema cleanup complete:")
         print("   - Renamed: budget_allocated -> contract_value")
         print("   - Removed: budget_used, revenue_projected, revenue_actual")
+
+    def migrate_project_hierarchy(self):
+        """
+        Add parent_id and is_parent columns to projects table for multi-level project hierarchy.
+        This migration is safe to run multiple times.
+        """
+        cursor = self.conn.cursor()
+
+        # Check if columns exist
+        cursor.execute("PRAGMA table_info(projects)")
+        columns = [col[1] for col in cursor.fetchall()]
+
+        # Add parent_id column
+        if 'parent_id' not in columns:
+            cursor.execute('ALTER TABLE projects ADD COLUMN parent_id TEXT')
+            print("Added 'parent_id' column to projects table")
+
+        # Add is_parent column
+        if 'is_parent' not in columns:
+            cursor.execute('ALTER TABLE projects ADD COLUMN is_parent INTEGER DEFAULT 0')
+            print("Added 'is_parent' column to projects table")
+
+        # Create index for parent_id if it doesn't exist
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_projects_parent_id ON projects(parent_id)
+        ''')
+
+        self.conn.commit()
+        print("✅ Project hierarchy migration complete")
+        print("   Note: All existing projects set to is_parent=0 (leaf projects)")
+        print("   Note: Update parent_id and is_parent values as needed for your project structure")
 
     def is_empty(self):
         """Check if database is empty"""
@@ -462,6 +507,149 @@ class DatabaseManager:
             )
 
         return df
+
+    def get_parent_project(self, project_id):
+        """Get parent project details for a given project"""
+        query = """
+            SELECT p.* FROM projects p
+            INNER JOIN projects c ON c.parent_id = p.id
+            WHERE c.id = ?
+        """
+        df = pd.read_sql_query(query, self.conn, params=[project_id])
+
+        # Calculate budget_used for parent if found
+        if not df.empty:
+            df['budget_used'] = df['id'].apply(
+                lambda proj_id: self.calculate_budget_used(proj_id)
+            )
+
+        return df.iloc[0] if not df.empty else None
+
+    def get_child_projects(self, parent_id):
+        """Get all child (4th level) projects for a given parent (3rd level) project"""
+        query = "SELECT * FROM projects WHERE parent_id = ?"
+        df = pd.read_sql_query(query, self.conn, params=[parent_id])
+
+        # Calculate budget_used for each child
+        if not df.empty:
+            df['budget_used'] = df['id'].apply(
+                lambda proj_id: self.calculate_budget_used(proj_id)
+            )
+
+        return df
+
+    def get_leaf_projects(self, filters=None):
+        """Get only leaf (4th level) projects - projects with is_parent=0"""
+        # Start with base query for leaf projects
+        query = "SELECT * FROM projects WHERE is_parent = 0"
+        params = []
+
+        if filters:
+            conditions = []
+            if 'status' in filters and filters['status']:
+                placeholders = ','.join('?' * len(filters['status']))
+                conditions.append(f"status IN ({placeholders})")
+                params.extend(filters['status'])
+            if 'start_date' in filters:
+                conditions.append("start_date >= ?")
+                params.append(filters['start_date'])
+            if 'end_date' in filters:
+                conditions.append("end_date <= ?")
+                params.append(filters['end_date'])
+            if 'id' in filters:
+                conditions.append("id = ?")
+                params.append(filters['id'])
+
+            if conditions:
+                query += " AND " + " AND ".join(conditions)
+
+        df = pd.read_sql_query(query, self.conn, params=params)
+
+        # Calculate budget_used for each project
+        if not df.empty:
+            df['budget_used'] = df['id'].apply(
+                lambda proj_id: self.calculate_budget_used(proj_id)
+            )
+
+        return df
+
+    def get_parent_projects(self, filters=None):
+        """Get only parent (3rd level) projects - projects with is_parent=1"""
+        # Start with base query for parent projects
+        query = "SELECT * FROM projects WHERE is_parent = 1"
+        params = []
+
+        if filters:
+            conditions = []
+            if 'status' in filters and filters['status']:
+                placeholders = ','.join('?' * len(filters['status']))
+                conditions.append(f"status IN ({placeholders})")
+                params.extend(filters['status'])
+            if 'start_date' in filters:
+                conditions.append("start_date >= ?")
+                params.append(filters['start_date'])
+            if 'end_date' in filters:
+                conditions.append("end_date <= ?")
+                params.append(filters['end_date'])
+            if 'id' in filters:
+                conditions.append("id = ?")
+                params.append(filters['id'])
+
+            if conditions:
+                query += " AND " + " AND ".join(conditions)
+
+        df = pd.read_sql_query(query, self.conn, params=params)
+
+        # Calculate budget_used for parent by summing children
+        if not df.empty:
+            df['budget_used'] = df['id'].apply(
+                lambda proj_id: self.calculate_parent_rollup(proj_id, 'budget_used')
+            )
+
+        return df
+
+    def validate_allocation_project(self, project_id):
+        """
+        Validate that a project can have allocations assigned to it.
+        Returns True if valid (is_parent=0), False otherwise.
+        Raises ValueError with descriptive message if invalid.
+        """
+        query = "SELECT id, name, is_parent FROM projects WHERE id = ?"
+        cursor = self.conn.cursor()
+        cursor.execute(query, [project_id])
+        result = cursor.fetchone()
+
+        if not result:
+            raise ValueError(f"Project '{project_id}' does not exist")
+
+        project_id, project_name, is_parent = result
+
+        if is_parent == 1:
+            raise ValueError(
+                f"Cannot allocate to parent project '{project_name}' ({project_id}). "
+                "Allocations must be assigned to leaf (4th level) projects only."
+            )
+
+        return True
+
+    def calculate_parent_rollup(self, parent_id, metric='budget_used'):
+        """
+        Calculate rollup metrics for a parent project by summing children.
+
+        Args:
+            parent_id: ID of parent project
+            metric: Metric to roll up (e.g., 'budget_used', 'hours')
+
+        Returns:
+            Summed value across all children
+        """
+        if metric == 'budget_used':
+            # Sum budget_used from all child projects
+            children = self.get_child_projects(parent_id)
+            return children['budget_used'].sum() if not children.empty else 0.0
+
+        # Can extend for other metrics as needed
+        return 0.0
 
     def add_project(self, project_data):
         """Add a new project"""

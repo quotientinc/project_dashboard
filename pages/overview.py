@@ -266,11 +266,13 @@ with col1:
     st.metric("Avg Employee Utilization", f"{avg_employee_utilization:.1f}%")
 
 with col2:
-    total_contract_value = projects_df['contract_value'].sum() if not projects_df.empty else 0
+    # Sum only leaf projects to prevent double-counting parent + children
+    leaf_projects = projects_df[projects_df['is_parent'] == 0] if not projects_df.empty else projects_df
+    total_contract_value = leaf_projects['contract_value'].sum() if not leaf_projects.empty else 0
     st.metric("Total Contract Value", f"${total_contract_value:,.0f}")
 
 with col3:
-    total_accrued = projects_df['budget_used'].sum() if not projects_df.empty else 0
+    total_accrued = leaf_projects['budget_used'].sum() if not leaf_projects.empty else 0
     st.metric("Total Accrued", f"${total_accrued:,.0f}")
 
 with col4:

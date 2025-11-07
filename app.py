@@ -147,12 +147,15 @@ with st.sidebar:
         current_year_start = datetime(current_year, 1, 1).date()
         current_year_end = datetime(current_year, 12, 31).date()
 
+        # Filter to leaf projects only to prevent double-counting parent + children
+        leaf_projects = projects_df[projects_df['is_parent'] == 0]
+
         # Filter for Active/Completed billable projects that overlap with current year
-        eligible_projects = projects_df[
-            (projects_df['status'].isin(['Active', 'Completed'])) &
-            (projects_df['billable'] == 1) &
-            (pd.to_datetime(projects_df['start_date']).dt.date <= current_year_end) &
-            (pd.to_datetime(projects_df['end_date']).dt.date >= current_year_start)
+        eligible_projects = leaf_projects[
+            (leaf_projects['status'].isin(['Active', 'Completed'])) &
+            (leaf_projects['billable'] == 1) &
+            (pd.to_datetime(leaf_projects['start_date']).dt.date <= current_year_end) &
+            (pd.to_datetime(leaf_projects['end_date']).dt.date >= current_year_start)
         ].copy()
 
         total_contract_value_avg = 0

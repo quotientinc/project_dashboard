@@ -15,6 +15,48 @@ tab1, tab2, tab3, tab4 = st.tabs(["Import Data", "Export Data", "Data Backup", "
 with tab1:
     st.markdown("#### Import Data")
 
+    # Project Hierarchy Documentation
+    with st.expander("📚 Understanding Project Hierarchy", expanded=False):
+        st.markdown("""
+        ### Project Hierarchy Overview
+
+        Projects are organized in two levels to support contract/task order structures:
+
+        #### **Parent Projects (3rd Level)** - Contract/Task Order Level
+        - Example: `102401.Y1.000` or `220306.00.009`
+        - Represents the contract or task order for **billing purposes**
+        - `contract_value` = Total contract amount (e.g., $2.9M)
+        - **Cannot have allocations or time entries**
+        - Used for high-level contract tracking
+
+        #### **Leaf Projects (4th Level)** - Task Area Level
+        - Example: `102401.Y1.000.00`, `102401.Y1.000.01`, `220306.00.009.01`
+        - Represents task areas where **work is tracked**
+        - `contract_value` = Budget for this specific task area (e.g., $1.5M)
+        - **Can have allocations and time entries**
+        - Links to parent via `parent_id`
+
+        #### **Example Structure:**
+        ```
+        Parent: 102401.Y1.000 (DNS Hardening Y1)
+          ├─ contract_value: $2,900,000
+          ├─ Child: 102401.Y1.000.00 (Task Area 0) - contract_value: $1,500,000
+          └─ Child: 102401.Y1.000.01 (Task Area 1) - contract_value: $1,400,000
+        ```
+
+        #### **Why This Matters:**
+        - **Prevents Double-Counting**: Budget totals sum only leaf projects
+        - **Data Integrity**: Allocations can only be assigned to leaf projects
+        - **Accurate Reporting**: Parent budgets shown for context, but not in totals
+
+        #### **CSV Import Support:**
+        When importing projects, you can optionally include:
+        - `is_parent`: Set to `1` for parent projects, `0` for leaf projects (default: 0)
+        - `parent_id`: Project ID of the parent (e.g., "102401.Y1.000")
+
+        If these columns are not in your CSV, all projects default to leaf projects (is_parent=0).
+        """)
+
     # Timesheet CSV Import Section
     st.markdown("##### 📋 Import Timesheet CSV")
     st.info("Import timesheet data from TimesheetData.csv format. This will migrate the database schema and replace all time entries.")
@@ -500,7 +542,7 @@ with tab1:
                 from utils.csv_importer import AllocationCSVImporter
 
                 # Parse and preview
-                importer = AllocationCSVImporter(allocation_file)
+                importer = AllocationCSVImporter(allocation_file, db=db)
                 allocations, summary = importer.import_all()
 
                 # Check for validation errors

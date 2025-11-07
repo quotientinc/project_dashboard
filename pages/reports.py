@@ -16,12 +16,18 @@ st.markdown("### 📑 Reports (🚨not ready yet)")
 def generate_executive_summary(db, processor):
     st.markdown("#### Executive Summary Report")
 
-    # Date range
-    col1, col2 = st.columns(2)
+    # Date range and filters
+    col1, col2, col3 = st.columns(3)
     with col1:
         start_date = st.date_input("Start Date")
     with col2:
         end_date = st.date_input("End Date")
+    with col3:
+        view_mode = st.selectbox(
+            "Project Level",
+            options=["Leaf Projects Only", "Parent Projects Only", "All Projects"],
+            help="Filter by project hierarchy level"
+        )
 
     if st.button("Generate Report"):
         # Load data
@@ -29,9 +35,19 @@ def generate_executive_summary(db, processor):
         employees_df = db.get_employees()
         expenses_df = db.get_expenses()
 
+        # Apply hierarchy filter
+        if view_mode == "Leaf Projects Only":
+            projects_df = projects_df[projects_df['is_parent'] == 0]
+        elif view_mode == "Parent Projects Only":
+            projects_df = projects_df[projects_df['is_parent'] == 1]
+        # else: "All Projects" - no filtering
+
         # Report header
         st.markdown(f"### Report Period: {start_date} to {end_date}")
         st.markdown(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+
+        if view_mode == "Leaf Projects Only":
+            st.info("ℹ️ Showing leaf (4th level) projects only. Budget totals prevent double-counting of parent/child relationships.")
 
         # Executive metrics
         st.markdown("#### Key Metrics")
@@ -49,9 +65,15 @@ def generate_executive_summary(db, processor):
 
         # Project summary
         st.markdown("#### Project Summary")
-        summary_df = projects_df[['name', 'status', 'contract_value', 'budget_used', 'revenue_actual']].copy()
-        summary_df['Budget Variance'] = summary_df['contract_value'] - summary_df['budget_used']
-        st.dataframe(summary_df, width='stretch', hide_index=True)
+        summary_df = pd.DataFrame()
+        summary_df['Project'] = projects_df['name']
+        summary_df['Level'] = projects_df['is_parent'].apply(lambda x: "Parent (3rd)" if x == 1 else "Leaf (4th)")
+        summary_df['Status'] = projects_df['status']
+        summary_df['Contract Value'] = projects_df['contract_value']
+        summary_df['Budget Used'] = projects_df['budget_used']
+        summary_df['Revenue Actual'] = projects_df['revenue_actual']
+        summary_df['Budget Variance'] = projects_df['contract_value'] - projects_df['budget_used']
+        st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
         # Download option
         if st.button("Download Report"):
@@ -81,6 +103,25 @@ def generate_project_status_report(db, processor):
             st.markdown(f"**Client:** {project['client']}")
             st.markdown(f"**Status:** {project['status']}")
             st.markdown(f"**Project Manager:** {project['project_manager']}")
+
+            # Hierarchy information
+            level_label = "Parent (3rd Level)" if project.get('is_parent', 0) == 1 else "Leaf (4th Level)"
+            st.markdown(f"**Project Level:** {level_label}")
+
+            if project.get('is_parent', 0) == 1:
+                # Show children
+                children = db.get_child_projects(project['id'])
+                if not children.empty:
+                    st.markdown(f"**Child Projects:** {len(children)} task areas")
+                    with st.expander("View Child Projects"):
+                        for _, child in children.iterrows():
+                            st.markdown(f"- {child['id']}: {child['name']} (${child['contract_value']:,.0f})")
+            else:
+                # Show parent
+                if pd.notna(project.get('parent_id')) and project.get('parent_id'):
+                    parent = db.get_parent_project(project['id'])
+                    if parent is not None:
+                        st.markdown(f"**Parent Project:** {parent['name']} ({parent['id']})")
 
             # Progress metrics
             col1, col2, col3 = st.columns(3)

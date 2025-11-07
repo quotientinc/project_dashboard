@@ -67,13 +67,15 @@ with tab1:
 
             st.metric("Over Budget", over_budget_count, delta_color="inverse")
         with col6:
-            total_budget = projects_df['contract_value'].sum()
+            # Sum only leaf projects to prevent double-counting parent + children
+            leaf_projects = projects_df[projects_df['is_parent'] == 0]
+            total_budget = leaf_projects['contract_value'].sum()
             st.metric("Total Budget", f"${total_budget/1e6:.1f}M")
 
         st.markdown("---")
 
         # Filters and controls
-        col1, col2, col3 = st.columns([2, 1, 1])
+        col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
 
         with col1:
             status_options = ['Active', 'Future', 'Completed', 'On Hold', 'Cancelled']
@@ -82,6 +84,13 @@ with tab1:
                 options=status_options,
                 default=['Active'],
                 help="Select one or more statuses to display"
+            )
+
+        with col4:
+            view_mode = st.selectbox(
+                "Project Level",
+                options=["Leaf Projects (4th Level)", "Parent Projects (3rd Level)", "All Projects"],
+                help="Filter by project hierarchy level"
             )
 
         with col2:
@@ -123,6 +132,13 @@ with tab1:
             filtered_df = filtered_df[filtered_df['status'].isin(selected_statuses)]
         else:
             filtered_df = pd.DataFrame()
+
+        # Hierarchy level filter
+        if view_mode == "Leaf Projects (4th Level)":
+            filtered_df = filtered_df[filtered_df['is_parent'] == 0]
+        elif view_mode == "Parent Projects (3rd Level)":
+            filtered_df = filtered_df[filtered_df['is_parent'] == 1]
+        # else: "All Projects" - no additional filtering
 
         # Search filter
         if search_term:
@@ -169,6 +185,19 @@ with tab1:
 
             # Project basics
             display_df['Project'] = filtered_df['name']
+            display_df['Level'] = filtered_df['is_parent'].apply(lambda x: "Parent (3rd)" if x == 1 else "Leaf (4th)")
+
+            # Add parent project name for leaf projects
+            def get_parent_name(row):
+                if row['is_parent'] == 1:
+                    return "-"
+                elif pd.notna(row.get('parent_id')) and row.get('parent_id'):
+                    parent = db.get_parent_project(row.name)  # row.name is the index (project id)
+                    return parent['name'] if parent is not None else "-"
+                else:
+                    return "-"
+
+            display_df['Parent Project'] = filtered_df.apply(get_parent_name, axis=1)
             display_df['Client'] = filtered_df['client']
             display_df['PM'] = filtered_df['project_manager']
             display_df['Status'] = filtered_df['status']
@@ -932,6 +961,45 @@ with tab3:
 
                 billable = st.checkbox("Billable Project", value=bool(project.get('billable', 0)), help="Check if this is a billable client project")
 
+                st.markdown("##### Project Hierarchy")
+                col_h1, col_h2 = st.columns(2)
+
+                with col_h1:
+                    is_parent = st.checkbox(
+                        "Parent Project (3rd Level)",
+                        value=bool(project.get('is_parent', 0)),
+                        help="Check if this is a parent/contract-level project (3rd level). Uncheck for task-area projects (4th level)."
+                    )
+
+                with col_h2:
+                    # Only show parent selector if this is NOT a parent project
+                    if not is_parent:
+                        # Get list of potential parent projects
+                        parent_projects = db.get_parent_projects()
+                        if not parent_projects.empty:
+                            parent_options = ["(None)"] + parent_projects['id'].tolist()
+                            parent_names = ["No Parent"] + [f"{row['id']} - {row['name']}" for _, row in parent_projects.iterrows()]
+
+                            current_parent = project.get('parent_id', None)
+                            current_index = 0
+                            if current_parent and current_parent in parent_options:
+                                current_index = parent_options.index(current_parent)
+
+                            parent_id = st.selectbox(
+                                "Parent Project",
+                                options=parent_options,
+                                format_func=lambda x: parent_names[parent_options.index(x)],
+                                index=current_index,
+                                help="Select the parent (3rd level) project if this is a task-area (4th level) project"
+                            )
+                            parent_id = None if parent_id == "(None)" else parent_id
+                        else:
+                            st.info("No parent projects available. Create a parent project first or check the 'Parent Project' box above.")
+                            parent_id = None
+                    else:
+                        parent_id = None
+                        st.info("Parent projects cannot have a parent")
+
                 update_button = st.form_submit_button("Update Project", type="primary")
 
                 if update_button:
@@ -945,7 +1013,9 @@ with tab3:
                             'start_date': start_date.strftime('%Y-%m-%d'),
                             'end_date': end_date.strftime('%Y-%m-%d'),
                             'contract_value': contract_value,
-                            'billable': 1 if billable else 0
+                            'billable': 1 if billable else 0,
+                            'is_parent': 1 if is_parent else 0,
+                            'parent_id': parent_id
                         }
 
                         try:

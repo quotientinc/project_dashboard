@@ -481,11 +481,16 @@ class EmployeeReferenceCSVImporter:
 class ProjectReferenceCSVImporter:
     """
     Imports project data from ProjectReference.csv format for merging with existing data.
-    CSV columns: Project, POP Start Date, POP End Date,
-                 Total Contract Value (All Mods), Total Contract Funding (All Mods)
+    CSV columns:
+      - Required: Project, POP Start Date, POP End Date, Total Contract Value (All Mods)
+      - Optional: is_parent (0 or 1), parent_id (project ID string)
 
     The "Project" column contains both project ID and name (e.g., "101715.Y2.000.00 NIH CC OY2")
     which is split on the first space.
+
+    Hierarchy fields:
+      - is_parent: 1 for parent (3rd level) projects, 0 for leaf (4th level) projects (default: 0)
+      - parent_id: ID of parent project for leaf projects (default: None)
     """
 
     def __init__(self, csv_path):
@@ -589,6 +594,21 @@ class ProjectReferenceCSVImporter:
                     # If date parsing fails, default to Active
                     status = 'Active'
 
+            # Optional hierarchy fields (default to leaf project if not specified)
+            is_parent = 0
+            parent_id = None
+
+            if 'is_parent' in row and pd.notna(row['is_parent']):
+                try:
+                    is_parent = int(row['is_parent'])
+                except (ValueError, TypeError):
+                    is_parent = 0
+
+            if 'parent_id' in row and pd.notna(row['parent_id']):
+                parent_id = str(row['parent_id']).strip()
+                if parent_id == '':
+                    parent_id = None
+
             project = {
                 'id': project_id,
                 'name': project_name,
@@ -597,6 +617,8 @@ class ProjectReferenceCSVImporter:
                 'status': status,
                 'contract_value': contract_value,
                 'billable': billable,
+                'is_parent': is_parent,
+                'parent_id': parent_id,
                 'updated_at': now
             }
             self.projects.append(project)
@@ -639,9 +661,10 @@ class AllocationCSVImporter:
     The allocation_date should be in YYYY-MM format (e.g., "2024-12", "2025-01")
     """
 
-    def __init__(self, csv_path):
-        """Initialize importer with CSV file path"""
+    def __init__(self, csv_path, db=None):
+        """Initialize importer with CSV file path and optional database instance"""
         self.csv_path = csv_path
+        self.db = db
         self.df = None
         self.allocations = []
         self.validation_errors = []
@@ -738,6 +761,14 @@ class AllocationCSVImporter:
             if row['allocated_fte'] < 0:
                 self.validation_errors.append(f"Row {idx + 2}: Invalid allocated_fte (must be >= 0)")
                 continue
+
+            # Validate project is leaf node (not a parent project)
+            if self.db:
+                try:
+                    self.db.validate_allocation_project(row['project_id'])
+                except ValueError as e:
+                    self.validation_errors.append(f"Row {idx + 2}: {str(e)}")
+                    continue
 
             # Build allocation record
             allocation = {
