@@ -735,8 +735,8 @@ class AllocationCSVImporter:
                 self.validation_errors.append(f"Row {idx + 2}: Invalid allocation_date")
                 continue
 
-            if row['allocated_fte'] <= 0:
-                self.validation_errors.append(f"Row {idx + 2}: Invalid allocated_fte (must be > 0)")
+            if row['allocated_fte'] < 0:
+                self.validation_errors.append(f"Row {idx + 2}: Invalid allocated_fte (must be >= 0)")
                 continue
 
             # Build allocation record
