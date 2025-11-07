@@ -309,7 +309,6 @@ def generate_allocation_csv_template(project_id, project_name, start_date, end_d
         emp_id = emp['id']
         emp_name = emp['name']
         default_role = emp['role']
-        default_rate = emp.get('cost_rate', 0.0)
 
         for month_key in month_keys:
             # Check if allocation exists for this employee-month
@@ -321,26 +320,30 @@ def generate_allocation_csv_template(project_id, project_name, start_date, end_d
             if not existing_alloc.empty:
                 # Use existing allocation data
                 alloc = existing_alloc.iloc[0]
+                # Only use bill_rate if it exists in the allocation record
+                bill_rate = alloc['bill_rate'] if pd.notna(alloc.get('bill_rate')) and alloc.get('bill_rate') != 0 else ''
+
                 template_rows.append({
                     'employee_id': emp_id,
                     'employee_name': emp_name,  # For preview only, not in export
                     'project_id': project_id,
                     'allocation_date': month_key,
                     'allocated_fte': alloc['allocated_fte'],
-                    'bill_rate': alloc.get('bill_rate', default_rate),
+                    'bill_rate': bill_rate,
                     'role': alloc.get('role', default_role) if pd.notna(alloc.get('role')) else default_role,
                     'status': 'Existing'  # For preview only
                 })
                 existing_count += 1
             else:
                 # Create placeholder row for missing allocation
+                # Leave bill_rate empty - user should set appropriate rate
                 template_rows.append({
                     'employee_id': emp_id,
                     'employee_name': emp_name,  # For preview only
                     'project_id': project_id,
                     'allocation_date': month_key,
                     'allocated_fte': 0.0,  # User needs to fill this in
-                    'bill_rate': default_rate,
+                    'bill_rate': '',  # Empty - user should set appropriate billing rate
                     'role': default_role,
                     'status': 'New'  # For preview only
                 })
@@ -362,7 +365,7 @@ def generate_allocation_csv_template(project_id, project_name, start_date, end_d
 
     # Preview
     st.markdown("#### Preview")
-    st.caption("Rows marked 'New' have allocated_fte=0.0 and need to be filled in before import")
+    st.caption("Rows marked 'New' have allocated_fte=0.0 and empty bill_rate - fill these in before import")
 
     # Display preview with status column
     st.dataframe(
@@ -405,8 +408,9 @@ def generate_allocation_csv_template(project_id, project_name, start_date, end_d
         "💡 **Next Steps:**\n"
         "1. Download the CSV template\n"
         "2. Fill in `allocated_fte` values for rows marked 'New' (e.g., 0.5 for 50% allocation)\n"
-        "3. Adjust `bill_rate` and `role` if needed\n"
-        "4. Import via **Data Management → Import Data → Import Allocation CSV**"
+        "3. Fill in `bill_rate` values if empty (hourly billing rate)\n"
+        "4. Adjust `role` if needed\n"
+        "5. Import via **Data Management → Import Data → Import Allocation CSV**"
     )
 
 def generate_allocation_gaps_report(db, processor):
