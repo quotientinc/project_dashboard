@@ -239,6 +239,208 @@ def generate_financial_report(db, processor):
             )
             st.plotly_chart(fig, width='stretch')
 
+def generate_allocation_gaps_report(db, processor):
+    st.markdown("#### Projects Lacking Allocations Report")
+    st.caption("Analysis of allocation coverage for Active and Future projects")
+
+    # Load data
+    projects_df = db.get_projects()
+    allocations_df = db.get_allocations()
+
+    # Filter to Active and Future projects only
+    active_future_projects = projects_df[projects_df['status'].isin(['Active', 'Future'])].copy()
+
+    if active_future_projects.empty:
+        st.info("No Active or Future projects found.")
+        return
+
+    # Initialize lists to categorize projects
+    no_allocations = []
+    partial_coverage = []
+    fully_allocated = []
+
+    # Analyze each project
+    project_details = []
+
+    for _, project in active_future_projects.iterrows():
+        project_id = project['id']
+        project_name = project['name']
+        client = project['client']
+        status = project['status']
+        start_date = pd.to_datetime(project['start_date'])
+        end_date = pd.to_datetime(project['end_date'])
+
+        # Calculate project duration in months
+        project_months = pd.date_range(start=start_date, end=end_date, freq='MS')
+        total_months = len(project_months)
+
+        # Get allocations for this project
+        project_allocations = allocations_df[allocations_df['project_id'] == project_id]
+
+        if project_allocations.empty:
+            # No allocations at all
+            allocation_status = "❌ No Allocations"
+            coverage_pct = 0
+            months_covered = 0
+            months_missing = total_months
+            employee_count = 0
+            total_fte = 0
+            no_allocations.append(project_name)
+        else:
+            # Get unique allocation months
+            allocation_months = pd.to_datetime(project_allocations['allocation_date']).dt.to_period('M').unique()
+            months_covered = len(allocation_months)
+
+            # Calculate coverage percentage
+            coverage_pct = (months_covered / total_months * 100) if total_months > 0 else 0
+            months_missing = total_months - months_covered
+
+            # Get employee count and total FTE
+            employee_count = project_allocations['employee_id'].nunique()
+            total_fte = project_allocations.groupby('allocation_date')['allocated_fte'].sum().mean()
+
+            # Classify allocation status
+            if coverage_pct >= 100:
+                allocation_status = "✅ Fully Allocated"
+                fully_allocated.append(project_name)
+            else:
+                allocation_status = "⚠️ Partial Coverage"
+                partial_coverage.append(project_name)
+
+        # Add to project details
+        project_details.append({
+            'Project ID': project_id,
+            'Project Name': project_name,
+            'Client': client,
+            'Status': status,
+            'Start Date': start_date.strftime('%Y-%m-%d'),
+            'End Date': end_date.strftime('%Y-%m-%d'),
+            'Total Months': total_months,
+            'Months Covered': months_covered,
+            'Months Missing': months_missing,
+            'Coverage %': coverage_pct,
+            'Allocation Status': allocation_status,
+            'Employees': employee_count,
+            'Avg FTE': round(total_fte, 2) if not project_allocations.empty else 0
+        })
+
+    # Create DataFrame
+    details_df = pd.DataFrame(project_details)
+
+    # Summary Cards
+    st.markdown("#### Allocation Summary")
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("Total Projects", len(active_future_projects))
+
+    with col2:
+        no_alloc_pct = (len(no_allocations) / len(active_future_projects) * 100) if len(active_future_projects) > 0 else 0
+        st.metric(
+            "❌ No Allocations",
+            len(no_allocations),
+            delta=f"{no_alloc_pct:.1f}%",
+            delta_color="inverse"
+        )
+
+    with col3:
+        partial_pct = (len(partial_coverage) / len(active_future_projects) * 100) if len(active_future_projects) > 0 else 0
+        st.metric(
+            "⚠️ Partial Coverage",
+            len(partial_coverage),
+            delta=f"{partial_pct:.1f}%",
+            delta_color="off"
+        )
+
+    with col4:
+        full_pct = (len(fully_allocated) / len(active_future_projects) * 100) if len(active_future_projects) > 0 else 0
+        st.metric(
+            "✅ Fully Allocated",
+            len(fully_allocated),
+            delta=f"{full_pct:.1f}%",
+            delta_color="normal"
+        )
+
+    st.markdown("---")
+
+    # Filters and Sorting
+    st.markdown("#### Project Details")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        status_filter = st.selectbox(
+            "Filter by Allocation Status",
+            ["All", "❌ No Allocations", "⚠️ Partial Coverage", "✅ Fully Allocated"],
+            key="alloc_status_filter"
+        )
+
+    with col2:
+        sort_by = st.selectbox(
+            "Sort by",
+            ["Coverage % (Low to High)", "Coverage % (High to Low)", "Project Name", "Start Date"],
+            key="alloc_sort_by"
+        )
+
+    # Apply filter
+    filtered_df = details_df.copy()
+    if status_filter != "All":
+        filtered_df = filtered_df[filtered_df['Allocation Status'] == status_filter]
+
+    # Apply sorting
+    if sort_by == "Coverage % (Low to High)":
+        filtered_df = filtered_df.sort_values('Coverage %', ascending=True)
+    elif sort_by == "Coverage % (High to Low)":
+        filtered_df = filtered_df.sort_values('Coverage %', ascending=False)
+    elif sort_by == "Project Name":
+        filtered_df = filtered_df.sort_values('Project Name')
+    elif sort_by == "Start Date":
+        filtered_df = filtered_df.sort_values('Start Date')
+
+    # Display table
+    st.dataframe(
+        filtered_df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Coverage %": st.column_config.ProgressColumn(
+                "Coverage %",
+                format="%.1f%%",
+                min_value=0,
+                max_value=100
+            ),
+            "Avg FTE": st.column_config.NumberColumn(
+                "Avg FTE",
+                format="%.2f"
+            )
+        }
+    )
+
+    # Show totals
+    st.markdown("##### Summary Statistics")
+    summary_cols = st.columns(4)
+    with summary_cols[0]:
+        st.metric("Total Projects", len(filtered_df))
+    with summary_cols[1]:
+        avg_coverage = filtered_df['Coverage %'].mean()
+        st.metric("Avg Coverage", f"{avg_coverage:.1f}%")
+    with summary_cols[2]:
+        total_missing = filtered_df['Months Missing'].sum()
+        st.metric("Total Months Missing", int(total_missing))
+    with summary_cols[3]:
+        avg_fte = filtered_df['Avg FTE'].mean()
+        st.metric("Avg FTE per Project", f"{avg_fte:.2f}")
+
+    # CSV Export
+    st.markdown("---")
+    csv = filtered_df.to_csv(index=False)
+    st.download_button(
+        label="📥 Download Report as CSV",
+        data=csv,
+        file_name=f"allocation_gaps_report_{datetime.now().strftime('%Y%m%d')}.csv",
+        mime="text/csv"
+    )
+
 def generate_custom_report(db, processor):
     st.markdown("#### Custom Report Builder")
 
@@ -315,7 +517,7 @@ def generate_custom_report(db, processor):
 report_type = st.selectbox(
     "Select Report Type",
     ["Executive Summary", "Project Status Report", "Resource Utilization Report",
-     "Financial Report", "Custom Report"]
+     "Financial Report", "Projects Lacking Allocations", "Custom Report"]
 )
 
 # Call the appropriate function
@@ -327,5 +529,7 @@ elif report_type == "Resource Utilization Report":
     generate_resource_report(db, processor)
 elif report_type == "Financial Report":
     generate_financial_report(db, processor)
+elif report_type == "Projects Lacking Allocations":
+    generate_allocation_gaps_report(db, processor)
 else:
     generate_custom_report(db, processor)
