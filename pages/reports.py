@@ -391,7 +391,7 @@ def generate_allocation_csv_template(project_id, project_name, start_date, end_d
     )
 
     # Export CSV (remove preview-only columns)
-    export_df = template_df[['employee_id', 'project_id', 'allocation_date', 'allocated_fte', 'bill_rate', 'role']].copy()
+    export_df = template_df[['employee_id', 'employee_name', 'project_id', 'allocation_date', 'allocated_fte', 'bill_rate', 'role']].copy()
     csv = export_df.to_csv(index=False)
 
     st.markdown("#### Download")
