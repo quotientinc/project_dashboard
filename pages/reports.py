@@ -258,6 +258,7 @@ def generate_allocation_gaps_report(db, processor):
     no_allocations = []
     partial_coverage = []
     fully_allocated = []
+    skipped_projects = []
 
     # Analyze each project
     project_details = []
@@ -267,8 +268,30 @@ def generate_allocation_gaps_report(db, processor):
         project_name = project['name']
         client = project['client']
         status = project['status']
-        start_date = pd.to_datetime(project['start_date'])
-        end_date = pd.to_datetime(project['end_date'])
+
+        # Check for missing dates
+        start_date_str = project['start_date']
+        end_date_str = project['end_date']
+
+        # Skip projects without start_date or end_date
+        if pd.isna(start_date_str) or start_date_str == '' or pd.isna(end_date_str) or end_date_str == '':
+            reason = []
+            if pd.isna(start_date_str) or start_date_str == '':
+                reason.append("Missing start date")
+            if pd.isna(end_date_str) or end_date_str == '':
+                reason.append("Missing end date")
+
+            skipped_projects.append({
+                'Project ID': project_id,
+                'Project Name': project_name,
+                'Client': client,
+                'Status': status,
+                'Reason': ' & '.join(reason)
+            })
+            continue
+
+        start_date = pd.to_datetime(start_date_str)
+        end_date = pd.to_datetime(end_date_str)
 
         # Calculate project duration in months
         project_months = pd.date_range(start=start_date, end=end_date, freq='MS')
@@ -331,11 +354,18 @@ def generate_allocation_gaps_report(db, processor):
     st.markdown("#### Allocation Summary")
     col1, col2, col3, col4 = st.columns(4)
 
+    analyzed_count = len(details_df)
+    skipped_count = len(skipped_projects)
+
     with col1:
-        st.metric("Total Projects", len(active_future_projects))
+        st.metric(
+            "Projects Analyzed",
+            analyzed_count,
+            help=f"Out of {len(active_future_projects)} total Active/Future projects. {skipped_count} skipped (see below)."
+        )
 
     with col2:
-        no_alloc_pct = (len(no_allocations) / len(active_future_projects) * 100) if len(active_future_projects) > 0 else 0
+        no_alloc_pct = (len(no_allocations) / analyzed_count * 100) if analyzed_count > 0 else 0
         st.metric(
             "❌ No Allocations",
             len(no_allocations),
@@ -344,7 +374,7 @@ def generate_allocation_gaps_report(db, processor):
         )
 
     with col3:
-        partial_pct = (len(partial_coverage) / len(active_future_projects) * 100) if len(active_future_projects) > 0 else 0
+        partial_pct = (len(partial_coverage) / analyzed_count * 100) if analyzed_count > 0 else 0
         st.metric(
             "⚠️ Partial Coverage",
             len(partial_coverage),
@@ -353,7 +383,7 @@ def generate_allocation_gaps_report(db, processor):
         )
 
     with col4:
-        full_pct = (len(fully_allocated) / len(active_future_projects) * 100) if len(active_future_projects) > 0 else 0
+        full_pct = (len(fully_allocated) / analyzed_count * 100) if analyzed_count > 0 else 0
         st.metric(
             "✅ Fully Allocated",
             len(fully_allocated),
@@ -440,6 +470,27 @@ def generate_allocation_gaps_report(db, processor):
         file_name=f"allocation_gaps_report_{datetime.now().strftime('%Y%m%d')}.csv",
         mime="text/csv"
     )
+
+    # Skipped Projects Section
+    if skipped_projects:
+        st.markdown("---")
+        st.markdown("#### ⚠️ Projects Skipped (No Period of Performance Defined)")
+        st.info(
+            f"**{len(skipped_projects)} project(s)** were excluded from the allocation analysis above "
+            f"because they are missing a start date and/or end date. Projects must have both dates "
+            f"defined to calculate allocation coverage."
+        )
+
+        skipped_df = pd.DataFrame(skipped_projects)
+        st.dataframe(
+            skipped_df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.caption("💡 To include these projects in the analysis, please add start and end dates in the Projects page.")
+    else:
+        st.success("✅ All Active and Future projects have defined periods of performance.")
 
 def generate_custom_report(db, processor):
     st.markdown("#### Custom Report Builder")
