@@ -157,7 +157,7 @@ class TimesheetCSVImporter:
                 'skills': None,
                 'hire_date': None,
                 'term_date': None,
-                'pay_type': None,
+                'pay_type': 'Salary',
                 'cost_rate': None,
                 'annual_salary': None,
                 'pto_accrual': None,
