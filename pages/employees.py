@@ -401,109 +401,115 @@ with tab1:
         # Apply filters
         filtered_df = util_df.copy()
 
-        if pay_type_filter != "All":
-            filtered_df = filtered_df[filtered_df['pay_type'] == pay_type_filter]
+        # Only apply filters if DataFrame is not empty
+        if not util_df.empty:
+            if pay_type_filter != "All":
+                filtered_df = filtered_df[filtered_df['pay_type'] == pay_type_filter]
 
-        if status_filter != "All":
-            filtered_df = filtered_df[filtered_df['status'] == status_filter]
+            if status_filter != "All":
+                filtered_df = filtered_df[filtered_df['status'] == status_filter]
 
-        # Apply sorting
-        if sort_by == "Name":
-            filtered_df = filtered_df.sort_values('name')
-        elif sort_by == "Utilization % (High to Low)":
-            filtered_df = filtered_df.sort_values('utilization_pct', ascending=False)
-        elif sort_by == "Utilization % (Low to High)":
-            filtered_df = filtered_df.sort_values('utilization_pct', ascending=True)
-        elif sort_by == "Variance":
-            filtered_df = filtered_df.sort_values('variance', ascending=False)
+            # Apply sorting
+            if sort_by == "Name":
+                filtered_df = filtered_df.sort_values('name')
+            elif sort_by == "Utilization % (High to Low)":
+                filtered_df = filtered_df.sort_values('utilization_pct', ascending=False)
+            elif sort_by == "Utilization % (Low to High)":
+                filtered_df = filtered_df.sort_values('utilization_pct', ascending=True)
+            elif sort_by == "Variance":
+                filtered_df = filtered_df.sort_values('variance', ascending=False)
 
         st.markdown(f"### 📋 Detailed Utilization - {month_key}")
 
-        # Summary cards
-        st.markdown("#### Utilization Summary")
+        # Check if there are any billable employees
+        if util_df.empty:
+            st.info("No billable employees found for the selected period. Make sure employees are marked as billable in the employee settings.")
+        else:
+            # Summary cards
+            st.markdown("#### Utilization Summary")
 
-        col1, col2, col3, col4 = st.columns(4)
+            col1, col2, col3, col4 = st.columns(4)
 
-        with col1:
-            over_util = len(util_df[util_df['utilization_pct'] > 120])
-            st.metric("🔴 Over-Utilized (>120%)", over_util)
+            with col1:
+                over_util = len(util_df[util_df['utilization_pct'] > 120])
+                st.metric("🔴 Over-Utilized (>120%)", over_util)
 
-        with col2:
-            high_util = len(util_df[(util_df['utilization_pct'] >= 100) & (util_df['utilization_pct'] <= 120)])
-            st.metric("🟡 High Utilization (100-120%)", high_util)
+            with col2:
+                high_util = len(util_df[(util_df['utilization_pct'] >= 100) & (util_df['utilization_pct'] <= 120)])
+                st.metric("🟡 High Utilization (100-120%)", high_util)
 
-        with col3:
-            good_util = len(util_df[(util_df['utilization_pct'] >= 80) & (util_df['utilization_pct'] < 100)])
-            st.metric("🟢 Well-Utilized (80-100%)", good_util)
+            with col3:
+                good_util = len(util_df[(util_df['utilization_pct'] >= 80) & (util_df['utilization_pct'] < 100)])
+                st.metric("🟢 Well-Utilized (80-100%)", good_util)
 
-        with col4:
-            under_util = len(util_df[util_df['utilization_pct'] < 80])
-            st.metric("🔵 Under-Utilized (<80%)", under_util)
+            with col4:
+                under_util = len(util_df[util_df['utilization_pct'] < 80])
+                st.metric("🔵 Under-Utilized (<80%)", under_util)
 
-        # Display table
-        display_df = filtered_df[[
-            'employee_id', 'name', 'possible_hours',
-            'actual_hours', 'actual_billable_hours', 'pto_hours', 'other_nonbillable_hours', 'utilization_pct', 'status',
-            'ytd_possible_hours', 'ytd_actual_billable_hours', 'ytd_utilization_pct'
-        ]].copy()
+            # Display table
+            display_df = filtered_df[[
+                'employee_id', 'name', 'possible_hours',
+                'actual_hours', 'actual_billable_hours', 'pto_hours', 'other_nonbillable_hours', 'utilization_pct', 'status',
+                'ytd_possible_hours', 'ytd_actual_billable_hours', 'ytd_utilization_pct'
+            ]].copy()
 
-        display_df = display_df.rename(columns={
-            'name': 'Employee',
-            'possible_hours': 'Possible Billable Hrs',
-            'actual_hours': 'Actual Hrs',
-            'actual_billable_hours': 'Actual Billable Hrs',
-            'pto_hours': 'PTO Hrs',
-            'other_nonbillable_hours': 'Other Non-billable Hrs',
-            'utilization_pct': 'Billable Utilization %',
-            'status': 'Status',
-            'ytd_possible_hours': '📅 YTD Possible Billable Hrs',
-            'ytd_actual_billable_hours': '📅 YTD Actual Billable Hrs',
-            'ytd_utilization_pct': '📅 YTD Billable Utilization %'
-        })
+            display_df = display_df.rename(columns={
+                'name': 'Employee',
+                'possible_hours': 'Possible Billable Hrs',
+                'actual_hours': 'Actual Hrs',
+                'actual_billable_hours': 'Actual Billable Hrs',
+                'pto_hours': 'PTO Hrs',
+                'other_nonbillable_hours': 'Other Non-billable Hrs',
+                'utilization_pct': 'Billable Utilization %',
+                'status': 'Status',
+                'ytd_possible_hours': '📅 YTD Possible Billable Hrs',
+                'ytd_actual_billable_hours': '📅 YTD Actual Billable Hrs',
+                'ytd_utilization_pct': '📅 YTD Billable Utilization %'
+            })
 
-        # Conditional formatting
-        def color_utilization_status(val):
-            if val > 120:
-                return 'background-color: #ffcccc'  # Red
-            elif val >= 100:
-                return 'background-color: #fff9cc'  # Yellow
-            elif val >= 80:
-                return 'background-color: #ccffcc'  # Green
-            else:
-                return 'background-color: #cce5ff'  # Blue
+            # Conditional formatting
+            def color_utilization_status(val):
+                if val > 120:
+                    return 'background-color: #ffcccc'  # Red
+                elif val >= 100:
+                    return 'background-color: #fff9cc'  # Yellow
+                elif val >= 80:
+                    return 'background-color: #ccffcc'  # Green
+                else:
+                    return 'background-color: #cce5ff'  # Blue
 
-        def ytd_background(val):
-            return 'background-color: #f0f0f0'  # Light gray for YTD columns
+            def ytd_background(val):
+                return 'background-color: #f0f0f0'  # Light gray for YTD columns
 
-        # Apply styling and formatting to display_df
-        styled_df = display_df.style.applymap(color_utilization_status, subset=['Billable Utilization %'])
-        styled_df = styled_df.applymap(ytd_background, subset=[
-            '📅 YTD Possible Billable Hrs',
-            '📅 YTD Actual Billable Hrs',
-            '📅 YTD Billable Utilization %'
-        ])
+            # Apply styling and formatting to display_df
+            styled_df = display_df.style.applymap(color_utilization_status, subset=['Billable Utilization %'])
+            styled_df = styled_df.applymap(ytd_background, subset=[
+                '📅 YTD Possible Billable Hrs',
+                '📅 YTD Actual Billable Hrs',
+                '📅 YTD Billable Utilization %'
+            ])
 
-        # Format numeric columns to 2 decimal places
-        styled_df = styled_df.format({
-            'Possible Billable Hrs': '{:.2f}',
-            'Actual Hrs': '{:.2f}',
-            'Actual Billable Hrs': '{:.2f}',
-            'PTO Hrs': '{:.2f}',
-            'Other Non-billable Hrs': '{:.2f}',
-            'Billable Utilization %': '{:.2f}',
-            '📅 YTD Possible Billable Hrs': '{:.2f}',
-            '📅 YTD Actual Billable Hrs': '{:.2f}',
-            '📅 YTD Billable Utilization %': '{:.2f}'
-        })
+            # Format numeric columns to 2 decimal places
+            styled_df = styled_df.format({
+                'Possible Billable Hrs': '{:.2f}',
+                'Actual Hrs': '{:.2f}',
+                'Actual Billable Hrs': '{:.2f}',
+                'PTO Hrs': '{:.2f}',
+                'Other Non-billable Hrs': '{:.2f}',
+                'Billable Utilization %': '{:.2f}',
+                '📅 YTD Possible Billable Hrs': '{:.2f}',
+                '📅 YTD Actual Billable Hrs': '{:.2f}',
+                '📅 YTD Billable Utilization %': '{:.2f}'
+            })
 
-        st.markdown("#### Utilization Report")
+            st.markdown("#### Utilization Report")
 
-        col1, col2 = st.columns([1, 3])
+            col1, col2 = st.columns([1, 3])
 
-        # Show the logic behind the table for reference
-        with col1:
-            with st.popover("💡Logic for Utilization Table"):
-                st.markdown("""For each employee in the utilization table:
+            # Show the logic behind the table for reference
+            with col1:
+                with st.popover("💡Logic for Utilization Table"):
+                    st.markdown("""For each employee in the utilization table:
 
   | Column                           | Source                                                  | Calculation                                                                          |
   |----------------------------------|---------------------------------------------------------|--------------------------------------------------------------------------------------|
@@ -526,59 +532,59 @@ with tab1:
 - YTD columns show cumulative data from January 1st through the end of the selected month.
 """)
 
-        # Display table with row selection
-        with col2:
-            st.info("👆 Click on any row to view detailed project breakdown for that employee")
+            # Display table with row selection
+            with col2:
+                st.info("👆 Click on any row to view detailed project breakdown for that employee")
 
-        selection = st.dataframe(
-            styled_df,
-            use_container_width=True,
-            hide_index=True,
-            height=500,
-            on_select="rerun",
-            selection_mode="single-row",
-            key="employee_utilization_table",
-            column_config={
-                "employee_id": None  # Hide employee_id column
-            }
-        )
+            selection = st.dataframe(
+                styled_df,
+                use_container_width=True,
+                hide_index=True,
+                height=500,
+                on_select="rerun",
+                selection_mode="single-row",
+                key="employee_utilization_table",
+                column_config={
+                    "employee_id": None  # Hide employee_id column
+                }
+            )
 
-        # Handle row selection - open dialog to show project breakdown
-        if selection and selection.selection.rows:
-            selected_idx = selection.selection.rows[0]
-            selected_row = display_df.iloc[selected_idx]
-            emp_id = selected_row['employee_id']
-            emp_name = selected_row['Employee']
+            # Handle row selection - open dialog to show project breakdown
+            if selection and selection.selection.rows:
+                selected_idx = selection.selection.rows[0]
+                selected_row = display_df.iloc[selected_idx]
+                emp_id = selected_row['employee_id']
+                emp_name = selected_row['Employee']
 
-            # Open modal dialog with employee project breakdown
-            show_project_breakdown(emp_id, emp_name, month_key, time_entries_df)
+                # Open modal dialog with employee project breakdown
+                show_project_breakdown(emp_id, emp_name, month_key, time_entries_df)
 
-        # Summary totals
-        st.markdown("##### Summary Totals")
-        summary_cols = st.columns(6)
-        with summary_cols[0]:
-            st.metric("Employees", len(filtered_df))
-        with summary_cols[1]:
-            st.metric("Total Possible Hrs", f"{filtered_df['possible_hours'].sum():.0f}")
-        with summary_cols[2]:
-            st.metric("Total Actual Hrs", f"{filtered_df['actual_hours'].sum():.0f}")
-        with summary_cols[3]:
-            st.metric("Total Actual Billable Hrs", f"{filtered_df['actual_billable_hours'].sum():.0f}")
-        with summary_cols[4]:
-            st.metric("Total PTO Hrs", f"{filtered_df['pto_hours'].sum():.0f}")
-        with summary_cols[5]:
-            avg_util = filtered_df['utilization_pct'].mean()
-            st.metric("Avg Utilization", f"{avg_util:.1f}%")
+            # Summary totals
+            st.markdown("##### Summary Totals")
+            summary_cols = st.columns(6)
+            with summary_cols[0]:
+                st.metric("Employees", len(filtered_df))
+            with summary_cols[1]:
+                st.metric("Total Possible Hrs", f"{filtered_df['possible_hours'].sum():.0f}")
+            with summary_cols[2]:
+                st.metric("Total Actual Hrs", f"{filtered_df['actual_hours'].sum():.0f}")
+            with summary_cols[3]:
+                st.metric("Total Actual Billable Hrs", f"{filtered_df['actual_billable_hours'].sum():.0f}")
+            with summary_cols[4]:
+                st.metric("Total PTO Hrs", f"{filtered_df['pto_hours'].sum():.0f}")
+            with summary_cols[5]:
+                avg_util = filtered_df['utilization_pct'].mean()
+                st.metric("Avg Utilization", f"{avg_util:.1f}%")
 
-        # CSV Export (without employee_id column)
-        csv_df = display_df.drop(columns=['employee_id'])
-        csv = csv_df.to_csv(index=False)
-        st.download_button(
-            label="📥 Download Utilization Report",
-            data=csv,
-            file_name=f"utilization_{selected_year}_{selected_month:02d}.csv",
-            mime="text/csv"
-        )
+            # CSV Export (without employee_id column)
+            csv_df = display_df.drop(columns=['employee_id'])
+            csv = csv_df.to_csv(index=False)
+            st.download_button(
+                label="📥 Download Utilization Report",
+                data=csv,
+                file_name=f"utilization_{selected_year}_{selected_month:02d}.csv",
+                mime="text/csv"
+            )
 
     except Exception as e:
         st.error(f"Error loading utilization data: {str(e)}")

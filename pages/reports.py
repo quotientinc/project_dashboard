@@ -96,11 +96,15 @@ def generate_project_status_report(db, processor):
                 st.progress(min(revenue_progress / 100, 1.0))
 
             with col3:
-                days_total = (pd.to_datetime(project['end_date']) - pd.to_datetime(project['start_date'])).days
-                days_elapsed = (datetime.now() - pd.to_datetime(project['start_date'])).days
-                time_progress = (days_elapsed / days_total * 100) if days_total > 0 else 0
-                st.metric("Time Progress", f"{time_progress:.1f}%")
-                st.progress(min(time_progress / 100, 1.0))
+                if pd.notna(project['start_date']) and pd.notna(project['end_date']):
+                    days_total = (pd.to_datetime(project['end_date']) - pd.to_datetime(project['start_date'])).days
+                    days_elapsed = (datetime.now() - pd.to_datetime(project['start_date'])).days
+                    time_progress = (days_elapsed / days_total * 100) if days_total > 0 else 0
+                    st.metric("Time Progress", f"{time_progress:.1f}%")
+                    st.progress(min(time_progress / 100, 1.0))
+                else:
+                    st.metric("Time Progress", "N/A")
+                    st.caption("Project dates not defined")
 
             # Team allocation
             if not allocations_df.empty:
