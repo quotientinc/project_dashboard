@@ -144,21 +144,25 @@ with st.sidebar:
     if not projects_df.empty:
         # Calculate Total Contract Value (AVG) for current year
         current_year = datetime.now().year
-        current_year_start = datetime(current_year, 1, 1).date()
-        current_year_end = datetime(current_year, 12, 31).date()
+        current_year_start = pd.Timestamp(datetime(current_year, 1, 1))
+        current_year_end = pd.Timestamp(datetime(current_year, 12, 31))
 
         # Filter for Active/Completed billable projects that overlap with current year
         eligible_projects = projects_df[
             (projects_df['status'].isin(['Active', 'Completed'])) &
             (projects_df['billable'] == 1) &
-            (pd.to_datetime(projects_df['start_date']).dt.date <= current_year_end) &
-            (pd.to_datetime(projects_df['end_date']).dt.date >= current_year_start)
+            (pd.to_datetime(projects_df['start_date']) <= current_year_end) &
+            (pd.to_datetime(projects_df['end_date']) >= current_year_start)
         ].copy()
 
         total_contract_value_avg = 0
         new_contract_value = 0
         projects_ytd_count = 0
         if not eligible_projects.empty:
+            # Convert to date objects for loop comparisons
+            current_year_start_date = current_year_start.date()
+            current_year_end_date = current_year_end.date()
+
             for _, project in eligible_projects.iterrows():
                 # Skip if any required fields are null/NaN
                 if pd.isna(project['start_date']) or pd.isna(project['end_date']) or pd.isna(project['contract_value']):
@@ -180,8 +184,8 @@ with st.sidebar:
                     continue
 
                 # Calculate overlap with current year in days
-                overlap_start = max(start_date, current_year_start)
-                overlap_end = min(end_date, current_year_end)
+                overlap_start = max(start_date, current_year_start_date)
+                overlap_end = min(end_date, current_year_end_date)
                 overlap_days = (overlap_end - overlap_start).days + 1
 
                 # Skip if no overlap
@@ -199,12 +203,12 @@ with st.sidebar:
                 projects_ytd_count += 1
 
                 # Track contract value for projects that started this year
-                if start_date >= current_year_start:
+                if start_date >= current_year_start_date:
                     new_contract_value += prorated_value
 
             # Calculate how many projects started in current year
             new_projects_count = len(eligible_projects[
-                pd.to_datetime(eligible_projects['start_date']).dt.date >= current_year_start
+                pd.to_datetime(eligible_projects['start_date']) >= current_year_start
             ])
         else:
             new_projects_count = 0
@@ -224,12 +228,12 @@ with st.sidebar:
         )
     if not employees_df.empty:
         # Filter for active, billable employees (all pay types)
-        current_date = datetime.now().date()
+        current_date = pd.Timestamp(datetime.now())
         billable_employees = employees_df[
             (employees_df['billable'] == 1) &
             (
                 (pd.isna(employees_df['term_date'])) |
-                (pd.to_datetime(employees_df['term_date']).dt.date >= current_date)
+                (pd.to_datetime(employees_df['term_date']) >= current_date)
             )
         ]
 

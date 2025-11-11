@@ -128,7 +128,7 @@ billable_employees_df = employees_df[
     (employees_df['billable'] == 1) &
     (
         (pd.isna(employees_df['term_date'])) |
-        (pd.to_datetime(employees_df['term_date']).dt.date >= current_date.date())
+        (pd.to_datetime(employees_df['term_date']) >= pd.Timestamp(current_date))
     )
 ].copy()
 
