@@ -106,283 +106,287 @@ def render_project_details_tab(db, processor):
             with detail_tab1:
                 st.markdown("#### Project Performance Analysis")
 
-                # Get performance metrics for project date range
-                try:
-                    with st.spinner("Loading project performance data..."):
-                        metrics = processor.get_performance_metrics(
-                            start_date=project['start_date'],
-                            end_date=project['end_date'],
-                            constraint={'project_id': str(project_id)}
+                # Check if project has dates defined
+                if pd.isna(project['start_date']) or pd.isna(project['end_date']):
+                    st.warning("⚠️ **Project dates required** - Please set start and end dates in the Edit Project tab to view performance metrics.")
+                else:
+                    # Get performance metrics for project date range
+                    try:
+                        with st.spinner("Loading project performance data..."):
+                            metrics = processor.get_performance_metrics(
+                                start_date=project['start_date'],
+                                end_date=project['end_date'],
+                                constraint={'project_id': str(project_id)}
+                            )
+
+                        # Helper function to aggregate metrics across all months and employees
+                        def aggregate_monthly_data(metrics_dict):
+                            """Aggregate metrics by month across all employees"""
+                            monthly_totals = {}
+                            for month, employees in metrics_dict.items():
+                                total_hours = sum(emp_data['hours'] for emp_data in employees.values())
+                                total_revenue = sum(emp_data['revenue'] for emp_data in employees.values())
+                                monthly_totals[month] = {
+                                    'hours': total_hours,
+                                    'revenue': total_revenue
+                                }
+                            return monthly_totals
+
+                        # Get months data for smart combination
+                        months_df = db.get_months()
+
+                        # Use smart combination logic
+                        combined_data = processor.combine_actual_projected_smartly(
+                            actuals_dict=metrics['actuals'],
+                            projected_dict=metrics['projected'],
+                            months_df=months_df
                         )
 
-                    # Helper function to aggregate metrics across all months and employees
-                    def aggregate_monthly_data(metrics_dict):
-                        """Aggregate metrics by month across all employees"""
-                        monthly_totals = {}
-                        for month, employees in metrics_dict.items():
-                            total_hours = sum(emp_data['hours'] for emp_data in employees.values())
-                            total_revenue = sum(emp_data['revenue'] for emp_data in employees.values())
-                            monthly_totals[month] = {
-                                'hours': total_hours,
-                                'revenue': total_revenue
-                            }
-                        return monthly_totals
+                        # Aggregate combined data
+                        combined_monthly = aggregate_monthly_data(combined_data)
 
-                    # Get months data for smart combination
-                    months_df = db.get_months()
+                        # Also keep separate aggregates for display purposes
+                        actuals_monthly = aggregate_monthly_data(metrics['actuals'])
+                        projected_monthly = aggregate_monthly_data(metrics['projected'])
 
-                    # Use smart combination logic
-                    combined_data = processor.combine_actual_projected_smartly(
-                        actuals_dict=metrics['actuals'],
-                        projected_dict=metrics['projected'],
-                        months_df=months_df
-                    )
+                        # Calculate totals from smart combined data
+                        total_combined_hours = sum(m['hours'] for m in combined_monthly.values())
+                        total_combined_revenue = sum(m['revenue'] for m in combined_monthly.values())
 
-                    # Aggregate combined data
-                    combined_monthly = aggregate_monthly_data(combined_data)
+                        # Calculate separate totals for display (actual from past, projected from future)
+                        total_actual_hours = sum(m['hours'] for m in actuals_monthly.values())
+                        total_actual_revenue = sum(m['revenue'] for m in actuals_monthly.values())
 
-                    # Also keep separate aggregates for display purposes
-                    actuals_monthly = aggregate_monthly_data(metrics['actuals'])
-                    projected_monthly = aggregate_monthly_data(metrics['projected'])
+                        # Get budget from project
+                        budget_revenue = project['contract_value'] if pd.notna(project['contract_value']) else 0
 
-                    # Calculate totals from smart combined data
-                    total_combined_hours = sum(m['hours'] for m in combined_monthly.values())
-                    total_combined_revenue = sum(m['revenue'] for m in combined_monthly.values())
+                        # Calculate burn percentages
+                        revenue_burn_pct = (total_combined_revenue / budget_revenue * 100) if budget_revenue > 0 else 0
+                        revenue_variance = total_combined_revenue - budget_revenue
 
-                    # Calculate separate totals for display (actual from past, projected from future)
-                    total_actual_hours = sum(m['hours'] for m in actuals_monthly.values())
-                    total_actual_revenue = sum(m['revenue'] for m in actuals_monthly.values())
-
-                    # Get budget from project
-                    budget_revenue = project['contract_value'] if pd.notna(project['contract_value']) else 0
-
-                    # Calculate burn percentages
-                    revenue_burn_pct = (total_combined_revenue / budget_revenue * 100) if budget_revenue > 0 else 0
-                    revenue_variance = total_combined_revenue - budget_revenue
-
-                    # Determine status
-                    if revenue_burn_pct > 100:
-                        status = "🔴 Over Budget"
-                        status_color = "#ffcccc"
-                    elif revenue_burn_pct >= 90:
-                        status = "🟡 Near Budget"
-                        status_color = "#fff9cc"
-                    elif revenue_burn_pct >= 80:
-                        status = "🟢 On Track"
-                        status_color = "#ccffcc"
-                    else:
-                        status = "🔵 Under Budget"
-                        status_color = "#cce5ff"
-
-                    # Display summary cards
-                    st.markdown("##### Summary")
-                    col1, col2, col3 = st.columns(3)
-
-                    with col1:
-                        st.metric(
-                            "Total Hours (Smart Combined)",
-                            f"{total_combined_hours:,.0f} hrs",
-                            delta=f"Actual: {total_actual_hours:,.0f}",
-                            help="Intelligently combined hours: Past = actual only, Current = blended, Future = projected only"
-                        )
-
-                    with col2:
-                        st.metric(
-                            f"Total Accrued (Smart Combined)",
-                            f"${total_combined_revenue:,.0f}",
-                            delta=f"${revenue_variance:+,.0f} vs budget",
-                            delta_color="inverse" if revenue_variance > 0 else "normal",
-                            help="Intelligently combined revenue: Past = actual only, Current = blended, Future = projected only"
-                        )
-
-                    with col3:
-                        st.markdown(
-                            f"<div style='background-color: {status_color}; padding: 20px; border-radius: 5px; text-align: center;'>"
-                            f"<h4>Budget Status</h4>"
-                            f"<h2>{status}</h2>"
-                            f"<p>{revenue_burn_pct:.1f}% of ${budget_revenue:,.0f}</p>"
-                            f"</div>",
-                            unsafe_allow_html=True
-                        )
-
-                    st.divider()
-
-                    # Monthly breakdown table
-                    st.markdown("##### Monthly Breakdown (Smart Combined)")
-
-                    # Get all unique months from actuals, projected, and combined to include future months
-                    all_months = sorted(
-                        set(list(actuals_monthly.keys()) + list(projected_monthly.keys()) + list(combined_monthly.keys())),
-                        key=lambda x: pd.to_datetime(x, format='%B %Y')
-                    )
-
-                    # Build monthly breakdown
-                    monthly_data = []
-                    cumulative_revenue = 0
-
-                    # Month type icons
-                    month_type_icons = {
-                        'past': '📊',  # Past month - actual only
-                        'active': '⚡',  # Active month - blended
-                        'future': '📈'  # Future month - projected only
-                    }
-
-                    for month in all_months:
-                        # Get smart combined data
-                        combined_month = combined_monthly.get(month, {})
-                        combined_hrs = combined_month.get('hours', 0)
-                        combined_rev = combined_month.get('revenue', 0)
-
-                        # Get month type from the combined data (check first entity)
-                        month_type = 'past'  # default
-                        if month in combined_data:
-                            first_entity = list(combined_data[month].values())[0] if combined_data[month] else {}
-                            month_type = first_entity.get('month_type', 'past')
-
-                        # Get actual and projected for reference
-                        actual_hrs = actuals_monthly.get(month, {}).get('hours', 0)
-                        actual_rev = actuals_monthly.get(month, {}).get('revenue', 0)
-                        proj_hrs = projected_monthly.get(month, {}).get('hours', 0)
-                        proj_rev = projected_monthly.get(month, {}).get('revenue', 0)
-
-                        cumulative_revenue += combined_rev
-
-                        budget_pct = (cumulative_revenue / budget_revenue * 100) if budget_revenue > 0 else 0
-
-                        # Determine budget status
-                        if budget_pct > 100:
-                            budget_status = "🔴"
-                        elif budget_pct >= 90:
-                            budget_status = "🟡"
-                        elif budget_pct >= 80:
-                            budget_status = "🟢"
+                        # Determine status
+                        if revenue_burn_pct > 100:
+                            status = "🔴 Over Budget"
+                            status_color = "#ffcccc"
+                        elif revenue_burn_pct >= 90:
+                            status = "🟡 Near Budget"
+                            status_color = "#fff9cc"
+                        elif revenue_burn_pct >= 80:
+                            status = "🟢 On Track"
+                            status_color = "#ccffcc"
                         else:
-                            budget_status = "🔵"
+                            status = "🔵 Under Budget"
+                            status_color = "#cce5ff"
 
-                        # Get month type icon
-                        type_icon = month_type_icons.get(month_type, '')
+                        # Display summary cards
+                        st.markdown("##### Summary")
+                        col1, col2, col3 = st.columns(3)
 
-                        monthly_data.append({
-                            'Type': type_icon,
-                            'Month': month,
-                            'Combined Hours': combined_hrs,
-                            'Combined Revenue': combined_rev,
-                            'Actual Hours': actual_hrs,
-                            'Actual Revenue': actual_rev,
-                            'Projected Hours': proj_hrs,
-                            'Projected Revenue': proj_rev,
-                            'Cumulative Revenue': cumulative_revenue,
-                            'Budget %': budget_pct,
-                            'Status': budget_status
-                        })
+                        with col1:
+                            st.metric(
+                                "Total Hours (Smart Combined)",
+                                f"{total_combined_hours:,.0f} hrs",
+                                delta=f"Actual: {total_actual_hours:,.0f}",
+                                help="Intelligently combined hours: Past = actual only, Current = blended, Future = projected only"
+                            )
 
-                    monthly_df = pd.DataFrame(monthly_data)
+                        with col2:
+                            st.metric(
+                                f"Total Accrued (Smart Combined)",
+                                f"${total_combined_revenue:,.0f}",
+                                delta=f"${revenue_variance:+,.0f} vs budget",
+                                delta_color="inverse" if revenue_variance > 0 else "normal",
+                                help="Intelligently combined revenue: Past = actual only, Current = blended, Future = projected only"
+                            )
 
-                    # Format display
-                    display_df = monthly_df.copy()
-                    display_df['Combined Hours'] = display_df['Combined Hours'].apply(lambda x: f"{x:,.0f}")
-                    display_df['Combined Revenue'] = display_df['Combined Revenue'].apply(lambda x: f"${x:,.0f}")
-                    display_df['Actual Hours'] = display_df['Actual Hours'].apply(lambda x: f"{x:,.0f}")
-                    display_df['Actual Revenue'] = display_df['Actual Revenue'].apply(lambda x: f"${x:,.0f}")
-                    display_df['Projected Hours'] = display_df['Projected Hours'].apply(lambda x: f"{x:,.0f}")
-                    display_df['Projected Revenue'] = display_df['Projected Revenue'].apply(lambda x: f"${x:,.0f}")
-                    display_df['Cumulative Revenue'] = display_df['Cumulative Revenue'].apply(lambda x: f"${x:,.0f}")
-                    display_df['Budget %'] = display_df['Budget %'].apply(lambda x: f"{x:.1f}%")
+                        with col3:
+                            st.markdown(
+                                f"<div style='background-color: {status_color}; padding: 20px; border-radius: 5px; text-align: center;'>"
+                                f"<h4>Budget Status</h4>"
+                                f"<h2>{status}</h2>"
+                                f"<p>{revenue_burn_pct:.1f}% of ${budget_revenue:,.0f}</p>"
+                                f"</div>",
+                                unsafe_allow_html=True
+                            )
 
-                    # Add legend for icons
-                    st.info("📊 = Past (Actual only) | ⚡ = Active/Current (Blended) | 📈 = Future (Projected only)")
+                        st.divider()
 
-                    st.dataframe(display_df, use_container_width=True, hide_index=True, height=400)
+                        # Monthly breakdown table
+                        st.markdown("##### Monthly Breakdown (Smart Combined)")
 
-                    # Burn rate visualization
-                    st.divider()
-                    st.markdown("##### Burn Rate Visualization")
-
-                    col1, col2 = st.columns(2)
-
-                    with col1:
-                        # Cumulative revenue vs budget chart
-                        fig = go.Figure()
-
-                        fig.add_trace(go.Scatter(
-                            x=monthly_df['Month'],
-                            y=monthly_df['Cumulative Revenue'],
-                            name='Cumulative Revenue',
-                            mode='lines+markers',
-                            line=dict(color='#2E86C1', width=3),
-                            fill='tozeroy'
-                        ))
-
-                        fig.add_trace(go.Scatter(
-                            x=monthly_df['Month'],
-                            y=[budget_revenue] * len(monthly_df),
-                            name='Budget',
-                            mode='lines',
-                            line=dict(color='red', width=2, dash='dash')
-                        ))
-
-                        fig.update_layout(
-                            title="Cumulative Revenue vs Budget (Smart Combined)",
-                            xaxis_title="Month",
-                            yaxis_title="Revenue ($)",
-                            height=400,
-                            hovermode='x unified'
+                        # Get all unique months from actuals, projected, and combined to include future months
+                        all_months = sorted(
+                            set(list(actuals_monthly.keys()) + list(projected_monthly.keys()) + list(combined_monthly.keys())),
+                            key=lambda x: pd.to_datetime(x, format='%B %Y')
                         )
 
-                        st.plotly_chart(fig, use_container_width=True)
+                        # Build monthly breakdown
+                        monthly_data = []
+                        cumulative_revenue = 0
 
-                    with col2:
-                        # Monthly hours breakdown with color coding by month type
-                        fig = go.Figure()
+                        # Month type icons
+                        month_type_icons = {
+                            'past': '📊',  # Past month - actual only
+                            'active': '⚡',  # Active month - blended
+                            'future': '📈'  # Future month - projected only
+                        }
 
-                        # Color code bars by month type
-                        colors = []
-                        for month in monthly_df['Month']:
-                            month_type = 'past'
+                        for month in all_months:
+                            # Get smart combined data
+                            combined_month = combined_monthly.get(month, {})
+                            combined_hrs = combined_month.get('hours', 0)
+                            combined_rev = combined_month.get('revenue', 0)
+
+                            # Get month type from the combined data (check first entity)
+                            month_type = 'past'  # default
                             if month in combined_data:
                                 first_entity = list(combined_data[month].values())[0] if combined_data[month] else {}
                                 month_type = first_entity.get('month_type', 'past')
 
-                            # Assign colors based on type
-                            if month_type == 'past':
-                                colors.append('#27AE60')  # Green for actual
-                            elif month_type == 'active':
-                                colors.append('#F39C12')  # Orange for blended
-                            else:  # future
-                                colors.append('#85C1E2')  # Blue for projected
+                            # Get actual and projected for reference
+                            actual_hrs = actuals_monthly.get(month, {}).get('hours', 0)
+                            actual_rev = actuals_monthly.get(month, {}).get('revenue', 0)
+                            proj_hrs = projected_monthly.get(month, {}).get('hours', 0)
+                            proj_rev = projected_monthly.get(month, {}).get('revenue', 0)
 
-                        fig.add_trace(go.Bar(
-                            x=monthly_df['Month'],
-                            y=monthly_df['Combined Hours'],
-                            name='Combined Hours',
-                            marker_color=colors,
-                            text=monthly_df['Type'],
-                            textposition='outside'
-                        ))
+                            cumulative_revenue += combined_rev
 
-                        fig.update_layout(
-                            title="Hours by Month (Smart Combined)<br><sub>📊 Past | ⚡ Active | 📈 Future</sub>",
-                            xaxis_title="Month",
-                            yaxis_title="Hours",
-                            height=400,
-                            hovermode='x unified'
+                            budget_pct = (cumulative_revenue / budget_revenue * 100) if budget_revenue > 0 else 0
+
+                            # Determine budget status
+                            if budget_pct > 100:
+                                budget_status = "🔴"
+                            elif budget_pct >= 90:
+                                budget_status = "🟡"
+                            elif budget_pct >= 80:
+                                budget_status = "🟢"
+                            else:
+                                budget_status = "🔵"
+
+                            # Get month type icon
+                            type_icon = month_type_icons.get(month_type, '')
+
+                            monthly_data.append({
+                                'Type': type_icon,
+                                'Month': month,
+                                'Combined Hours': combined_hrs,
+                                'Combined Revenue': combined_rev,
+                                'Actual Hours': actual_hrs,
+                                'Actual Revenue': actual_rev,
+                                'Projected Hours': proj_hrs,
+                                'Projected Revenue': proj_rev,
+                                'Cumulative Revenue': cumulative_revenue,
+                                'Budget %': budget_pct,
+                                'Status': budget_status
+                            })
+
+                        monthly_df = pd.DataFrame(monthly_data)
+
+                        # Format display
+                        display_df = monthly_df.copy()
+                        display_df['Combined Hours'] = display_df['Combined Hours'].apply(lambda x: f"{x:,.0f}")
+                        display_df['Combined Revenue'] = display_df['Combined Revenue'].apply(lambda x: f"${x:,.0f}")
+                        display_df['Actual Hours'] = display_df['Actual Hours'].apply(lambda x: f"{x:,.0f}")
+                        display_df['Actual Revenue'] = display_df['Actual Revenue'].apply(lambda x: f"${x:,.0f}")
+                        display_df['Projected Hours'] = display_df['Projected Hours'].apply(lambda x: f"{x:,.0f}")
+                        display_df['Projected Revenue'] = display_df['Projected Revenue'].apply(lambda x: f"${x:,.0f}")
+                        display_df['Cumulative Revenue'] = display_df['Cumulative Revenue'].apply(lambda x: f"${x:,.0f}")
+                        display_df['Budget %'] = display_df['Budget %'].apply(lambda x: f"{x:.1f}%")
+
+                        # Add legend for icons
+                        st.info("📊 = Past (Actual only) | ⚡ = Active/Current (Blended) | 📈 = Future (Projected only)")
+
+                        st.dataframe(display_df, use_container_width=True, hide_index=True, height=400)
+
+                        # Burn rate visualization
+                        st.divider()
+                        st.markdown("##### Burn Rate Visualization")
+
+                        col1, col2 = st.columns(2)
+
+                        with col1:
+                            # Cumulative revenue vs budget chart
+                            fig = go.Figure()
+
+                            fig.add_trace(go.Scatter(
+                                x=monthly_df['Month'],
+                                y=monthly_df['Cumulative Revenue'],
+                                name='Cumulative Revenue',
+                                mode='lines+markers',
+                                line=dict(color='#2E86C1', width=3),
+                                fill='tozeroy'
+                            ))
+
+                            fig.add_trace(go.Scatter(
+                                x=monthly_df['Month'],
+                                y=[budget_revenue] * len(monthly_df),
+                                name='Budget',
+                                mode='lines',
+                                line=dict(color='red', width=2, dash='dash')
+                            ))
+
+                            fig.update_layout(
+                                title="Cumulative Revenue vs Budget (Smart Combined)",
+                                xaxis_title="Month",
+                                yaxis_title="Revenue ($)",
+                                height=400,
+                                hovermode='x unified'
+                            )
+
+                            st.plotly_chart(fig, use_container_width=True)
+
+                        with col2:
+                            # Monthly hours breakdown with color coding by month type
+                            fig = go.Figure()
+
+                            # Color code bars by month type
+                            colors = []
+                            for month in monthly_df['Month']:
+                                month_type = 'past'
+                                if month in combined_data:
+                                    first_entity = list(combined_data[month].values())[0] if combined_data[month] else {}
+                                    month_type = first_entity.get('month_type', 'past')
+
+                                # Assign colors based on type
+                                if month_type == 'past':
+                                    colors.append('#27AE60')  # Green for actual
+                                elif month_type == 'active':
+                                    colors.append('#F39C12')  # Orange for blended
+                                else:  # future
+                                    colors.append('#85C1E2')  # Blue for projected
+
+                            fig.add_trace(go.Bar(
+                                x=monthly_df['Month'],
+                                y=monthly_df['Combined Hours'],
+                                name='Combined Hours',
+                                marker_color=colors,
+                                text=monthly_df['Type'],
+                                textposition='outside'
+                            ))
+
+                            fig.update_layout(
+                                title="Hours by Month (Smart Combined)<br><sub>📊 Past | ⚡ Active | 📈 Future</sub>",
+                                xaxis_title="Month",
+                                yaxis_title="Hours",
+                                height=400,
+                                hovermode='x unified'
+                            )
+
+                            st.plotly_chart(fig, use_container_width=True)
+
+                        # CSV Export
+                        csv = monthly_df.to_csv(index=False)
+                        st.download_button(
+                            label="📥 Download Monthly Breakdown",
+                            data=csv,
+                            file_name=f"project_performance_{project_id}_{project['start_date']}_{project['end_date']}.csv",
+                            mime="text/csv"
                         )
 
-                        st.plotly_chart(fig, use_container_width=True)
-
-                    # CSV Export
-                    csv = monthly_df.to_csv(index=False)
-                    st.download_button(
-                        label="📥 Download Monthly Breakdown",
-                        data=csv,
-                        file_name=f"project_performance_{project_id}_{project['start_date']}_{project['end_date']}.csv",
-                        mime="text/csv"
-                    )
-
-                except Exception as e:
-                    st.error(f"Error loading performance data: {str(e)}")
-                    logger.error(f"Error in performance tab: {str(e)}", exc_info=True)
-                    st.info("Unable to load performance metrics. Please check the logs for details.")
+                    except Exception as e:
+                        st.error(f"Error loading performance data: {str(e)}")
+                        logger.error(f"Error in performance tab: {str(e)}", exc_info=True)
+                        st.info("Unable to load performance metrics. Please check the logs for details.")
 
             # Team
             with detail_tab2:

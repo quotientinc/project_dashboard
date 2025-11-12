@@ -3,6 +3,7 @@ import pandas as pd
 from pathlib import Path
 import json
 from datetime import datetime
+import streamlit as st
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -432,7 +433,8 @@ class DatabaseManager:
         return project_count == 0 and employee_count == 0
 
     # Project methods
-    def get_projects(self, filters=None):
+    @st.cache_data(ttl=60, show_spinner=False)
+    def get_projects(_self, filters=None):
         """Get all projects or filtered projects"""
         query = "SELECT * FROM projects"
         params = []
@@ -453,13 +455,37 @@ class DatabaseManager:
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
 
-        df = pd.read_sql_query(query, self.conn, params=params)
+        df = pd.read_sql_query(query, _self.conn, params=params)
 
-        # Calculate budget_used from time_entries for each project
+        # Calculate budget_used from time_entries for all projects in bulk (avoid N+1 query)
         if not df.empty:
-            df['budget_used'] = df['id'].apply(
-                lambda proj_id: self.calculate_budget_used(proj_id)
-            )
+            # Get all time entries once
+            all_time_entries = _self.get_time_entries()
+
+            if not all_time_entries.empty:
+                # Calculate cost for each entry
+                def calculate_entry_cost(row):
+                    if pd.notna(row.get('amount')) and row['amount'] != 0:
+                        return row['amount']
+                    elif pd.notna(row.get('bill_rate')) and pd.notna(row.get('hours')):
+                        return row['hours'] * row['bill_rate']
+                    else:
+                        return 0.0
+
+                all_time_entries['cost'] = all_time_entries.apply(calculate_entry_cost, axis=1)
+
+                # Group by project_id and sum costs
+                budget_by_project = all_time_entries.groupby('project_id')['cost'].sum().reset_index()
+                budget_by_project.columns = ['id', 'budget_used']
+
+                # Merge with projects dataframe
+                df = df.merge(budget_by_project, on='id', how='left')
+
+                # Fill NaN with 0.0 for projects with no time entries
+                df['budget_used'] = df['budget_used'].fillna(0.0)
+            else:
+                # No time entries at all
+                df['budget_used'] = 0.0
 
         return df
 
@@ -507,7 +533,8 @@ class DatabaseManager:
         return rows_affected
 
     # Employee methods
-    def get_employees(self, filters=None):
+    @st.cache_data(ttl=300, show_spinner=False)
+    def get_employees(_self, filters=None):
         """Get all employees or filtered employees"""
         query = "SELECT * FROM employees"
         params = []
@@ -515,7 +542,7 @@ class DatabaseManager:
         # Note: department filter removed as department column no longer exists
         # filters parameter kept for future extensibility
 
-        return pd.read_sql_query(query, self.conn, params=params)
+        return pd.read_sql_query(query, _self.conn, params=params)
 
     def add_employee(self, employee_data):
         """Add a new employee"""
@@ -545,7 +572,8 @@ class DatabaseManager:
         self.conn.commit()
 
     # Allocation methods
-    def get_allocations(self, project_id=None, employee_id=None):
+    @st.cache_data(ttl=60, show_spinner=False)
+    def get_allocations(_self, project_id=None, employee_id=None):
         """Get allocations filtered by project or employee"""
         query = """
             SELECT a.*, p.name as project_name, e.name as employee_name,
@@ -569,7 +597,7 @@ class DatabaseManager:
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
 
-        return pd.read_sql_query(query, self.conn, params=params)
+        return pd.read_sql_query(query, _self.conn, params=params)
 
     def add_allocation(self, allocation_data):
         """Add a new allocation"""
@@ -694,7 +722,8 @@ class DatabaseManager:
         return (len(errors) == 0, errors)
 
     # Time tracking methods
-    def get_time_entries(self, start_date=None, end_date=None, employee_id=None, project_id=None):
+    @st.cache_data(ttl=30, show_spinner=False)
+    def get_time_entries(_self, start_date=None, end_date=None, employee_id=None, project_id=None):
         """Get time entries with filters"""
         query = """
             SELECT t.*, e.name as employee_name, p.name as project_name,
@@ -728,7 +757,7 @@ class DatabaseManager:
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
 
-        return pd.read_sql_query(query, self.conn, params=params)
+        return pd.read_sql_query(query, _self.conn, params=params)
 
     def get_existing_time_entries_date_range(self):
         """
@@ -1053,7 +1082,8 @@ class DatabaseManager:
         return df
 
     # Months methods
-    def get_months(self, year=None):
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def get_months(_self, year=None):
         """Get all months or filtered by year, sorted by year DESC, month ASC"""
         query = "SELECT * FROM months"
         params = []
@@ -1063,7 +1093,7 @@ class DatabaseManager:
             params.append(year)
 
         query += " ORDER BY year DESC, month ASC"
-        return pd.read_sql_query(query, self.conn, params=params)
+        return pd.read_sql_query(query, _self.conn, params=params)
 
     def add_month(self, month_data):
         """Add a new month record"""

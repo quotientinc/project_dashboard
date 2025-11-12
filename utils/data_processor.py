@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from dateutil.relativedelta import relativedelta
 import calendar
+import streamlit as st
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -871,6 +872,7 @@ class DataProcessor:
         return '; '.join(styles) if styles else ''
 
     @staticmethod
+    @st.cache_data(ttl=60, show_spinner=False)
     def get_performance_metrics(
         start_date: str,
         end_date: str,
@@ -909,7 +911,6 @@ class DataProcessor:
             When constraint is {"project_id": "..."}, data is grouped by employee.
             When constraint is {"employee_id": "..."}, data is grouped by project.
         """
-        import streamlit as st
 
         # Access database manager from session state
         db = st.session_state.db_manager
@@ -973,6 +974,7 @@ class DataProcessor:
         """Build actuals data from time_entries table"""
 
         # Build query to get time entries
+        # Use LEFT JOIN instead of correlated subquery for better performance
         query = """
             SELECT
                 t.employee_id,
@@ -982,15 +984,12 @@ class DataProcessor:
                 t.amount,
                 t.billable,
                 t.bill_rate as time_entry_bill_rate,
-                COALESCE(
-                    (SELECT a.bill_rate
-                     FROM allocations a
-                     WHERE a.employee_id = t.employee_id
-                     AND a.project_id = t.project_id
-                     LIMIT 1),
-                    0
-                ) as allocation_bill_rate
+                COALESCE(a.bill_rate, 0) as allocation_bill_rate
             FROM time_entries t
+            LEFT JOIN (
+                SELECT DISTINCT employee_id, project_id, bill_rate
+                FROM allocations
+            ) a ON t.employee_id = a.employee_id AND t.project_id = a.project_id
             WHERE t.date >= ?
                 AND t.date <= ?
                 AND t.project_id != 'FRINGE.HOL'
@@ -1034,31 +1033,14 @@ class DataProcessor:
             # Default to employee grouping (when filter_type is 'project' or None)
             group_key = 'employee_id'
 
-        # Group by month and employee/project for total hours
-        grouped = time_entries_df.groupby(['month_name', group_key]).agg({
-            'hours': 'sum',
-            'revenue': 'sum',
-            'date': 'nunique'  # Count unique dates for worked_days
-        }).reset_index()
-
-        grouped.columns = ['month_name', group_key, 'hours', 'revenue', 'worked_days']
-
-        # Calculate billable hours separately
-        billable_entries = time_entries_df[time_entries_df['billable'] == 1]
-        if not billable_entries.empty:
-            billable_grouped = billable_entries.groupby(['month_name', group_key]).agg({
-                'hours': 'sum'
-            }).reset_index()
-            billable_grouped.columns = ['month_name', group_key, 'billable_hours']
-        else:
-            billable_grouped = pd.DataFrame(columns=['month_name', group_key, 'billable_hours'])
-
-        # Merge total and billable hours
-        if not billable_grouped.empty:
-            grouped = grouped.merge(billable_grouped, on=['month_name', group_key], how='left')
-            grouped['billable_hours'] = grouped['billable_hours'].fillna(0)
-        else:
-            grouped['billable_hours'] = 0
+        # Optimized: Single groupby with conditional aggregation instead of two separate groupbys
+        # This reduces iteration through the DataFrame from 2x to 1x
+        grouped = time_entries_df.groupby(['month_name', group_key]).agg(
+            hours=('hours', 'sum'),
+            revenue=('revenue', 'sum'),
+            worked_days=('date', 'nunique'),  # Count unique dates for worked_days
+            billable_hours=('hours', lambda x: x[time_entries_df.loc[x.index, 'billable'] == 1].sum())
+        ).reset_index()
 
         # Build nested dictionary structure
         actuals = {}

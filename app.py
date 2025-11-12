@@ -133,13 +133,24 @@ pg = st.navigation([
 ])
 
 # Quick stats in sidebar
-with st.sidebar:
-    st.markdown("### 📈 Quick Stats")
-
-    # Load data for stats
+@st.cache_data(ttl=300, show_spinner=False)
+def calculate_sidebar_stats():
+    """Calculate sidebar statistics with caching for performance"""
     db = st.session_state.db_manager
     projects_df = db.get_projects()
     employees_df = db.get_employees()
+
+    stats = {
+        'has_projects': not projects_df.empty,
+        'has_employees': not employees_df.empty,
+        'total_contract_value_avg': 0,
+        'new_contract_value': 0,
+        'projects_ytd_count': 0,
+        'new_projects_count': 0,
+        'total_billable_employees': 0,
+        'salary_count': 0,
+        'hourly_count': 0
+    }
 
     if not projects_df.empty:
         # Calculate Total Contract Value (AVG) for current year
@@ -214,18 +225,11 @@ with st.sidebar:
             new_projects_count = 0
             new_contract_value = 0
 
-        st.metric(
-            "Total Contract Value (AVG)",
-            f"${total_contract_value_avg:,.0f}",
-            delta=f"${new_contract_value:,.0f} new this year",
-            delta_color="off"
-        )
-        st.metric(
-            "Total Projects YTD",
-            projects_ytd_count,
-            delta=f"{new_projects_count} started this year",
-            delta_color="off"
-        )
+        stats['total_contract_value_avg'] = total_contract_value_avg
+        stats['new_contract_value'] = new_contract_value
+        stats['projects_ytd_count'] = projects_ytd_count
+        stats['new_projects_count'] = new_projects_count
+
     if not employees_df.empty:
         # Filter for active, billable employees (all pay types)
         current_date = pd.Timestamp(datetime.now())
@@ -241,12 +245,47 @@ with st.sidebar:
         salary_count = len(billable_employees[billable_employees['pay_type'] == 'Salary'])
         hourly_count = len(billable_employees[billable_employees['pay_type'] == 'Hourly'])
 
+        stats['total_billable_employees'] = len(billable_employees)
+        stats['salary_count'] = salary_count
+        stats['hourly_count'] = hourly_count
+
+    return stats
+
+
+with st.sidebar:
+    st.markdown("### 📈 Quick Stats")
+
+    # Get cached stats
+    stats = calculate_sidebar_stats()
+
+    if stats['has_projects']:
         st.metric(
-            "Total Billable Employees",
-            len(billable_employees),
-            delta=f"{salary_count} Salary, {hourly_count} Hourly",
+            "Total Contract Value (AVG)",
+            f"${stats['total_contract_value_avg']:,.0f}",
+            delta=f"${stats['new_contract_value']:,.0f} new this year",
             delta_color="off"
         )
+        st.metric(
+            "Total Projects YTD",
+            stats['projects_ytd_count'],
+            delta=f"{stats['new_projects_count']} started this year",
+            delta_color="off"
+        )
+
+    if stats['has_employees']:
+        st.metric(
+            "Total Billable Employees",
+            stats['total_billable_employees'],
+            delta=f"{stats['salary_count']} Salary, {stats['hourly_count']} Hourly",
+            delta_color="off"
+        )
+
+    # Cache control
+    st.markdown("---")
+    if st.button("🔄 Refresh Data", help="Clear all caches and reload data from database"):
+        st.cache_data.clear()
+        st.success("✅ Cache cleared! Data will be reloaded.")
+        st.rerun()
 
 # Run the selected page
 pg.run()
