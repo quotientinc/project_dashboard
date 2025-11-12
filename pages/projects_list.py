@@ -15,7 +15,7 @@ def render_project_list_tab(db, processor):
         st.markdown("#### Project Overview")
 
         # Summary metrics
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
         with col1:
             active_count = len(projects_df[projects_df['status'] == 'Active'])
             st.metric("Active", active_count)
@@ -38,6 +38,20 @@ def render_project_list_tab(db, processor):
 
             st.metric("Over Budget", over_budget_count, delta_color="inverse")
         with col6:
+            # Calculate missing budget count for billable projects only
+            if 'is_billable' in projects_df.columns:
+                billable_projects = projects_df[projects_df['is_billable'] != 0]
+            else:
+                # If is_billable column doesn't exist, assume all projects are billable
+                billable_projects = projects_df
+            missing_budget_count = len(billable_projects[pd.isna(billable_projects['contract_value'])])
+            st.metric(
+                "Missing Budget",
+                missing_budget_count,
+                help="Billable projects without contract_value data",
+                delta_color="inverse"
+            )
+        with col7:
             total_budget = projects_df['contract_value'].sum()
             st.metric("Total Budget", f"${total_budget/1e6:.1f}M")
 
@@ -69,12 +83,17 @@ def render_project_list_tab(db, processor):
             )
 
         with col3:
-            # Add data quality indicator
-            projects_with_budget = len(projects_df[pd.notna(projects_df['contract_value'])])
+            # Add data quality indicator for billable projects
+            if 'is_billable' in projects_df.columns:
+                billable_projects = projects_df[projects_df['is_billable'] != 0]
+            else:
+                # If is_billable column doesn't exist, assume all projects are billable
+                billable_projects = projects_df
+            billable_with_budget = len(billable_projects[pd.notna(billable_projects['contract_value'])])
             st.metric(
-                "With Budget Data",
-                f"{projects_with_budget}/{len(projects_df)}",
-                help="Number of projects with contract_value data"
+                "Billable w/ Budget",
+                f"{billable_with_budget}/{len(billable_projects)}",
+                help="Billable projects with contract_value data"
             )
 
         # Optional search
