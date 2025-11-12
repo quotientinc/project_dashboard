@@ -567,6 +567,7 @@ class ProjectReferenceCSVImporter:
 
             # Parse currency values
             contract_value = self._parse_currency(row.get('Total\nContract Value\n(All Mods)'))
+            contract_funding = self._parse_currency(row.get('Total\nContract Funding\n(All Mods)'))
 
             # Default all projects to billable
             billable = 1
@@ -596,6 +597,7 @@ class ProjectReferenceCSVImporter:
                 'end_date': end_date,
                 'status': status,
                 'contract_value': contract_value,
+                'contract_funding': contract_funding,
                 'billable': billable,
                 'updated_at': now
             }
@@ -609,15 +611,25 @@ class ProjectReferenceCSVImporter:
             return {}
 
         with_budget = sum(1 for p in self.projects if p['contract_value'])
+        with_funding = sum(1 for p in self.projects if p.get('contract_funding'))
         with_dates = sum(1 for p in self.projects if p['start_date'] and p['end_date'])
 
         total_budget = sum(p['contract_value'] for p in self.projects if p['contract_value'])
+        total_funding = sum(p.get('contract_funding', 0) for p in self.projects if p.get('contract_funding'))
+
+        # Remove contract_funding from projects before they're sent to database
+        # (database doesn't have this column, but we want it in summary)
+        for project in self.projects:
+            if 'contract_funding' in project:
+                del project['contract_funding']
 
         return {
             'total_projects': len(self.projects),
             'with_budget': with_budget,
+            'with_funding': with_funding,
             'with_dates': with_dates,
-            'total_budget': total_budget
+            'total_budget': total_budget,
+            'total_funding': total_funding
         }
 
     def import_all(self):
