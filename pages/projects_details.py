@@ -5,7 +5,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
-from components.burn_rate_editor import show_burn_rate_editor
+from components.allocation_planner import show_allocation_planner
 from utils.project_helpers import safe_currency_display
 from utils.logger import get_logger
 
@@ -99,7 +99,7 @@ def render_project_details_tab(db, processor):
 
             # Tabs for project details
             detail_tab1, detail_tab2, detail_tab3, detail_tab4, detail_tab5 = st.tabs(
-                ["Performance", "Team", "Timeline", "Expenses", "Burn Rate"]
+                ["Performance", "Team", "Timeline", "Expenses", "Allocation Planner"]
             )
 
             # Performance
@@ -683,9 +683,9 @@ def render_project_details_tab(db, processor):
                 else:
                     st.info("No expenses recorded for this project")
 
-            # Burn Rate
+            # Allocation Planner
             with detail_tab5:
-                # Burn Rate Analysis
-                show_burn_rate_editor(project, db, processor)
+                # Budget Allocation Planner
+                show_allocation_planner(project, db, processor)
     else:
         st.info("No projects available")
