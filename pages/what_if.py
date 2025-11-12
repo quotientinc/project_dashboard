@@ -11,6 +11,43 @@ processor = st.session_state.data_processor
 
 st.markdown("### 🔮 What-If Scenario Analysis (🚨not ready yet)")
 
+# Helper function to calculate revenue metrics from performance data
+def calculate_project_revenue(project):
+    """
+    Calculate revenue_actual and revenue_projected for a project using get_performance_metrics().
+
+    Returns:
+        tuple: (revenue_actual, revenue_projected) or (0, 0) if project has no dates
+    """
+    # Check if project has valid dates
+    if pd.isna(project['start_date']) or pd.isna(project['end_date']):
+        return 0, 0
+
+    try:
+        # Get performance metrics for this project
+        metrics = processor.get_performance_metrics(
+            start_date=project['start_date'],
+            end_date=project['end_date'],
+            constraint={'project_id': str(project['id'])}
+        )
+
+        # Sum revenue from actuals (actual revenue from time_entries.amount)
+        revenue_actual = 0
+        for month_data in metrics.get('actuals', {}).values():
+            for entity_data in month_data.values():
+                revenue_actual += entity_data.get('revenue', 0)
+
+        # Sum revenue from projected (projected revenue from allocations)
+        revenue_projected = 0
+        for month_data in metrics.get('projected', {}).values():
+            for entity_data in month_data.values():
+                revenue_projected += entity_data.get('revenue', 0)
+
+        return revenue_actual, revenue_projected
+    except Exception as e:
+        logger.warning(f"Could not calculate revenue for project {project.get('name', 'Unknown')}: {e}")
+        return 0, 0
+
 # Function definitions
 def project_cost_scenarios(db, processor):
     st.markdown("#### Project Cost Scenarios")
@@ -21,6 +58,9 @@ def project_cost_scenarios(db, processor):
         selected_project = st.selectbox("Select Project", projects_df['name'].tolist())
         project = projects_df[projects_df['name'] == selected_project].iloc[0]
 
+        # Calculate revenue metrics using performance data
+        revenue_actual, revenue_projected = calculate_project_revenue(project)
+
         st.markdown("##### Current Baseline")
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -28,7 +68,7 @@ def project_cost_scenarios(db, processor):
         with col2:
             st.metric("Budget Used", f"${project['budget_used']:,.0f}")
         with col3:
-            st.metric("Revenue Actual", f"${project['revenue_actual']:,.0f}")
+            st.metric("Revenue Actual", f"${revenue_actual:,.0f}")
 
         st.markdown("##### Define Scenarios")
 
@@ -80,7 +120,7 @@ def project_cost_scenarios(db, processor):
                 'labor_cost': project['budget_used'] * 0.7,  # Assume 70% is labor
                 'expense_cost': project['budget_used'] * 0.3,  # Assume 30% is expenses
                 'budget_used': project['budget_used'],
-                'revenue_actual': project['revenue_actual'],
+                'revenue_actual': revenue_actual,
                 'total_cost': project['budget_used']
             }
 
@@ -95,11 +135,11 @@ def project_cost_scenarios(db, processor):
             for scenario in scenarios + [{'name': 'Current'}]:
                 if scenario['name'] == 'Current':
                     cost = project['budget_used']
-                    revenue = project['revenue_actual']
+                    revenue = revenue_actual
                 else:
                     changes = scenario['changes']
                     cost = project['budget_used'] * changes[0]['value']
-                    revenue = project['revenue_actual'] * changes[1]['value']
+                    revenue = revenue_actual * changes[1]['value']
 
                 profit = revenue - cost
                 margin = (profit / revenue * 100) if revenue > 0 else 0
@@ -146,17 +186,30 @@ def resource_allocation_scenarios(db, processor):
         st.markdown("##### Current Allocation")
 
         allocations_df = db.get_allocations()
-        current_fte = processor.calculate_fte_requirements(projects_df, allocations_df, 'monthly')
 
-        if not current_fte.empty:
-            fig = px.bar(
-                current_fte,
-                x='period',
-                y='fte_required',
-                color='project',
-                title="Current FTE Requirements by Project"
-            )
-            st.plotly_chart(fig, width='stretch')
+        # Calculate current FTE by project from monthly allocations
+        if not allocations_df.empty:
+            # Convert allocation_date to datetime and extract month info
+            allocations_df['allocation_date'] = pd.to_datetime(allocations_df['allocation_date'])
+            allocations_df['period'] = allocations_df['allocation_date'].dt.strftime('%Y-%m')
+
+            # Group by period and project to get FTE requirements
+            current_fte = allocations_df.groupby(['period', 'project_name']).agg({
+                'allocated_fte': 'sum'
+            }).reset_index()
+            current_fte.columns = ['period', 'project', 'fte_required']
+
+            if not current_fte.empty:
+                fig = px.bar(
+                    current_fte,
+                    x='period',
+                    y='fte_required',
+                    color='project',
+                    title="Current FTE Requirements by Project"
+                )
+                st.plotly_chart(fig, width='stretch')
+        else:
+            st.info("No allocation data available to display FTE requirements.")
 
         st.markdown("##### Scenario Builder")
 
@@ -259,9 +312,13 @@ def revenue_projection_scenarios(db, processor):
     projects_df = db.get_projects()
 
     if not projects_df.empty:
-        # Current revenue
-        current_revenue = projects_df['revenue_actual'].sum()
-        projected_revenue = projects_df['revenue_projected'].sum()
+        # Calculate revenue for all projects using performance metrics
+        current_revenue = 0
+        projected_revenue = 0
+        for _, project in projects_df.iterrows():
+            rev_actual, rev_projected = calculate_project_revenue(project)
+            current_revenue += rev_actual
+            projected_revenue += rev_projected
 
         st.markdown("##### Current State")
         col1, col2, col3 = st.columns(3)
