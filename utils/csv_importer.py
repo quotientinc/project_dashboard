@@ -195,14 +195,18 @@ class TimesheetCSVImporter:
             bill_rate = None
             if pd.notna(row['Billing Rate']):
                 try:
-                    bill_rate = float(row['Billing Rate'])
+                    # Remove commas before converting to float
+                    cleaned = str(row['Billing Rate']).strip().replace(',', '')
+                    bill_rate = float(cleaned)
                 except (ValueError, TypeError):
                     bill_rate = None
 
             amount = None
             if pd.notna(row['Amount']):
                 try:
-                    amount = float(row['Amount'])
+                    # Remove commas before converting to float
+                    cleaned = str(row['Amount']).strip().replace(',', '')
+                    amount = float(cleaned)
                 except (ValueError, TypeError):
                     amount = None
 
