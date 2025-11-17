@@ -202,9 +202,9 @@ def analyze_budget_status(project, allocations_df, time_entries_df, processor, d
             'actual_cost': month_actual,
             'projected_cost': month_projected,
             'cumulative_actual': cumulative_actual,
-            'cumulative_projected': cumulative_actual + month_projected,
+            'cumulative_projected': cumulative_projected,
             'cumulative_pct_actual': (cumulative_actual / budget_total * 100) if budget_total > 0 else 0,
-            'cumulative_pct_projected': ((cumulative_actual + month_projected) / budget_total * 100) if budget_total > 0 else 0
+            'cumulative_pct_projected': (cumulative_projected / budget_total * 100) if budget_total > 0 else 0
         })
 
     return {
