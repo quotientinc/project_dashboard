@@ -681,9 +681,9 @@ class AllocationCSVImporter:
         self.df['project_id'] = self.df['project_id'].astype(str).str.strip()
         self.df['allocated_fte'] = pd.to_numeric(self.df['allocated_fte'], errors='coerce').fillna(0.0)
 
-        # Parse bill_rate (optional field)
+        # Parse bill_rate (optional field) - clean currency formatting
         if 'bill_rate' in self.df.columns:
-            self.df['bill_rate'] = pd.to_numeric(self.df['bill_rate'], errors='coerce')
+            self.df['bill_rate'] = self.df['bill_rate'].apply(self._parse_currency)
 
         # Handle optional role column
         if 'role' not in self.df.columns:
@@ -693,6 +693,18 @@ class AllocationCSVImporter:
         self.df['allocation_date_parsed'] = self.df['allocation_date'].apply(self._parse_allocation_date)
 
         return self
+
+    def _parse_currency(self, currency_str):
+        """Convert currency string to float, handling dollar signs, commas, and quotes"""
+        if pd.isna(currency_str):
+            return None
+        try:
+            # Remove dollar signs, commas, and convert to float
+            cleaned = str(currency_str).strip().replace('$', '').replace(',', '')
+            value = float(cleaned)
+            return value if value > 0 else None
+        except Exception:
+            return None
 
     def _parse_allocation_date(self, date_str):
         """
