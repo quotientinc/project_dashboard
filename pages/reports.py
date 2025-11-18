@@ -419,17 +419,17 @@ def generate_allocation_csv_template(project_id, project_name, start_date, end_d
 
 def generate_allocation_gaps_report(db, processor):
     st.markdown("#### Projects Lacking Allocations Report")
-    st.caption("Analysis of allocation coverage for Active and Future projects")
+    st.caption("Analysis of allocation coverage across all projects")
 
     # Load data
     projects_df = db.get_projects()
     allocations_df = db.get_allocations()
 
-    # Filter to Active and Future projects only
-    active_future_projects = projects_df[projects_df['status'].isin(['Active', 'Future'])].copy()
+    # Get all projects (will be filtered by user selection below)
+    all_projects = projects_df.copy()
 
-    if active_future_projects.empty:
-        st.info("No Active or Future projects found.")
+    if all_projects.empty:
+        st.info("No projects found.")
         return
 
     # Initialize lists to categorize projects
@@ -441,7 +441,7 @@ def generate_allocation_gaps_report(db, processor):
     # Analyze each project
     project_details = []
 
-    for _, project in active_future_projects.iterrows():
+    for _, project in all_projects.iterrows():
         project_id = project['id']
         project_name = project['name']
         client = project['client']
@@ -539,7 +539,7 @@ def generate_allocation_gaps_report(db, processor):
         st.metric(
             "Projects Analyzed",
             analyzed_count,
-            help=f"Out of {len(active_future_projects)} total Active/Future projects. {skipped_count} skipped (see below)."
+            help=f"Out of {len(all_projects)} total projects. {skipped_count} skipped (see below)."
         )
 
     with col2:
@@ -571,39 +571,36 @@ def generate_allocation_gaps_report(db, processor):
 
     st.markdown("---")
 
-    # Filters and Sorting
+    # Filters
     st.markdown("#### Project Details")
 
     col1, col2 = st.columns(2)
 
     with col1:
-        status_filter = st.selectbox(
+        project_status_filter = st.selectbox(
+            "Filter by Project Status",
+            ["All", "Active", "Future", "Completed", "On Hold", "Cancelled"],
+            index=1,  # Default to "Active"
+            key="project_status_filter"
+        )
+
+    with col2:
+        allocation_status_filter = st.selectbox(
             "Filter by Allocation Status",
             ["All", "❌ No Allocations", "⚠️ Partial Coverage", "✅ Fully Allocated"],
             key="alloc_status_filter"
         )
 
-    with col2:
-        sort_by = st.selectbox(
-            "Sort by",
-            ["Coverage % (Low to High)", "Coverage % (High to Low)", "Project Name", "Start Date"],
-            key="alloc_sort_by"
-        )
-
-    # Apply filter
+    # Apply filters
     filtered_df = details_df.copy()
-    if status_filter != "All":
-        filtered_df = filtered_df[filtered_df['Allocation Status'] == status_filter]
 
-    # Apply sorting
-    if sort_by == "Coverage % (Low to High)":
-        filtered_df = filtered_df.sort_values('Coverage %', ascending=True)
-    elif sort_by == "Coverage % (High to Low)":
-        filtered_df = filtered_df.sort_values('Coverage %', ascending=False)
-    elif sort_by == "Project Name":
-        filtered_df = filtered_df.sort_values('Project Name')
-    elif sort_by == "Start Date":
-        filtered_df = filtered_df.sort_values('Start Date')
+    # Filter by project status
+    if project_status_filter != "All":
+        filtered_df = filtered_df[filtered_df['Status'] == project_status_filter]
+
+    # Filter by allocation status
+    if allocation_status_filter != "All":
+        filtered_df = filtered_df[filtered_df['Allocation Status'] == allocation_status_filter]
 
     # Display table with row selection for CSV template generation
     st.caption("💡 Click on a row to generate an allocation CSV template for that project")
@@ -685,7 +682,7 @@ def generate_allocation_gaps_report(db, processor):
 
         st.caption("💡 To include these projects in the analysis, please add start and end dates in the Projects page.")
     else:
-        st.success("✅ All Active and Future projects have defined periods of performance.")
+        st.success("✅ All projects have defined periods of performance.")
 
 def generate_custom_report(db, processor):
     st.markdown("#### Custom Report Builder")
