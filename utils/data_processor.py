@@ -986,10 +986,10 @@ class DataProcessor:
                 t.bill_rate as time_entry_bill_rate,
                 COALESCE(a.bill_rate, 0) as allocation_bill_rate
             FROM time_entries t
-            LEFT JOIN (
-                SELECT DISTINCT employee_id, project_id, bill_rate
-                FROM allocations
-            ) a ON t.employee_id = a.employee_id AND t.project_id = a.project_id
+            LEFT JOIN allocations a
+                ON t.employee_id = a.employee_id
+                AND t.project_id = a.project_id
+                AND strftime('%Y-%m', t.date) = a.allocation_date
             WHERE t.date >= ?
                 AND t.date <= ?
                 AND t.project_id != 'FRINGE.HOL'
