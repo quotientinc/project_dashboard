@@ -971,10 +971,14 @@ class DataProcessor:
         filter_type: Optional[str],
         filter_value: Optional[str]
     ) -> Dict:
-        """Build actuals data from time_entries table"""
+        """
+        Build actuals data from time_entries table ONLY.
 
-        # Build query to get time entries
-        # Use LEFT JOIN instead of correlated subquery for better performance
+        Actuals = what actually happened, purely from time_entries.
+        No JOIN with allocations - that's for projected data.
+        """
+
+        # Query time_entries directly - no JOIN needed
         query = """
             SELECT
                 t.employee_id,
@@ -983,13 +987,8 @@ class DataProcessor:
                 t.hours,
                 t.amount,
                 t.billable,
-                t.bill_rate as time_entry_bill_rate,
-                COALESCE(a.bill_rate, 0) as allocation_bill_rate
+                t.bill_rate
             FROM time_entries t
-            LEFT JOIN allocations a
-                ON t.employee_id = a.employee_id
-                AND t.project_id = a.project_id
-                AND strftime('%Y-%m', t.date) = a.allocation_date
             WHERE t.date >= ?
                 AND t.date <= ?
                 AND t.project_id != 'FRINGE.HOL'
@@ -1016,13 +1015,13 @@ class DataProcessor:
         time_entries_df['month_name'] = time_entries_df['date'].dt.strftime('%B %Y')
 
         # Calculate revenue: Use amount if available, otherwise calculate from hours × bill_rate
-        # Priority: 1) time_entries.amount, 2) hours × allocation.bill_rate
+        # Priority: 1) time_entries.amount, 2) hours × time_entries.bill_rate
         def calculate_revenue(row):
             if pd.notna(row['amount']) and row['amount'] != 0:
                 return row['amount']
             else:
-                # Fallback to calculated revenue using allocation bill_rate
-                return row['hours'] * row['allocation_bill_rate']
+                # Use bill_rate from time_entries (not allocations)
+                return row['hours'] * row.get('bill_rate', 0)
 
         time_entries_df['revenue'] = time_entries_df.apply(calculate_revenue, axis=1)
 
