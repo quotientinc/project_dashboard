@@ -654,6 +654,9 @@ class DatabaseManager:
         Delete allocations within a specific date range (inclusive).
         Used for incremental imports to clear overlapping data.
         Returns the number of allocations deleted.
+
+        WARNING: This deletes ALL allocations across ALL projects in the date range.
+        Use delete_allocations_by_scope() for safer, project-specific deletion.
         """
         cursor = self.conn.cursor()
         cursor.execute("""
@@ -662,6 +665,51 @@ class DatabaseManager:
         """, (start_date, end_date))
         self.conn.commit()
         return cursor.rowcount
+
+    def delete_allocations_by_scope(self, allocations_data):
+        """
+        Delete allocations only for the specific (employee_id, project_id, allocation_date)
+        combinations present in the incoming data.
+
+        This is the safe method for incremental imports - it only removes allocations
+        that will be replaced by the import, leaving other projects untouched.
+
+        Args:
+            allocations_data: List of dicts with 'employee_id', 'project_id', 'allocation_date'
+
+        Returns:
+            Number of allocations deleted
+        """
+        if not allocations_data:
+            return 0
+
+        cursor = self.conn.cursor()
+
+        # Extract unique (employee_id, project_id, allocation_date) tuples
+        scopes = set()
+        for alloc in allocations_data:
+            scopes.add((
+                alloc['employee_id'],
+                alloc['project_id'],
+                alloc['allocation_date']
+            ))
+
+        # Delete in batch using OR conditions
+        # For better performance with large datasets, we could use a temp table,
+        # but for typical allocation imports (hundreds to thousands), this is fine
+        deleted_count = 0
+
+        for employee_id, project_id, allocation_date in scopes:
+            cursor.execute("""
+                DELETE FROM allocations
+                WHERE employee_id = ?
+                  AND project_id = ?
+                  AND allocation_date = ?
+            """, (employee_id, project_id, allocation_date))
+            deleted_count += cursor.rowcount
+
+        self.conn.commit()
+        return deleted_count
 
     def bulk_insert_allocations(self, allocations_data):
         """

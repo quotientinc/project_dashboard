@@ -617,25 +617,12 @@ with tab1:
                             try:
                                 progress_bar = st.progress(0, text="Starting import...")
 
-                                # Step 1: Delete overlapping allocations
+                                # Step 1: Delete only the specific allocations being replaced
+                                # This is safer than deleting by date range - only removes allocations
+                                # for the (employee_id, project_id, allocation_date) combinations in the CSV
                                 deleted_count = 0
-                                if summary['date_range']:
-                                    csv_start, csv_end = summary['date_range']
-                                    existing_range = db.get_existing_allocations_date_range()
-
-                                    if existing_range:
-                                        # Calculate overlap
-                                        db_start, db_end = existing_range
-                                        overlap_start = max(csv_start, db_start)
-                                        overlap_end = min(csv_end, db_end)
-
-                                        if overlap_start <= overlap_end:
-                                            progress_bar.progress(30, text=f"Clearing allocations from {overlap_start} to {overlap_end}...")
-                                            deleted_count = db.delete_allocations_by_date_range(overlap_start, overlap_end)
-                                        else:
-                                            progress_bar.progress(30, text="No overlapping allocations to clear...")
-                                    else:
-                                        progress_bar.progress(30, text="No existing allocations (first import)...")
+                                progress_bar.progress(30, text=f"Clearing {len(allocations)} specific allocation records...")
+                                deleted_count = db.delete_allocations_by_scope(allocations)
 
                                 # Step 2: Insert new allocations
                                 progress_bar.progress(60, text=f"Importing {len(allocations)} allocations...")
