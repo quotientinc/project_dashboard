@@ -177,7 +177,7 @@ with tab1:
             hovermode='x unified'
         )
 
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
         # Display monthly breakdown table
         st.markdown("##### Monthly Breakdown")
@@ -187,7 +187,7 @@ with tab1:
         display_monthly['Profit'] = display_monthly['Profit'].apply(lambda x: f"${x:,.0f}")
         display_monthly['Margin %'] = display_monthly['Margin %'].apply(lambda x: f"{x:.1f}%")
 
-        st.dataframe(display_monthly, use_container_width=True, hide_index=True)
+        st.dataframe(display_monthly, width='stretch', hide_index=True)
     else:
         st.info(f"No time entry data found for {selected_year}")
 
@@ -244,7 +244,7 @@ with tab2:
                 names='Client',
                 title=f"Revenue by Client - {selected_year}"
             )
-            st.plotly_chart(fig_pie, use_container_width=True)
+            st.plotly_chart(fig_pie, width='stretch')
 
         with col2:
             # Chart 2: Profit Margin by Client (Bar)
@@ -264,7 +264,7 @@ with tab2:
                 yaxis_title="Margin %",
                 height=400
             )
-            st.plotly_chart(fig_margin, use_container_width=True)
+            st.plotly_chart(fig_margin, width='stretch')
 
         # Client summary table
         st.markdown("##### Client Summary")
@@ -274,7 +274,7 @@ with tab2:
         display_client['Profit'] = display_client['Profit'].apply(lambda x: f"${x:,.0f}")
         display_client['Margin %'] = display_client['Margin %'].apply(lambda x: f"{x:.1f}%")
 
-        st.dataframe(display_client, use_container_width=True, hide_index=True)
+        st.dataframe(display_client, width='stretch', hide_index=True)
     else:
         st.info(f"No data found for {selected_year}")
 
@@ -444,7 +444,7 @@ with tab3:
                 hovermode='x unified'
             )
 
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
             # Forecast table
             st.markdown("##### Monthly Forecast")
@@ -453,7 +453,7 @@ with tab3:
             display_forecast = display_forecast[['Month Name', 'Revenue', 'Type']]
             display_forecast.columns = ['Month', 'Revenue', 'Data Type']
 
-            st.dataframe(display_forecast, use_container_width=True, hide_index=True)
+            st.dataframe(display_forecast, width='stretch', hide_index=True)
         else:
             st.info(f"No data found for {selected_year}")
     else:
@@ -485,9 +485,9 @@ with tab3:
                 height=400
             )
 
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
             # Table
             display_actual = monthly_actual[['Month Name', 'Revenue']].copy()
             display_actual['Revenue'] = display_actual['Revenue'].apply(lambda x: f"${x:,.0f}")
-            st.dataframe(display_actual, use_container_width=True, hide_index=True)
+            st.dataframe(display_actual, width='stretch', hide_index=True)

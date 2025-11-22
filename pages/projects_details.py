@@ -296,7 +296,7 @@ def render_project_details_tab(db, processor):
                         # Add legend for icons
                         st.info("📊 = Past (Actual only) | ⚡ = Active/Current (Blended) | 📈 = Future (Projected only)")
 
-                        st.dataframe(display_df, use_container_width=True, hide_index=True, height=400)
+                        st.dataframe(display_df, width='stretch', hide_index=True, height=400)
 
                         # Burn rate visualization
                         st.divider()
@@ -333,7 +333,7 @@ def render_project_details_tab(db, processor):
                                 hovermode='x unified'
                             )
 
-                            st.plotly_chart(fig, use_container_width=True)
+                            st.plotly_chart(fig, width='stretch')
 
                         with col2:
                             # Monthly hours breakdown with color coding by month type
@@ -372,7 +372,7 @@ def render_project_details_tab(db, processor):
                                 hovermode='x unified'
                             )
 
-                            st.plotly_chart(fig, use_container_width=True)
+                            st.plotly_chart(fig, width='stretch')
 
                         # CSV Export
                         csv = monthly_df.to_csv(index=False)
@@ -463,7 +463,7 @@ def render_project_details_tab(db, processor):
 
                             if monthly_data:
                                 monthly_df = pd.DataFrame(monthly_data)
-                                st.dataframe(monthly_df, hide_index=True, use_container_width=True)
+                                st.dataframe(monthly_df, hide_index=True, width='stretch')
                         else:
                             # Fallback to simple FTE display if no allocation_date
                             total_fte = emp_allocs['allocated_fte'].sum()
@@ -549,7 +549,7 @@ def render_project_details_tab(db, processor):
                                 barmode='group',
                                 height=400
                             )
-                            st.plotly_chart(fig, use_container_width=True)
+                            st.plotly_chart(fig, width='stretch')
 
                         with col2:
                             # Line chart: Allocation % over time
@@ -571,7 +571,7 @@ def render_project_details_tab(db, processor):
                                 yaxis_title="Allocation %",
                                 height=400
                             )
-                            st.plotly_chart(fig2, use_container_width=True)
+                            st.plotly_chart(fig2, width='stretch')
                     else:
                         # Fallback to simple bar chart
                         fig = go.Figure(data=[

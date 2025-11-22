@@ -374,7 +374,7 @@ def generate_allocation_csv_template(project_id, project_name, start_date, end_d
     # Display preview with status column
     st.dataframe(
         template_df,
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
         height=400,
         column_config={
@@ -405,7 +405,7 @@ def generate_allocation_csv_template(project_id, project_name, start_date, end_d
         file_name=f"allocations_{project_id}_{datetime.now().strftime('%Y%m%d')}.csv",
         mime="text/csv",
         type="primary",
-        use_container_width=True
+        width='stretch'
     )
 
     st.info(
@@ -607,7 +607,7 @@ def generate_allocation_gaps_report(db, processor):
 
     selection = st.dataframe(
         filtered_df,
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
         on_select="rerun",
         selection_mode="single-row",
@@ -676,7 +676,7 @@ def generate_allocation_gaps_report(db, processor):
         skipped_df = pd.DataFrame(skipped_projects)
         st.dataframe(
             skipped_df,
-            use_container_width=True,
+            width='stretch',
             hide_index=True
         )
 
@@ -977,7 +977,7 @@ def generate_resource_allocation_report(db, processor):
 
         st.dataframe(
             display_df,
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
             column_config={
                 "Target FTE": st.column_config.NumberColumn(
@@ -1064,7 +1064,7 @@ def generate_resource_allocation_report(db, processor):
                 showlegend=True
             )
 
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
         # Export
         st.divider()
@@ -1201,7 +1201,7 @@ def generate_resource_allocation_report(db, processor):
 
         st.dataframe(
             display_proj_df,
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
             column_config={
                 "Total FTE": st.column_config.NumberColumn(
@@ -1246,7 +1246,7 @@ def generate_resource_allocation_report(db, processor):
 
         fig.update_xaxes(tickangle=-45)
 
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
         # Export
         st.divider()

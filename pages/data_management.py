@@ -380,7 +380,7 @@ with tab1:
                 # Show preview
                 st.markdown("##### Import Preview")
                 preview_df = pd.DataFrame(projects)
-                st.dataframe(preview_df.head(10), use_container_width=True)
+                st.dataframe(preview_df.head(10), width='stretch')
 
                 # Show summary statistics
                 st.markdown("##### Import Summary")

@@ -428,7 +428,7 @@ def display_trajectory_visualization(budget_analysis, project):
     fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128, 128, 128, 0.2)')
     fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128, 128, 128, 0.2)')
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
     # Legend explanation
     col1, col2 = st.columns([3, 1])
@@ -496,7 +496,7 @@ def display_interactive_allocation_table(budget_analysis, project, allocations_d
                 'Projected Cost': st.column_config.NumberColumn('Projected Cost', format='$%.0f', width='medium'),
                 'Status': st.column_config.TextColumn('Status', width='small')
             },
-            use_container_width=True,
+            width='stretch',
             hide_index=True
         )
 
@@ -549,7 +549,7 @@ def display_scenario_analysis(budget_analysis, project, allocations_df, processo
             'final_pct': st.column_config.NumberColumn('Target %', format='%.1f%%', width='small'),
             'status': st.column_config.TextColumn('Status', width='small')
         },
-        use_container_width=True,
+        width='stretch',
         hide_index=True
     )
 

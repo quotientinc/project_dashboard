@@ -336,7 +336,7 @@ with col1:
             legend=dict(x=0.02, y=0.98),
             hovermode='x unified'
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
     else:
         st.info("No utilization data available")
 
@@ -368,7 +368,7 @@ with col2:
                 showarrow=False
             )]
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
     else:
         st.info("No project data available")
 
@@ -467,7 +467,7 @@ with col1:
             yaxis=dict(range=[0, 150]),
             showlegend=False
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
     else:
         st.info("No billable employee data available")
 
@@ -550,7 +550,7 @@ with col2:
                 showlegend=True,
                 hovermode='x unified'
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         else:
             st.info("No burn rate data available")
     else:
@@ -657,6 +657,6 @@ if not time_entries_df.empty:
     recent_entries['date'] = recent_entries['date'].dt.strftime('%Y-%m-%d')
     # Add visual indicator for billable status
     recent_entries['billable'] = recent_entries['billable'].apply(lambda x: '✓ Billable' if x == 1 else '✗ Non-billable')
-    st.dataframe(recent_entries, use_container_width=True, hide_index=True)
+    st.dataframe(recent_entries, width='stretch', hide_index=True)
 else:
     st.info("No recent time entries")

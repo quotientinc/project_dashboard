@@ -214,7 +214,7 @@ def render_project_edit_tab(db, processor):
                 edited_df = st.data_editor(
                     editor_df,
                     column_config=column_config,
-                    use_container_width=True,
+                    width='stretch',
                     hide_index=True,
                     num_rows="dynamic",  # Allow adding/deleting rows
                     key='team_allocation_editor',

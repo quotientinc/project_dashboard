@@ -41,6 +41,6 @@ def render_project_analytics_tab(db, processor):
                 barmode='group',
                 height=400
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
     else:
         st.info("No projects available for analysis")

@@ -299,7 +299,7 @@ with tab1:
             display_df.loc[days_mask, month] = display_df.loc[days_mask, month].apply(lambda x: f"{int(x)}" if pd.notna(x) else "0")
 
         # Display the table
-        st.dataframe(display_df, use_container_width=True, height=600)
+        st.dataframe(display_df, width='stretch', height=600)
 
         # Download button (with original numeric values)
         csv = actuals_df.to_csv(index=False)
@@ -355,7 +355,7 @@ with tab2:
             display_df.loc[days_mask, month] = display_df.loc[days_mask, month].apply(lambda x: f"{int(x)}" if pd.notna(x) else "0")
 
         # Display the table
-        st.dataframe(display_df, use_container_width=True, height=600)
+        st.dataframe(display_df, width='stretch', height=600)
 
         # Download button (with original numeric values)
         csv = projected_df.to_csv(index=False)
@@ -411,7 +411,7 @@ with tab3:
             display_df.loc[days_mask, month] = display_df.loc[days_mask, month].apply(lambda x: f"{int(x)}" if pd.notna(x) else "0")
 
         # Display the table
-        st.dataframe(display_df, use_container_width=True, height=600)
+        st.dataframe(display_df, width='stretch', height=600)
 
         # Download button (with original numeric values)
         csv = possible_df.to_csv(index=False)

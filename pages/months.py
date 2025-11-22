@@ -102,7 +102,7 @@ with tab1:
         edited_df = st.data_editor(
             display_df,
             column_config=column_config,
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
             num_rows="fixed",
             key='months_editor'
@@ -241,7 +241,7 @@ with tab2:
                 preview_df = pd.DataFrame(months_to_add)
                 st.dataframe(
                     preview_df[['month', 'month_name', 'quarter', 'total_days', 'working_days', 'holidays']],
-                    use_container_width=True,
+                    width='stretch',
                     hide_index=True
                 )
 

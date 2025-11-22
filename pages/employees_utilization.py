@@ -182,7 +182,7 @@ def render_utilization_tab(db, processor):
 
                     st.dataframe(
                         breakdown_display,
-                        use_container_width=True,
+                        width='stretch',
                         hide_index=True,
                         height=400
                     )
@@ -221,7 +221,7 @@ def render_utilization_tab(db, processor):
                             }
                         )
                         fig.update_layout(height=400, showlegend=True)
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, width='stretch')
             else:
                 st.info(f"No time entries found for {emp_name} in {month_key}")
 
@@ -531,7 +531,7 @@ def render_utilization_tab(db, processor):
 
             selection = st.dataframe(
                 styled_df,
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
                 height=500,
                 on_select="rerun",

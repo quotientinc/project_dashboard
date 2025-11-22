@@ -189,7 +189,7 @@ def render_project_list_tab(db, processor):
             # Display with configuration
             st.dataframe(
                 display_df,
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
                 height=600,
                 column_config={

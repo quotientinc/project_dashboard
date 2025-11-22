@@ -1,18 +1,6 @@
 # Pages package initialization
-from . import overview
-from . import projects
-from . import employees
-from . import financial
-from . import reports
-from . import what_if
-from . import data_management
+# Note: Imports removed to prevent double execution of page scripts.
+# Streamlit's st.Page() navigation loads pages directly by file path
+# and doesn't require package-level imports.
 
-__all__ = [
-    'overview',
-    'projects', 
-    'employees',
-    'financial',
-    'reports',
-    'what_if',
-    'data_management'
-]
+__all__ = []
