@@ -572,7 +572,7 @@ class DatabaseManager:
         self.conn.commit()
 
     # Allocation methods
-    @st.cache_data(ttl=60, show_spinner=False)
+    @st.cache_data(ttl=300, show_spinner=False)
     def get_allocations(_self, project_id=None, employee_id=None):
         """Get allocations filtered by project or employee"""
         query = """

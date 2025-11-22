@@ -13,6 +13,7 @@ class DataProcessor:
     """Process and analyze project management data"""
     
     @staticmethod
+    @st.cache_data(ttl=300, show_spinner=False)
     def calculate_burn_rate(expenses_df: pd.DataFrame, time_period: str = 'monthly') -> pd.DataFrame:
         """Calculate burn rate over time"""
         if expenses_df.empty:
@@ -42,6 +43,7 @@ class DataProcessor:
         return burn_rate
     
     @staticmethod
+    @st.cache_data(ttl=300, show_spinner=False)
     def calculate_project_health(project_df: pd.DataFrame, allocations_df: pd.DataFrame) -> pd.DataFrame:
         """Calculate project health metrics"""
         if project_df.empty:
@@ -79,6 +81,7 @@ class DataProcessor:
         return health_metrics
     
     @staticmethod
+    @st.cache_data(ttl=60, show_spinner=False)
     def calculate_employee_utilization(
         employees_df: pd.DataFrame,
         allocations_df: pd.DataFrame,
@@ -872,7 +875,7 @@ class DataProcessor:
         return '; '.join(styles) if styles else ''
 
     @staticmethod
-    @st.cache_data(ttl=60, show_spinner=False)
+    @st.cache_data(ttl=300, show_spinner=False)
     def get_performance_metrics(
         start_date: str,
         end_date: str,

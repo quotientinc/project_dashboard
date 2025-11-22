@@ -38,6 +38,9 @@ def render_employee_list_tab(db, processor):
             # Sort by name
             filtered_df = filtered_df.sort_values('name')
 
+            # Fetch all allocations once instead of per employee (performance optimization)
+            all_allocations = db.get_allocations()
+
             # Display cards
             cols = st.columns(3)
             for idx, (_, emp) in enumerate(filtered_df.iterrows()):
@@ -50,16 +53,17 @@ def render_employee_list_tab(db, processor):
                         if pd.notna(emp.get('skills')) and emp['skills']:
                             st.write(f"**Skills:** {emp['skills']}")
 
-                        # Show current allocations with FTE
-                        allocations = db.get_allocations(employee_id=emp['id'])
-                        if not allocations.empty:
-                            total_fte = allocations['allocated_fte'].sum() if 'allocated_fte' in allocations.columns else 0
-                            st.write(f"**Total FTE:** {total_fte:.2f}")
+                        # Show current allocations with FTE - filter from all allocations
+                        if not all_allocations.empty:
+                            emp_allocations = all_allocations[all_allocations['employee_id'] == emp['id']]
+                            if not emp_allocations.empty:
+                                total_fte = emp_allocations['allocated_fte'].sum() if 'allocated_fte' in emp_allocations.columns else 0
+                                st.write(f"**Total FTE:** {total_fte:.2f}")
 
-                            with st.expander("Current Projects"):
-                                for _, alloc in allocations.iterrows():
-                                    fte = alloc.get('allocated_fte', 0)
-                                    st.write(f"• {alloc['project_name']} ({fte * 100:.0f}%)")
+                                with st.expander("Current Projects"):
+                                    for _, alloc in emp_allocations.iterrows():
+                                        fte = alloc.get('allocated_fte', 0)
+                                        st.write(f"• {alloc['project_name']} ({fte * 100:.0f}%)")
 
                         st.markdown("---")
     else:
