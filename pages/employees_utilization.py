@@ -475,8 +475,8 @@ def render_utilization_tab(db, processor):
                 return 'background-color: #f0f0f0'  # Light gray for YTD columns
 
             # Apply styling and formatting to display_df
-            styled_df = display_df.style.applymap(color_utilization_status, subset=['Billable Utilization %'])
-            styled_df = styled_df.applymap(ytd_background, subset=[
+            styled_df = display_df.style.map(color_utilization_status, subset=['Billable Utilization %'])
+            styled_df = styled_df.map(ytd_background, subset=[
                 '📅 YTD Possible Billable Hrs',
                 '📅 YTD Actual Billable Hrs',
                 '📅 YTD Billable Utilization %'

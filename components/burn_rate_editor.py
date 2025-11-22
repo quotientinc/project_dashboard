@@ -647,12 +647,8 @@ def display_hours_sheet(hours_df, project, show_all_months, processor, allocatio
 
     # Apply light gray background to Total columns
     if total_cols:
-        try:
-            # Try newer pandas map method
-            styled_df = styled_df.map(apply_total_style, subset=total_cols)
-        except AttributeError:
-            # Fall back to older applymap method
-            styled_df = styled_df.applymap(apply_total_style, subset=total_cols)
+        # Apply styling to total columns (using modern pandas map method)
+        styled_df = styled_df.map(apply_total_style, subset=total_cols)
 
     # Display editable table
     edited_df = st.data_editor(
