@@ -282,106 +282,110 @@ def render_project_details_tab(db, processor):
 
                         monthly_df = pd.DataFrame(monthly_data)
 
-                        # Format display
-                        display_df = monthly_df.copy()
-                        display_df['Combined Hours'] = display_df['Combined Hours'].apply(lambda x: f"{x:,.0f}")
-                        display_df['Combined Revenue'] = display_df['Combined Revenue'].apply(lambda x: f"${x:,.0f}")
-                        display_df['Actual Hours'] = display_df['Actual Hours'].apply(lambda x: f"{x:,.0f}")
-                        display_df['Actual Revenue'] = display_df['Actual Revenue'].apply(lambda x: f"${x:,.0f}")
-                        display_df['Projected Hours'] = display_df['Projected Hours'].apply(lambda x: f"{x:,.0f}")
-                        display_df['Projected Revenue'] = display_df['Projected Revenue'].apply(lambda x: f"${x:,.0f}")
-                        display_df['Cumulative Revenue'] = display_df['Cumulative Revenue'].apply(lambda x: f"${x:,.0f}")
-                        display_df['Budget %'] = display_df['Budget %'].apply(lambda x: f"{x:.1f}%")
+                        # Check if we have data to display
+                        if monthly_df.empty:
+                            st.info("No performance data available for this project. Add time entries or allocations to see metrics here.")
+                        else:
+                            # Format display
+                            display_df = monthly_df.copy()
+                            display_df['Combined Hours'] = display_df['Combined Hours'].apply(lambda x: f"{x:,.0f}")
+                            display_df['Combined Revenue'] = display_df['Combined Revenue'].apply(lambda x: f"${x:,.0f}")
+                            display_df['Actual Hours'] = display_df['Actual Hours'].apply(lambda x: f"{x:,.0f}")
+                            display_df['Actual Revenue'] = display_df['Actual Revenue'].apply(lambda x: f"${x:,.0f}")
+                            display_df['Projected Hours'] = display_df['Projected Hours'].apply(lambda x: f"{x:,.0f}")
+                            display_df['Projected Revenue'] = display_df['Projected Revenue'].apply(lambda x: f"${x:,.0f}")
+                            display_df['Cumulative Revenue'] = display_df['Cumulative Revenue'].apply(lambda x: f"${x:,.0f}")
+                            display_df['Budget %'] = display_df['Budget %'].apply(lambda x: f"{x:.1f}%")
 
-                        # Add legend for icons
-                        st.info("📊 = Past (Actual only) | ⚡ = Active/Current (Blended) | 📈 = Future (Projected only)")
+                            # Add legend for icons
+                            st.info("📊 = Past (Actual only) | ⚡ = Active/Current (Blended) | 📈 = Future (Projected only)")
 
-                        st.dataframe(display_df, width='stretch', hide_index=True, height=400)
+                            st.dataframe(display_df, width='stretch', hide_index=True, height=400)
 
-                        # Burn rate visualization
-                        st.divider()
-                        st.markdown("##### Burn Rate Visualization")
+                            # Burn rate visualization
+                            st.divider()
+                            st.markdown("##### Burn Rate Visualization")
 
-                        col1, col2 = st.columns(2)
+                            col1, col2 = st.columns(2)
 
-                        with col1:
-                            # Cumulative revenue vs budget chart
-                            fig = go.Figure()
+                            with col1:
+                                # Cumulative revenue vs budget chart
+                                fig = go.Figure()
 
-                            fig.add_trace(go.Scatter(
-                                x=monthly_df['Month'],
-                                y=monthly_df['Cumulative Revenue'],
-                                name='Cumulative Revenue',
-                                mode='lines+markers',
-                                line=dict(color='#2E86C1', width=3),
-                                fill='tozeroy'
-                            ))
+                                fig.add_trace(go.Scatter(
+                                    x=monthly_df['Month'],
+                                    y=monthly_df['Cumulative Revenue'],
+                                    name='Cumulative Revenue',
+                                    mode='lines+markers',
+                                    line=dict(color='#2E86C1', width=3),
+                                    fill='tozeroy'
+                                ))
 
-                            fig.add_trace(go.Scatter(
-                                x=monthly_df['Month'],
-                                y=[budget_revenue] * len(monthly_df),
-                                name='Budget',
-                                mode='lines',
-                                line=dict(color='red', width=2, dash='dash')
-                            ))
+                                fig.add_trace(go.Scatter(
+                                    x=monthly_df['Month'],
+                                    y=[budget_revenue] * len(monthly_df),
+                                    name='Budget',
+                                    mode='lines',
+                                    line=dict(color='red', width=2, dash='dash')
+                                ))
 
-                            fig.update_layout(
-                                title="Cumulative Revenue vs Budget (Smart Combined)",
-                                xaxis_title="Month",
-                                yaxis_title="Revenue ($)",
-                                height=400,
-                                hovermode='x unified'
+                                fig.update_layout(
+                                    title="Cumulative Revenue vs Budget (Smart Combined)",
+                                    xaxis_title="Month",
+                                    yaxis_title="Revenue ($)",
+                                    height=400,
+                                    hovermode='x unified'
+                                )
+
+                                st.plotly_chart(fig, width='stretch')
+
+                            with col2:
+                                # Monthly hours breakdown with color coding by month type
+                                fig = go.Figure()
+
+                                # Color code bars by month type
+                                colors = []
+                                for month in monthly_df['Month']:
+                                    month_type = 'past'
+                                    if month in combined_data:
+                                        first_entity = list(combined_data[month].values())[0] if combined_data[month] else {}
+                                        month_type = first_entity.get('month_type', 'past')
+
+                                    # Assign colors based on type
+                                    if month_type == 'past':
+                                        colors.append('#27AE60')  # Green for actual
+                                    elif month_type == 'active':
+                                        colors.append('#F39C12')  # Orange for blended
+                                    else:  # future
+                                        colors.append('#85C1E2')  # Blue for projected
+
+                                fig.add_trace(go.Bar(
+                                    x=monthly_df['Month'],
+                                    y=monthly_df['Combined Hours'],
+                                    name='Combined Hours',
+                                    marker_color=colors,
+                                    text=monthly_df['Type'],
+                                    textposition='outside'
+                                ))
+
+                                fig.update_layout(
+                                    title="Hours by Month (Smart Combined)<br><sub>📊 Past | ⚡ Active | 📈 Future</sub>",
+                                    xaxis_title="Month",
+                                    yaxis_title="Hours",
+                                    height=400,
+                                    hovermode='x unified'
+                                )
+
+                                st.plotly_chart(fig, width='stretch')
+
+                            # CSV Export
+                            csv = monthly_df.to_csv(index=False)
+                            st.download_button(
+                                label="📥 Download Monthly Breakdown",
+                                data=csv,
+                                file_name=f"project_performance_{project_id}_{project['start_date']}_{project['end_date']}.csv",
+                                mime="text/csv"
                             )
-
-                            st.plotly_chart(fig, width='stretch')
-
-                        with col2:
-                            # Monthly hours breakdown with color coding by month type
-                            fig = go.Figure()
-
-                            # Color code bars by month type
-                            colors = []
-                            for month in monthly_df['Month']:
-                                month_type = 'past'
-                                if month in combined_data:
-                                    first_entity = list(combined_data[month].values())[0] if combined_data[month] else {}
-                                    month_type = first_entity.get('month_type', 'past')
-
-                                # Assign colors based on type
-                                if month_type == 'past':
-                                    colors.append('#27AE60')  # Green for actual
-                                elif month_type == 'active':
-                                    colors.append('#F39C12')  # Orange for blended
-                                else:  # future
-                                    colors.append('#85C1E2')  # Blue for projected
-
-                            fig.add_trace(go.Bar(
-                                x=monthly_df['Month'],
-                                y=monthly_df['Combined Hours'],
-                                name='Combined Hours',
-                                marker_color=colors,
-                                text=monthly_df['Type'],
-                                textposition='outside'
-                            ))
-
-                            fig.update_layout(
-                                title="Hours by Month (Smart Combined)<br><sub>📊 Past | ⚡ Active | 📈 Future</sub>",
-                                xaxis_title="Month",
-                                yaxis_title="Hours",
-                                height=400,
-                                hovermode='x unified'
-                            )
-
-                            st.plotly_chart(fig, width='stretch')
-
-                        # CSV Export
-                        csv = monthly_df.to_csv(index=False)
-                        st.download_button(
-                            label="📥 Download Monthly Breakdown",
-                            data=csv,
-                            file_name=f"project_performance_{project_id}_{project['start_date']}_{project['end_date']}.csv",
-                            mime="text/csv"
-                        )
 
                     except Exception as e:
                         st.error(f"Error loading performance data: {str(e)}")
