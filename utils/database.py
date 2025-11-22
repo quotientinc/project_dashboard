@@ -19,6 +19,7 @@ class DatabaseManager:
         self.migrate_allocation_bill_rate()
         self.migrate_time_entries_bill_rate()
         self.migrate_projects_schema_cleanup()
+        self.create_indexes()
 
     def create_tables(self):
         """Create all necessary tables"""
@@ -422,6 +423,71 @@ class DatabaseManager:
         print("✅ Projects schema cleanup complete:")
         print("   - Renamed: budget_allocated -> contract_value")
         print("   - Removed: budget_used, revenue_projected, revenue_actual")
+
+    def create_indexes(self):
+        """
+        Create performance indexes on frequently queried columns.
+        This method is idempotent - safe to run multiple times.
+        Indexes significantly improve query performance, especially on large tables.
+        """
+        cursor = self.conn.cursor()
+
+        def index_exists(index_name):
+            """Check if an index already exists"""
+            cursor.execute("""
+                SELECT COUNT(*) FROM sqlite_master
+                WHERE type = 'index' AND name = ?
+            """, (index_name,))
+            return cursor.fetchone()[0] > 0
+
+        # Define all indexes to create
+        indexes = [
+            # Critical indexes on time_entries (largest table)
+            ('idx_time_entries_employee_id',
+             'CREATE INDEX idx_time_entries_employee_id ON time_entries(employee_id)'),
+            ('idx_time_entries_project_id',
+             'CREATE INDEX idx_time_entries_project_id ON time_entries(project_id)'),
+            ('idx_time_entries_date',
+             'CREATE INDEX idx_time_entries_date ON time_entries(date)'),
+            ('idx_time_entries_project_date',
+             'CREATE INDEX idx_time_entries_project_date ON time_entries(project_id, date)'),
+            ('idx_time_entries_employee_date',
+             'CREATE INDEX idx_time_entries_employee_date ON time_entries(employee_id, date)'),
+
+            # High-value indexes on allocations
+            ('idx_allocations_employee_id',
+             'CREATE INDEX idx_allocations_employee_id ON allocations(employee_id)'),
+            ('idx_allocations_project_id',
+             'CREATE INDEX idx_allocations_project_id ON allocations(project_id)'),
+            ('idx_allocations_allocation_date',
+             'CREATE INDEX idx_allocations_allocation_date ON allocations(allocation_date)'),
+            ('idx_allocations_project_date',
+             'CREATE INDEX idx_allocations_project_date ON allocations(project_id, allocation_date)'),
+            ('idx_allocations_employee_date',
+             'CREATE INDEX idx_allocations_employee_date ON allocations(employee_id, allocation_date)'),
+
+            # Optional indexes for filtering
+            ('idx_employees_billable',
+             'CREATE INDEX idx_employees_billable ON employees(billable)'),
+            ('idx_time_entries_billable',
+             'CREATE INDEX idx_time_entries_billable ON time_entries(billable)'),
+        ]
+
+        created_count = 0
+        for index_name, create_sql in indexes:
+            if not index_exists(index_name):
+                try:
+                    cursor.execute(create_sql)
+                    created_count += 1
+                except Exception as e:
+                    logger.warning(f"Failed to create index {index_name}: {str(e)}")
+
+        if created_count > 0:
+            self.conn.commit()
+            # Update statistics for query planner
+            cursor.execute("ANALYZE")
+            self.conn.commit()
+            logger.info(f"Created {created_count} database indexes for improved performance")
 
     def is_empty(self):
         """Check if database is empty"""
