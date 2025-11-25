@@ -118,6 +118,11 @@ data_page = st.Page(
     title="Data Management",
     icon="💾"
 )
+budget_mockup_page = st.Page(
+    "pages/budget_mockup.py",
+    title="Budget Mockup",
+    icon="💾"
+)
 
 # Create navigation
 pg = st.navigation([
@@ -129,7 +134,8 @@ pg = st.navigation([
     reports_page,
     whatif_page,
     months_page,
-    data_page
+    data_page,
+    budget_mockup_page
 ])
 
 # Quick stats in sidebar
