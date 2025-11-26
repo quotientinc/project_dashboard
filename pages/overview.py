@@ -47,7 +47,7 @@ def get_working_days_in_range(start_date, end_date, months_df, year, month):
     return int(working_days_in_month * proportion)
 
 # Date Range Filter
-st.markdown("### 📊 Dashboard Overview (🚨data is in progress)")
+st.markdown("### 📊 Dashboard Overview")
 col1, col2 = st.columns([4, 1])
 
 with col1:
@@ -555,93 +555,6 @@ with col2:
             st.info("No burn rate data available")
     else:
         st.info("No time entry or expense data available")
-
-# Project Health Dashboard
-st.markdown("---")
-st.markdown("### 🏥 Project Health Dashboard")
-
-if not projects_df.empty:
-    health_df = processor.calculate_project_health(projects_df, allocations_df)
-
-    # Add filter option
-    col1, col2 = st.columns([3, 1])
-    with col2:
-        show_at_risk_only = st.checkbox("Show only at-risk projects (< 75%)", value=False)
-
-    # Filter if requested
-    if show_at_risk_only:
-        health_df = health_df[health_df['health_score'] < 75]
-
-    # Sort by health score (worst first)
-    health_df = health_df.sort_values('health_score', ascending=True)
-
-    if not health_df.empty:
-        # Display in 4-column grid
-        projects_per_row = 4
-        for i in range(0, len(health_df), projects_per_row):
-            cols = st.columns(projects_per_row)
-            batch = health_df.iloc[i:i+projects_per_row]
-
-            for idx, (_, project) in enumerate(batch.iterrows()):
-                with cols[idx]:
-                    # Handle NaN values
-                    health_score = project['health_score'] if not pd.isna(project['health_score']) else 0
-                    budget_health = project['budget_health'] if not pd.isna(project['budget_health']) else 0
-                    schedule_progress = project['schedule_progress'] if not pd.isna(project['schedule_progress']) else 0
-                    profit_margin = project['profit_margin'] if not pd.isna(project['profit_margin']) else 0
-
-                    # Determine color based on health score
-                    if health_score >= 75:
-                        color = "🟢"
-                    elif health_score >= 50:
-                        color = "🟡"
-                    else:
-                        color = "🔴"
-
-                    st.markdown(f"**{project['name']}** {color}")
-                    st.metric("Health Score", f"{health_score:.1f}%")
-                    st.progress(max(0.0, min(1.0, health_score / 100)))
-
-                    with st.expander("Details"):
-                        st.write(f"Budget Health: {budget_health:.1f}%")
-                        st.write(f"Schedule Progress: {schedule_progress:.1f}%")
-                        st.write(f"Profit Margin: {profit_margin:.1f}%")
-    else:
-        st.info("No at-risk projects found")
-else:
-    st.info("No project data available")
-
-# Forecast Section
-st.markdown("---")
-st.markdown("### 🔮 Project Completion Forecast")
-
-if not projects_df.empty and not time_entries_df.empty:
-    forecast_df = processor.forecast_project_completion(projects_df, time_entries_df)
-
-    if not forecast_df.empty:
-        for _, forecast in forecast_df.iterrows():
-            col1, col2, col3, col4 = st.columns(4)
-
-            with col1:
-                st.write(f"**{forecast['project_name']}**")
-
-            with col2:
-                st.write(f"Progress: {forecast['current_progress']:.1f}%")
-                st.progress(min(max(forecast['current_progress'] / 100, 0.0), 1.0))
-
-            with col3:
-                st.write(f"Est. Completion: {forecast['forecast_completion'].strftime('%Y-%m-%d')}")
-
-            with col4:
-                if forecast['on_track']:
-                    st.success("On Track")
-                else:
-                    days_late = (forecast['forecast_completion'] - forecast['scheduled_end']).days
-                    st.error(f"Delayed by {days_late} days")
-    else:
-        st.info("Insufficient data for forecasting")
-else:
-    st.info("No project or time entry data available for forecasting")
 
 # Recent Activity
 st.markdown("---")
