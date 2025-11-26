@@ -10,7 +10,7 @@ logger = get_logger(__name__)
 db = st.session_state.db_manager
 processor = st.session_state.data_processor
 
-st.markdown("### 🚀 Project Management (🚨data is in progress)")
+st.markdown("### 🚀 Project Management")
 
 # Lazy loading: Use radio buttons to select tab and only render the active one
 # This prevents all 4 tabs from loading data simultaneously

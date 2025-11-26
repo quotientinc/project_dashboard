@@ -21,7 +21,7 @@ selected_year = st.selectbox(
     help="Financial analysis for the selected calendar year"
 )
 
-st.markdown(f"### 💰 Financial Analysis - {selected_year} (🚨not ready yet)")
+st.markdown(f"### 💰 Financial Analysis - {selected_year}")
 
 # Load data filtered to selected year
 projects_df = db.get_projects()

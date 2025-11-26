@@ -8,7 +8,7 @@ logger = get_logger(__name__)
 
 db = st.session_state.db_manager
 
-st.markdown("### 📊 Data Management (🚨use with caution some import logic needs updated)")
+st.markdown("### 📊 Data Management")
 
 tab1, tab2, tab3, tab4 = st.tabs(["Import Data", "Export Data", "Data Backup", "Database Management"])
 
