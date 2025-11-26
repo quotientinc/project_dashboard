@@ -3,6 +3,7 @@ Project List tab - displays filterable table of all projects with summary metric
 """
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 from utils.project_helpers import safe_budget_percentage, safe_currency_display
 
 
@@ -12,66 +13,34 @@ def render_project_list_tab(db, processor):
     projects_df = db.get_projects()
 
     if not projects_df.empty:
-        st.markdown("#### Project Overview")
-
-        # Summary metrics
-        col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
-        with col1:
-            active_count = len(projects_df[projects_df['status'] == 'Active'])
-            st.metric("Active", active_count)
-        with col2:
-            future_count = len(projects_df[projects_df['status'] == 'Future'])
-            st.metric("Future", future_count, help="Projects not yet started")
-        with col3:
-            completed_count = len(projects_df[projects_df['status'] == 'Completed'])
-            st.metric("Completed", completed_count)
-        with col4:
-            on_hold_count = len(projects_df[projects_df['status'] == 'On Hold'])
-            st.metric("On Hold", on_hold_count)
-        with col5:
-            # Calculate over budget count with NULL handling
-            over_budget_count = 0
-            for _, proj in projects_df.iterrows():
-                pct, _ = safe_budget_percentage(proj['budget_used'], proj['quoted_value'])
-                if pct is not None and pct > 100:
-                    over_budget_count += 1
-
-            st.metric("Over Budget", over_budget_count, delta_color="inverse")
-        with col6:
-            # Calculate missing budget count for billable projects only
-            if 'is_billable' in projects_df.columns:
-                billable_projects = projects_df[projects_df['is_billable'] != 0]
-            else:
-                # If is_billable column doesn't exist, assume all projects are billable
-                billable_projects = projects_df
-            missing_budget_count = len(billable_projects[
-                pd.isna(billable_projects['quoted_value']) | pd.isna(billable_projects['awarded_value'])
-            ])
-            st.metric(
-                "Missing Budget",
-                missing_budget_count,
-                help="Billable projects without quoted or awarded value data",
-                delta_color="inverse"
-            )
-        with col7:
-            total_quoted = projects_df['quoted_value'].sum()
-            st.metric("Total Quoted", f"${total_quoted/1e6:.1f}M")
-
-        st.markdown("---")
-
         # Filters and controls
-        col1, col2, col3 = st.columns([2, 1, 1])
+        col1, col2, col3, col4 = st.columns([2, 1.5, 1, 1])
 
         with col1:
             status_options = ['Active', 'Future', 'Completed', 'On Hold', 'Cancelled']
             selected_statuses = st.multiselect(
                 "Filter by Status",
                 options=status_options,
-                default=['Active'],
+                default=['Active', 'Future', 'Completed'],
                 help="Select one or more statuses to display"
             )
 
         with col2:
+            # Date range filter
+            current_year = datetime.now().year
+            date_filter_options = [
+                f"Active in {current_year}",
+                "All Projects",
+                "Custom Date Range"
+            ]
+            date_filter = st.selectbox(
+                "Date Range",
+                options=date_filter_options,
+                index=0,
+                help="Filter projects by activity period"
+            )
+
+        with col3:
             sort_by = st.selectbox(
                 "Sort by",
                 options=[
@@ -84,7 +53,7 @@ def render_project_list_tab(db, processor):
                 ]
             )
 
-        with col3:
+        with col4:
             # Add data quality indicator for billable projects
             if 'is_billable' in projects_df.columns:
                 billable_projects = projects_df[projects_df['is_billable'] != 0]
@@ -99,6 +68,22 @@ def render_project_list_tab(db, processor):
                 f"{billable_with_budget}/{len(billable_projects)}",
                 help="Billable projects with quoted_value and awarded_value data"
             )
+
+        # Custom date range inputs (only show if Custom Date Range selected)
+        if date_filter == "Custom Date Range":
+            date_col1, date_col2 = st.columns(2)
+            with date_col1:
+                custom_start = st.date_input(
+                    "Filter Start Date",
+                    value=datetime(current_year, 1, 1),
+                    help="Show projects active on or after this date"
+                )
+            with date_col2:
+                custom_end = st.date_input(
+                    "Filter End Date",
+                    value=datetime(current_year, 12, 31),
+                    help="Show projects active on or before this date"
+                )
 
         # Optional search
         search_term = st.text_input(
@@ -117,6 +102,34 @@ def render_project_list_tab(db, processor):
             filtered_df = filtered_df[filtered_df['status'].isin(selected_statuses)]
         else:
             filtered_df = pd.DataFrame()
+
+        # Date range filter
+        if date_filter == f"Active in {current_year}":
+            # Show projects that overlap with current year
+            # start_date <= 2025-12-31 AND end_date >= 2025-01-01
+            # Projects with missing dates are excluded
+            year_start = pd.Timestamp(datetime(current_year, 1, 1))
+            year_end = pd.Timestamp(datetime(current_year, 12, 31))
+
+            filtered_df = filtered_df[
+                pd.notna(filtered_df['start_date']) &
+                pd.notna(filtered_df['end_date']) &
+                (pd.to_datetime(filtered_df['start_date']) <= year_end) &
+                (pd.to_datetime(filtered_df['end_date']) >= year_start)
+            ]
+        elif date_filter == "Custom Date Range":
+            # Show projects that overlap with custom date range
+            # Projects with missing dates are excluded
+            range_start = pd.Timestamp(custom_start)
+            range_end = pd.Timestamp(custom_end)
+
+            filtered_df = filtered_df[
+                pd.notna(filtered_df['start_date']) &
+                pd.notna(filtered_df['end_date']) &
+                (pd.to_datetime(filtered_df['start_date']) <= range_end) &
+                (pd.to_datetime(filtered_df['end_date']) >= range_start)
+            ]
+        # If "All Projects", don't apply any date filter
 
         # Search filter
         if search_term:
@@ -153,8 +166,54 @@ def render_project_list_tab(db, processor):
         elif sort_by == "Client (A-Z)":
             filtered_df = filtered_df.sort_values('client')
 
-        # Show count
+        # Project Overview - showing metrics for filtered projects
+        st.markdown("#### Project Overview")
         st.caption(f"Showing {len(filtered_df)} of {len(projects_df)} projects")
+
+        # Summary metrics based on filtered data
+        col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
+        with col1:
+            active_count = len(filtered_df[filtered_df['status'] == 'Active'])
+            st.metric("Active", active_count)
+        with col2:
+            future_count = len(filtered_df[filtered_df['status'] == 'Future'])
+            st.metric("Future", future_count, help="Projects not yet started")
+        with col3:
+            completed_count = len(filtered_df[filtered_df['status'] == 'Completed'])
+            st.metric("Completed", completed_count)
+        with col4:
+            on_hold_count = len(filtered_df[filtered_df['status'] == 'On Hold'])
+            st.metric("On Hold", on_hold_count)
+        with col5:
+            # Calculate over budget count with NULL handling
+            over_budget_count = 0
+            for _, proj in filtered_df.iterrows():
+                pct, _ = safe_budget_percentage(proj['budget_used'], proj['quoted_value'])
+                if pct is not None and pct > 100:
+                    over_budget_count += 1
+
+            st.metric("Over Budget", over_budget_count, delta_color="inverse")
+        with col6:
+            # Calculate missing budget count for billable projects only
+            if 'is_billable' in filtered_df.columns:
+                billable_projects = filtered_df[filtered_df['is_billable'] != 0]
+            else:
+                # If is_billable column doesn't exist, assume all projects are billable
+                billable_projects = filtered_df
+            missing_budget_count = len(billable_projects[
+                pd.isna(billable_projects['quoted_value']) | pd.isna(billable_projects['awarded_value'])
+            ])
+            st.metric(
+                "Missing Budget",
+                missing_budget_count,
+                help="Billable projects without quoted or awarded value data",
+                delta_color="inverse"
+            )
+        with col7:
+            total_quoted = filtered_df['quoted_value'].sum()
+            st.metric("Total Quoted", f"${total_quoted/1e6:.1f}M")
+
+        st.markdown("---")
 
         # Display projects in enhanced compact table
         if not filtered_df.empty:
