@@ -18,7 +18,7 @@ db = st.session_state.db_manager
 processor = st.session_state.data_processor
 
 # Page title
-st.markdown("### 📊 Performance Data")
+st.markdown("### 🕐 Timesheets")
 st.markdown("View performance metrics across actuals, projected, and possible capacity.")
 
 # Filters section
