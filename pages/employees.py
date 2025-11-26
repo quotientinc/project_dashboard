@@ -1,6 +1,7 @@
 import streamlit as st
 from utils.logger import get_logger
 from pages.employees_utilization import render_utilization_tab
+from pages.employees_allocation import render_allocation_tab
 from pages.employees_list import render_employee_list_tab
 from pages.employees_detail import render_employee_detail_tab
 
@@ -12,8 +13,8 @@ processor = st.session_state.data_processor
 st.markdown("### 👥 Employee Management")
 
 # Lazy loading: Use radio buttons to select tab and only render the active one
-# This prevents all 3 tabs from loading data simultaneously
-tab_names = ["Utilization", "Employee List", "Employee Detail (Edit)"]
+# This prevents all tabs from loading data simultaneously
+tab_names = ["Utilization", "Allocation Planning", "Employee List", "Employee Detail (Edit)"]
 
 # Track selected tab in session state
 if 'employee_active_tab' not in st.session_state:
@@ -37,6 +38,8 @@ st.markdown("---")
 # Lazy render: Only execute the selected tab's function
 if selected_tab == "Utilization":
     render_utilization_tab(db, processor)
+elif selected_tab == "Allocation Planning":
+    render_allocation_tab(db, processor)
 elif selected_tab == "Employee List":
     render_employee_list_tab(db, processor)
 elif selected_tab == "Employee Detail (Edit)":
