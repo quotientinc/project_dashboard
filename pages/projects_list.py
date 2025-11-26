@@ -14,7 +14,7 @@ def render_project_list_tab(db, processor):
 
     if not projects_df.empty:
         # Filters and controls
-        col1, col2, col3, col4 = st.columns([2, 1.5, 1, 1])
+        col1, col2, col3 = st.columns([2, 1.5, 1])
 
         with col1:
             status_options = ['Active', 'Future', 'Completed', 'On Hold', 'Cancelled']
@@ -41,19 +41,6 @@ def render_project_list_tab(db, processor):
             )
 
         with col3:
-            sort_by = st.selectbox(
-                "Sort by",
-                options=[
-                    "Name (A-Z)",
-                    "Start Date (Newest)",
-                    "Start Date (Oldest)",
-                    "Budget % Used (High to Low)",
-                    "Budget % Used (Low to High)",
-                    "Client (A-Z)"
-                ]
-            )
-
-        with col4:
             # Add data quality indicator for billable projects
             if 'is_billable' in projects_df.columns:
                 billable_projects = projects_df[projects_df['is_billable'] != 0]
@@ -140,31 +127,14 @@ def render_project_list_tab(db, processor):
             )
             filtered_df = filtered_df[search_mask]
 
-        # Apply sorting
-        if sort_by == "Name (A-Z)":
-            filtered_df = filtered_df.sort_values('name')
-        elif sort_by == "Budget % Used (High to Low)":
-            # Calculate percentage, keeping NaN for missing data - use quoted_value
-            filtered_df['budget_pct'] = filtered_df.apply(
-                lambda row: safe_budget_percentage(row['budget_used'], row['quoted_value'])[0],
-                axis=1
-            )
-            # Sort with NaN last
-            filtered_df = filtered_df.sort_values('budget_pct', ascending=False, na_position='last')
-        elif sort_by == "Budget % Used (Low to High)":
-            # Calculate percentage, keeping NaN for missing data - use quoted_value
-            filtered_df['budget_pct'] = filtered_df.apply(
-                lambda row: safe_budget_percentage(row['budget_used'], row['quoted_value'])[0],
-                axis=1
-            )
-            # Sort with NaN last
-            filtered_df = filtered_df.sort_values('budget_pct', ascending=True, na_position='last')
-        elif sort_by == "Start Date (Newest)":
-            filtered_df = filtered_df.sort_values('start_date', ascending=False, na_position='last')
-        elif sort_by == "Start Date (Oldest)":
-            filtered_df = filtered_df.sort_values('start_date', ascending=True, na_position='last')
-        elif sort_by == "Client (A-Z)":
-            filtered_df = filtered_df.sort_values('client')
+        # Default sorting: Budget % Used (Low to High)
+        # Calculate percentage for all rows - use quoted_value
+        filtered_df['budget_pct'] = filtered_df.apply(
+            lambda row: safe_budget_percentage(row['budget_used'], row['quoted_value'])[0],
+            axis=1
+        )
+        # Sort with NaN last
+        filtered_df = filtered_df.sort_values('budget_pct', ascending=True, na_position='last')
 
         # Project Overview - showing metrics for filtered projects
         st.markdown("#### Project Overview")
