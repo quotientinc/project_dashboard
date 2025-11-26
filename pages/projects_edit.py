@@ -43,7 +43,25 @@ def render_project_edit_tab(db, processor):
                     status = st.selectbox("Status", status_options_edit, index=current_status_index)
                     start_date = st.date_input("Start Date", value=pd.to_datetime(project['start_date']) if pd.notna(project['start_date']) else None)
                     end_date = st.date_input("End Date", value=pd.to_datetime(project['end_date']) if pd.notna(project['end_date']) else None)
-                    contract_value = st.number_input("Contract Value", min_value=0.0, step=1000.0, value=float(project['contract_value']) if pd.notna(project['contract_value']) else 0.0, help="Total contract value - what the customer pays")
+
+                    # Side-by-side inputs for quoted and awarded values
+                    value_col1, value_col2 = st.columns(2)
+                    with value_col1:
+                        quoted_value = st.number_input(
+                            "Quoted Value",
+                            min_value=0.0,
+                            step=1000.0,
+                            value=float(project['quoted_value']) if pd.notna(project['quoted_value']) else 0.0,
+                            help="Original bid/quote amount for this project"
+                        )
+                    with value_col2:
+                        awarded_value = st.number_input(
+                            "Awarded Value",
+                            min_value=0.0,
+                            step=1000.0,
+                            value=float(project['awarded_value']) if pd.notna(project['awarded_value']) else 0.0,
+                            help="Actual funding awarded/allocated to date"
+                        )
 
                 billable = st.checkbox("Billable Project", value=bool(project.get('billable', 0)), help="Check if this is a billable client project")
 
@@ -59,7 +77,8 @@ def render_project_edit_tab(db, processor):
                             'status': status,
                             'start_date': start_date.strftime('%Y-%m-%d'),
                             'end_date': end_date.strftime('%Y-%m-%d'),
-                            'contract_value': contract_value,
+                            'quoted_value': quoted_value,
+                            'awarded_value': awarded_value,
                             'billable': 1 if billable else 0
                         }
 

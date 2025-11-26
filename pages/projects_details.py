@@ -88,12 +88,19 @@ def render_project_details_tab(db, processor):
 
             with col2:
                 # Get budget values (budget_used is now calculated automatically by get_projects())
-                budget = project['contract_value'] if pd.notna(project['contract_value']) else 0
+                quoted = project['quoted_value'] if pd.notna(project['quoted_value']) else 0
+                awarded = project['awarded_value'] if pd.notna(project['awarded_value']) else 0
                 total_accrued = project['budget_used'] if pd.notna(project['budget_used']) else 0
 
-                budget_remaining = budget - total_accrued
+                budget_remaining = quoted - total_accrued
 
-                st.metric("Budget Allocated", safe_currency_display(budget))
+                # Display quoted and awarded values side-by-side
+                value_col1, value_col2 = st.columns(2)
+                with value_col1:
+                    st.metric("Quoted Value", safe_currency_display(quoted))
+                with value_col2:
+                    st.metric("Awarded Value", safe_currency_display(awarded))
+
                 st.metric("Total Accrued to Date", safe_currency_display(total_accrued))
                 st.metric("Budget Remaining", safe_currency_display(budget_remaining))
 
@@ -157,8 +164,8 @@ def render_project_details_tab(db, processor):
                         total_actual_hours = sum(m['hours'] for m in actuals_monthly.values())
                         total_actual_revenue = sum(m['revenue'] for m in actuals_monthly.values())
 
-                        # Get budget from project
-                        budget_revenue = project['contract_value'] if pd.notna(project['contract_value']) else 0
+                        # Get budget from project - use quoted_value as baseline
+                        budget_revenue = project['quoted_value'] if pd.notna(project['quoted_value']) else 0
 
                         # Calculate burn percentages
                         revenue_burn_pct = (total_combined_revenue / budget_revenue * 100) if budget_revenue > 0 else 0

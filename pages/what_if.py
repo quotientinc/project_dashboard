@@ -62,12 +62,14 @@ def project_cost_scenarios(db, processor):
         revenue_actual, revenue_projected = calculate_project_revenue(project)
 
         st.markdown("##### Current Baseline")
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Budget Allocated", f"${project['contract_value']:,.0f}")
+            st.metric("Quoted Value", f"${project['quoted_value']:,.0f}")
         with col2:
-            st.metric("Budget Used", f"${project['budget_used']:,.0f}")
+            st.metric("Awarded Value", f"${project['awarded_value']:,.0f}")
         with col3:
+            st.metric("Budget Used", f"${project['budget_used']:,.0f}")
+        with col4:
             st.metric("Revenue Actual", f"${revenue_actual:,.0f}")
 
         st.markdown("##### Define Scenarios")

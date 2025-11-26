@@ -27,8 +27,8 @@ def show_allocation_planner(project, db_manager, processor):
         st.warning("⚠️ **Project dates required** - Please set start and end dates in the Edit Project tab.")
         return
 
-    if pd.isna(project['contract_value']) or project['contract_value'] == 0:
-        st.warning("⚠️ **Contract value required** - Please set a contract value in the Edit Project tab.")
+    if pd.isna(project['quoted_value']) or project['quoted_value'] == 0:
+        st.warning("⚠️ **Quoted value required** - Please set a quoted value in the Edit Project tab.")
         return
 
     # Load data
@@ -97,7 +97,7 @@ def analyze_budget_status(project, allocations_df, time_entries_df, processor, d
     - health_status: 'healthy', 'warning', 'critical'
     """
 
-    budget_total = project['contract_value'] if pd.notna(project['contract_value']) else 0
+    budget_total = project['quoted_value'] if pd.notna(project['quoted_value']) else 0
 
     # Calculate timeline metrics
     start_date = pd.to_datetime(project['start_date'])

@@ -266,16 +266,16 @@ with col1:
     st.metric("Avg Employee Utilization", f"{avg_employee_utilization:.1f}%")
 
 with col2:
-    total_contract_value = projects_df['contract_value'].sum() if not projects_df.empty else 0
-    st.metric("Total Contract Value", f"${total_contract_value:,.0f}")
+    total_quoted_value = projects_df['quoted_value'].sum() if not projects_df.empty else 0
+    st.metric("Total Quoted Value", f"${total_quoted_value:,.0f}")
 
 with col3:
     total_accrued = projects_df['budget_used'].sum() if not projects_df.empty else 0
     st.metric("Total Accrued", f"${total_accrued:,.0f}")
 
 with col4:
-    remaining = total_contract_value - total_accrued
-    burn_rate = (total_accrued / total_contract_value * 100) if total_contract_value > 0 else 0
+    remaining = total_quoted_value - total_accrued
+    burn_rate = (total_accrued / total_quoted_value * 100) if total_quoted_value > 0 else 0
     st.metric("Budget Burn Rate", f"{burn_rate:.1f}%", f"${remaining:,.0f} remaining", delta_color="inverse")
 
 # Charts Row 1

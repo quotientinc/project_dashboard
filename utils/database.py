@@ -19,6 +19,7 @@ class DatabaseManager:
         self.migrate_allocation_bill_rate()
         self.migrate_time_entries_bill_rate()
         self.migrate_projects_schema_cleanup()
+        self.migrate_contract_value_split()
         self.create_indexes()
 
     def create_tables(self):
@@ -34,7 +35,8 @@ class DatabaseManager:
                 status TEXT,
                 start_date TEXT,
                 end_date TEXT,
-                contract_value REAL,
+                quoted_value REAL,
+                awarded_value REAL,
                 client TEXT,
                 project_manager TEXT,
                 billable INTEGER DEFAULT 0,
@@ -423,6 +425,105 @@ class DatabaseManager:
         print("✅ Projects schema cleanup complete:")
         print("   - Renamed: budget_allocated -> contract_value")
         print("   - Removed: budget_used, revenue_projected, revenue_actual")
+
+    def migrate_contract_value_split(self):
+        """
+        Split contract_value into quoted_value and awarded_value.
+        - quoted_value: What the project was bid/quoted for
+        - awarded_value: What has actually been funded/awarded
+        - For existing projects, both values are set to the current contract_value
+        This migration is safe to run multiple times.
+        """
+        cursor = self.conn.cursor()
+
+        # Check current schema
+        cursor.execute("PRAGMA table_info(projects)")
+        columns = [col[1] for col in cursor.fetchall()]
+
+        # Check if migration already completed
+        if 'quoted_value' in columns and 'awarded_value' in columns and 'contract_value' not in columns:
+            print("Contract value split migration already completed")
+            return
+
+        # Check if we need to migrate from contract_value
+        if 'contract_value' not in columns:
+            print("Contract value split migration not needed (new database)")
+            return
+
+        print("Starting contract value split migration...")
+        print("  - Splitting contract_value into quoted_value and awarded_value")
+
+        # Step 1: Get all current data
+        cursor.execute("SELECT * FROM projects")
+        projects_data = cursor.fetchall()
+        cursor.execute("PRAGMA table_info(projects)")
+        old_columns = cursor.fetchall()
+        old_column_names = [col[1] for col in old_columns]
+
+        # Step 2: Create column mapping (old -> new)
+        # contract_value will be copied to BOTH new fields
+        column_mapping = {}
+        for old_col in old_column_names:
+            if old_col == 'contract_value':
+                column_mapping[old_col] = ['quoted_value', 'awarded_value']  # Split into two
+            else:
+                column_mapping[old_col] = [old_col]  # Keep as-is
+
+        # Step 3: Build new column list
+        new_column_names = []
+        for old_col in old_column_names:
+            new_cols = column_mapping[old_col]
+            new_column_names.extend(new_cols)
+
+        # Step 4: Transform data for new schema
+        transformed_data = []
+        for row in projects_data:
+            new_row = []
+            for i, old_col in enumerate(old_column_names):
+                new_cols = column_mapping[old_col]
+                if old_col == 'contract_value':
+                    # Copy contract_value to both quoted_value and awarded_value
+                    new_row.append(row[i])  # quoted_value
+                    new_row.append(row[i])  # awarded_value
+                else:
+                    new_row.append(row[i])
+            transformed_data.append(tuple(new_row))
+
+        # Step 5: Drop old table
+        cursor.execute("DROP TABLE projects")
+
+        # Step 6: Create new table with updated schema
+        cursor.execute('''
+            CREATE TABLE projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                status TEXT,
+                start_date TEXT,
+                end_date TEXT,
+                quoted_value REAL,
+                awarded_value REAL,
+                client TEXT,
+                project_manager TEXT,
+                billable INTEGER DEFAULT 0,
+                created_at TEXT,
+                updated_at TEXT
+            )
+        ''')
+
+        # Step 7: Restore data
+        if transformed_data:
+            placeholders = ','.join('?' * len(new_column_names))
+            query = f"INSERT INTO projects ({','.join(new_column_names)}) VALUES ({placeholders})"
+            cursor.executemany(query, transformed_data)
+            print(f"  - Migrated {len(transformed_data)} projects to new schema")
+            print(f"  - Both quoted_value and awarded_value set to original contract_value")
+
+        self.conn.commit()
+        print("✅ Contract value split migration complete")
+        print("   - Added: quoted_value (original bid/quote)")
+        print("   - Added: awarded_value (actual funding)")
+        print("   - Removed: contract_value")
 
     def create_indexes(self):
         """

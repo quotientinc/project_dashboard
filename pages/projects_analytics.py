@@ -27,9 +27,14 @@ def render_project_analytics_tab(db, processor):
 
             fig = go.Figure()
             fig.add_trace(go.Bar(
-                name='Contract Value',
+                name='Quoted Value',
                 x=comparison_df['name'],
-                y=comparison_df['contract_value']
+                y=comparison_df['quoted_value']
+            ))
+            fig.add_trace(go.Bar(
+                name='Awarded Value',
+                x=comparison_df['name'],
+                y=comparison_df['awarded_value']
             ))
             fig.add_trace(go.Bar(
                 name='Accrued to Date',
@@ -37,7 +42,7 @@ def render_project_analytics_tab(db, processor):
                 y=comparison_df['budget_used']
             ))
             fig.update_layout(
-                title="Contract Value vs Accrued Amount",
+                title="Quoted vs Awarded vs Accrued Amount",
                 barmode='group',
                 height=400
             )

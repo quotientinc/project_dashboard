@@ -32,7 +32,7 @@ def render_project_list_tab(db, processor):
             # Calculate over budget count with NULL handling
             over_budget_count = 0
             for _, proj in projects_df.iterrows():
-                pct, _ = safe_budget_percentage(proj['budget_used'], proj['contract_value'])
+                pct, _ = safe_budget_percentage(proj['budget_used'], proj['quoted_value'])
                 if pct is not None and pct > 100:
                     over_budget_count += 1
 
@@ -44,16 +44,18 @@ def render_project_list_tab(db, processor):
             else:
                 # If is_billable column doesn't exist, assume all projects are billable
                 billable_projects = projects_df
-            missing_budget_count = len(billable_projects[pd.isna(billable_projects['contract_value'])])
+            missing_budget_count = len(billable_projects[
+                pd.isna(billable_projects['quoted_value']) | pd.isna(billable_projects['awarded_value'])
+            ])
             st.metric(
                 "Missing Budget",
                 missing_budget_count,
-                help="Billable projects without contract_value data",
+                help="Billable projects without quoted or awarded value data",
                 delta_color="inverse"
             )
         with col7:
-            total_budget = projects_df['contract_value'].sum()
-            st.metric("Total Budget", f"${total_budget/1e6:.1f}M")
+            total_quoted = projects_df['quoted_value'].sum()
+            st.metric("Total Quoted", f"${total_quoted/1e6:.1f}M")
 
         st.markdown("---")
 
@@ -89,11 +91,13 @@ def render_project_list_tab(db, processor):
             else:
                 # If is_billable column doesn't exist, assume all projects are billable
                 billable_projects = projects_df
-            billable_with_budget = len(billable_projects[pd.notna(billable_projects['contract_value'])])
+            billable_with_budget = len(billable_projects[
+                pd.notna(billable_projects['quoted_value']) & pd.notna(billable_projects['awarded_value'])
+            ])
             st.metric(
                 "Billable w/ Budget",
                 f"{billable_with_budget}/{len(billable_projects)}",
-                help="Billable projects with contract_value data"
+                help="Billable projects with quoted_value and awarded_value data"
             )
 
         # Optional search
@@ -127,17 +131,17 @@ def render_project_list_tab(db, processor):
         if sort_by == "Name (A-Z)":
             filtered_df = filtered_df.sort_values('name')
         elif sort_by == "Budget % Used (High to Low)":
-            # Calculate percentage, keeping NaN for missing data
+            # Calculate percentage, keeping NaN for missing data - use quoted_value
             filtered_df['budget_pct'] = filtered_df.apply(
-                lambda row: safe_budget_percentage(row['budget_used'], row['contract_value'])[0],
+                lambda row: safe_budget_percentage(row['budget_used'], row['quoted_value'])[0],
                 axis=1
             )
             # Sort with NaN last
             filtered_df = filtered_df.sort_values('budget_pct', ascending=False, na_position='last')
         elif sort_by == "Budget % Used (Low to High)":
-            # Calculate percentage, keeping NaN for missing data
+            # Calculate percentage, keeping NaN for missing data - use quoted_value
             filtered_df['budget_pct'] = filtered_df.apply(
-                lambda row: safe_budget_percentage(row['budget_used'], row['contract_value'])[0],
+                lambda row: safe_budget_percentage(row['budget_used'], row['quoted_value'])[0],
                 axis=1
             )
             # Sort with NaN last
@@ -175,13 +179,14 @@ def render_project_list_tab(db, processor):
                 axis=1
             )
 
-            # Budget - use safe helpers
-            display_df['Budget Allocated'] = filtered_df['contract_value'].apply(safe_currency_display)
+            # Budget - show both quoted and awarded values
+            display_df['Quoted Value'] = filtered_df['quoted_value'].apply(safe_currency_display)
+            display_df['Awarded Value'] = filtered_df['awarded_value'].apply(safe_currency_display)
             display_df['Budget Used'] = filtered_df['budget_used'].apply(safe_currency_display)
 
-            # Budget percentage - use safe calculation
+            # Budget percentage - use safe calculation with quoted_value
             budget_pcts = filtered_df.apply(
-                lambda row: safe_budget_percentage(row['budget_used'], row['contract_value'])[1],
+                lambda row: safe_budget_percentage(row['budget_used'], row['quoted_value'])[1],
                 axis=1
             )
             display_df['Budget %'] = budget_pcts

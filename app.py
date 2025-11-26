@@ -181,16 +181,16 @@ def calculate_sidebar_stats():
             current_year_end_date = current_year_end.date()
 
             for _, project in eligible_projects.iterrows():
-                # Skip if any required fields are null/NaN
-                if pd.isna(project['start_date']) or pd.isna(project['end_date']) or pd.isna(project['contract_value']):
+                # Skip if any required fields are null/NaN - use quoted_value
+                if pd.isna(project['start_date']) or pd.isna(project['end_date']) or pd.isna(project['quoted_value']):
                     continue
 
                 start_date = pd.to_datetime(project['start_date']).date()
                 end_date = pd.to_datetime(project['end_date']).date()
-                contract_value = float(project['contract_value'])
+                quoted_value = float(project['quoted_value'])
 
-                # Skip if contract_value is 0 or negative
-                if contract_value <= 0:
+                # Skip if quoted_value is 0 or negative
+                if quoted_value <= 0:
                     continue
 
                 # Calculate total project duration in days
@@ -215,11 +215,11 @@ def calculate_sidebar_stats():
                 total_months = total_days / avg_days_per_month
                 overlap_months = overlap_days / avg_days_per_month
 
-                prorated_value = (contract_value / total_months) * overlap_months
+                prorated_value = (quoted_value / total_months) * overlap_months
                 total_contract_value_avg += prorated_value
                 projects_ytd_count += 1
 
-                # Track contract value for projects that started this year
+                # Track quoted value for projects that started this year
                 if start_date >= current_year_start_date:
                     new_contract_value += prorated_value
 

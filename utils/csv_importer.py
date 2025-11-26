@@ -120,7 +120,8 @@ class TimesheetCSVImporter:
                 'status': 'Active',
                 'start_date': None,
                 'end_date': None,
-                'contract_value': None,
+                'quoted_value': None,
+                'awarded_value': None,
                 'client': None,
                 'project_manager': None,
                 'created_at': now,
@@ -569,9 +570,9 @@ class ProjectReferenceCSVImporter:
             start_date = self._parse_date(row.get('POP Start Date'))
             end_date = self._parse_date(row.get('POP End Date'))
 
-            # Parse currency values
-            contract_value = self._parse_currency(row.get('Total\nContract Value\n(All Mods)'))
-            contract_funding = self._parse_currency(row.get('Total\nContract Funding\n(All Mods)'))
+            # Parse currency values - map to quoted_value and awarded_value
+            quoted_value = self._parse_currency(row.get('Total\nContract Value\n(All Mods)'))
+            awarded_value = self._parse_currency(row.get('Total\nContract Funding\n(All Mods)'))
 
             # Default all projects to billable
             billable = 1
@@ -600,8 +601,8 @@ class ProjectReferenceCSVImporter:
                 'start_date': start_date,
                 'end_date': end_date,
                 'status': status,
-                'contract_value': contract_value,
-                'contract_funding': contract_funding,
+                'quoted_value': quoted_value,
+                'awarded_value': awarded_value,
                 'billable': billable,
                 'updated_at': now
             }

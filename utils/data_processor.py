@@ -51,10 +51,10 @@ class DataProcessor:
         
         health_metrics = project_df.copy()
         
-        # Budget health
+        # Budget health - use quoted_value as the budget baseline
         health_metrics['budget_health'] = (
-            (health_metrics['contract_value'] - health_metrics['budget_used']) / 
-            health_metrics['contract_value'] * 100
+            (health_metrics['quoted_value'] - health_metrics['budget_used']) /
+            health_metrics['quoted_value'] * 100
         ).fillna(0)
         
         # Schedule health (days remaining vs total days)
@@ -66,10 +66,10 @@ class DataProcessor:
         days_elapsed = (today - health_metrics['start_date']).dt.days
         health_metrics['schedule_progress'] = (days_elapsed / total_days * 100).clip(0, 100)
 
-        # Margin calculation: remaining budget as percentage of contract value
+        # Margin calculation: remaining budget as percentage of quoted value
         health_metrics['profit_margin'] = (
-            (health_metrics['contract_value'] - health_metrics['budget_used']) /
-            health_metrics['contract_value'] * 100
+            (health_metrics['quoted_value'] - health_metrics['budget_used']) /
+            health_metrics['quoted_value'] * 100
         ).fillna(0)
 
         # Overall health score (weighted average of budget health and schedule progress)
@@ -467,7 +467,7 @@ class DataProcessor:
             avg_daily_hours = daily_hours.mean()
             
             # Calculate remaining work (simplified)
-            total_budget_hours = project['contract_value'] / 150 if project['contract_value'] else 0
+            total_budget_hours = project['quoted_value'] / 150 if project['quoted_value'] else 0
             hours_used = project_time['hours'].sum()
             remaining_hours = max(0, total_budget_hours - hours_used)
             
@@ -840,7 +840,7 @@ class DataProcessor:
         if not hbm_df.empty:
             # Calculate project totals
             actual_cost = hbm_df['total_cost'].sum()
-            current_funding = project.get('contract_value', 0)
+            current_funding = project.get('quoted_value', 0)
             balance = current_funding - actual_cost
 
             return hbm_df, {
