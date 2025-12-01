@@ -147,18 +147,32 @@ def render_employee_detail_tab(db, processor):
                                 # Get employee's cost_rate to use as bill_rate
                                 bill_rate = employee.get('cost_rate', None)
 
-                                allocation_data = {
-                                    'project_id': selected_proj['id'],
-                                    'employee_id': employee_id,
-                                    'allocated_fte': allocated_fte,
-                                    'start_date': alloc_start.strftime('%Y-%m-%d'),
-                                    'end_date': alloc_end.strftime('%Y-%m-%d'),
-                                    'role': role_in_project,
-                                    'bill_rate': bill_rate
-                                }
+                                # Generate monthly allocation records (matching Project Edit logic)
+                                # Create list of first-of-month dates between start and end
+                                months = pd.date_range(
+                                    start=pd.to_datetime(alloc_start).replace(day=1),
+                                    end=pd.to_datetime(alloc_end) + pd.DateOffset(months=1),
+                                    freq='MS'  # Month Start
+                                )[:-1]  # Remove extra month
 
-                                db.add_allocation(allocation_data)
-                                st.success(f"Added {employee['name']} to {project_name}!")
+                                # Create one allocation record per month
+                                records_created = 0
+                                for month_date in months:
+                                    allocation_data = {
+                                        'project_id': selected_proj['id'],
+                                        'employee_id': employee_id,
+                                        'allocated_fte': allocated_fte,
+                                        'allocation_date': month_date.strftime('%Y-%m'),  # Monthly allocation_date
+                                        'role': role_in_project,
+                                        'bill_rate': bill_rate,
+                                        'start_date': alloc_start.strftime('%Y-%m-%d'),
+                                        'end_date': alloc_end.strftime('%Y-%m-%d')
+                                    }
+
+                                    db.add_allocation(allocation_data)
+                                    records_created += 1
+
+                                st.success(f"Added {employee['name']} to {project_name}! Created {records_created} monthly allocation record(s).")
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Error adding to project: {str(e)}")
