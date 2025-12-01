@@ -39,71 +39,126 @@ def render_employee_detail_tab(db, processor):
                 allocations_df = db.get_allocations(employee_id=employee_id)
 
                 if not allocations_df.empty:
-                    # Group allocations by month
+                    # Parse allocation dates
                     allocations_df['allocation_date'] = pd.to_datetime(allocations_df['allocation_date'])
-                    allocations_df['month_key'] = allocations_df['allocation_date'].dt.strftime('%B %Y')
-                    allocations_df['sort_key'] = allocations_df['allocation_date'].dt.to_period('M')
+                    allocations_df['year'] = allocations_df['allocation_date'].dt.year
+                    allocations_df['month'] = allocations_df['allocation_date'].dt.month
 
-                    # Group by month
-                    grouped = allocations_df.groupby('month_key')
-
-                    # Sort months chronologically
-                    month_order = allocations_df.sort_values('sort_key')['month_key'].unique()
+                    # Get available years
+                    available_years = sorted(allocations_df['year'].unique(), reverse=True)
 
                     st.markdown("##### Current Allocations by Month")
 
-                    for month in month_order:
-                        month_allocs = allocations_df[allocations_df['month_key'] == month]
+                    # Year selector
+                    selected_year = st.selectbox(
+                        "Select Year",
+                        options=available_years,
+                        key=f"alloc_year_select_{employee_id}"
+                    )
 
-                        # Calculate total FTE for this month
-                        total_fte = month_allocs['allocated_fte'].sum()
+                    # Filter to selected year
+                    year_allocs = allocations_df[allocations_df['year'] == selected_year].copy()
 
-                        # Calculate allocation percentage
-                        allocation_pct = (total_fte / target_fte * 100) if target_fte > 0 else 0
+                    # Get unique projects for this year
+                    unique_projects = year_allocs[['project_id', 'project_name']].drop_duplicates()
 
-                        # Determine color and emoji based on allocation
-                        if allocation_pct > 120:
-                            emoji = "🔴"
-                            bg_color = "#ffcccc"
-                        elif allocation_pct >= 100:
-                            emoji = "🟡"
-                            bg_color = "#fff9cc"
-                        elif allocation_pct >= 80:
-                            emoji = "🟢"
-                            bg_color = "#ccffcc"
-                        else:
-                            emoji = "🔵"
-                            bg_color = "#cce5ff"
+                    # Build table with projects as rows, months as columns
+                    table_rows = []
 
-                        # Display month header with color coding
-                        st.markdown(
-                            f"<div style='background-color: {bg_color}; padding: 10px; border-radius: 5px; margin: 10px 0;'>"
-                            f"<b>📅 {month} ({total_fte:.1f} FTE of {target_fte:.1f} Target FTE) {emoji}</b>"
-                            f"</div>",
-                            unsafe_allow_html=True
+                    for _, proj in unique_projects.iterrows():
+                        proj_allocs = year_allocs[year_allocs['project_id'] == proj['project_id']]
+
+                        row = {
+                            'project_id': proj['project_id'],
+                            'Project': proj['project_name']
+                        }
+
+                        # Add columns for each month (Jan-Dec)
+                        for month_num in range(1, 13):
+                            month_data = proj_allocs[proj_allocs['month'] == month_num]
+
+                            month_abbr = pd.Timestamp(year=selected_year, month=month_num, day=1).strftime('%b')
+
+                            if not month_data.empty:
+                                row[f'{month_abbr} FTE'] = float(month_data['allocated_fte'].iloc[0])
+                                row[f'{month_abbr} Rate'] = float(month_data['bill_rate'].iloc[0]) if pd.notna(month_data['bill_rate'].iloc[0]) else 0.0
+                            else:
+                                row[f'{month_abbr} FTE'] = 0.0
+                                row[f'{month_abbr} Rate'] = 0.0
+
+                        table_rows.append(row)
+
+                    # Create DataFrame
+                    display_df = pd.DataFrame(table_rows)
+
+                    # Build column configuration
+                    column_config = {
+                        'project_id': None,  # Hide project_id
+                        'Project': st.column_config.TextColumn(
+                            'Project',
+                            width='medium',
+                            disabled=True
+                        )
+                    }
+
+                    # Add month columns
+                    for month_num in range(1, 13):
+                        month_abbr = pd.Timestamp(year=selected_year, month=month_num, day=1).strftime('%b')
+
+                        column_config[f'{month_abbr} FTE'] = st.column_config.NumberColumn(
+                            f'{month_abbr} FTE',
+                            help=f'FTE allocation for {month_abbr} {selected_year}',
+                            format='%.2f',
+                            width='small',
+                            disabled=True
                         )
 
-                        # Display allocations for this month
-                        for _, alloc in month_allocs.iterrows():
-                            col1, col2, col3 = st.columns([4, 2, 1])
+                        column_config[f'{month_abbr} Rate'] = st.column_config.NumberColumn(
+                            f'{month_abbr} Rate',
+                            help=f'Bill rate for {month_abbr} {selected_year}',
+                            format='$%.2f',
+                            width='small',
+                            disabled=True
+                        )
 
-                            with col1:
-                                st.write(f"  • **{alloc['project_name']}**")
+                    # Display table
+                    st.dataframe(
+                        display_df,
+                        column_config=column_config,
+                        hide_index=True,
+                        use_container_width=True,
+                        height=400
+                    )
 
-                            with col2:
-                                fte = alloc.get('allocated_fte', 0)
-                                st.write(f"{fte:.2f} FTE")
+                    # Calculate and display monthly totals
+                    st.markdown("##### Monthly Totals")
+                    total_cols = st.columns(12)
 
-                            with col3:
-                                if st.button("Remove", key=f"remove_emp_alloc_{alloc['id']}"):
-                                    try:
-                                        db.delete_allocation(alloc['id'])
-                                        st.success(f"Removed from {alloc['project_name']}")
-                                        st.rerun()
-                                    except Exception as e:
-                                        st.error(f"Error removing allocation: {str(e)}")
+                    for month_num in range(1, 13):
+                        month_abbr = pd.Timestamp(year=selected_year, month=month_num, day=1).strftime('%b')
+                        month_total = display_df[f'{month_abbr} FTE'].sum()
 
-                        st.markdown("")  # Add spacing between months
+                        # Calculate allocation percentage
+                        allocation_pct = (month_total / target_fte * 100) if target_fte > 0 else 0
+
+                        # Determine color based on allocation
+                        if allocation_pct > 120:
+                            emoji = "🔴"
+                        elif allocation_pct >= 100:
+                            emoji = "🟡"
+                        elif allocation_pct >= 80:
+                            emoji = "🟢"
+                        else:
+                            emoji = "🔵"
+
+                        with total_cols[month_num - 1]:
+                            st.metric(
+                                label=month_abbr,
+                                value=f"{month_total:.2f}",
+                                delta=f"{allocation_pct:.0f}% {emoji}",
+                                help=f"Target: {target_fte:.2f} FTE"
+                            )
+
                 else:
                     st.info("Not allocated to any projects")
 
