@@ -20,6 +20,7 @@ class DatabaseManager:
         self.migrate_time_entries_bill_rate()
         self.migrate_projects_schema_cleanup()
         self.migrate_contract_value_split()
+        self.migrate_remove_deprecated_allocation_columns()
         self.create_indexes()
 
     def create_tables(self):
@@ -524,6 +525,94 @@ class DatabaseManager:
         print("   - Added: quoted_value (original bid/quote)")
         print("   - Added: awarded_value (actual funding)")
         print("   - Removed: contract_value")
+
+    def migrate_remove_deprecated_allocation_columns(self):
+        """
+        Remove deprecated columns from allocations table:
+        - start_date (stored but never queried)
+        - end_date (stored but never queried)
+        - working_days (never populated)
+        - remaining_days (never populated)
+
+        With monthly allocation_date as source of truth, these are redundant.
+        This migration is safe to run multiple times.
+        """
+        cursor = self.conn.cursor()
+
+        # Check current schema
+        cursor.execute("PRAGMA table_info(allocations)")
+        columns = [col[1] for col in cursor.fetchall()]
+
+        # Check if migration already completed
+        if 'start_date' not in columns and 'end_date' not in columns:
+            print("Deprecated allocation columns already removed")
+            return
+
+        print("Starting allocation table cleanup migration...")
+        print("  - Removing: start_date, end_date, working_days, remaining_days")
+
+        # Step 1: Get all current data
+        cursor.execute("SELECT * FROM allocations")
+        allocations_data = cursor.fetchall()
+        cursor.execute("PRAGMA table_info(allocations)")
+        old_columns = cursor.fetchall()
+        old_column_names = [col[1] for col in old_columns]
+
+        # Step 2: Define new schema (only keep essential columns)
+        new_columns = [
+            'id', 'project_id', 'employee_id', 'allocated_fte',
+            'allocation_date', 'role', 'bill_rate', 'created_at', 'updated_at'
+        ]
+
+        # Step 3: Extract data for columns we're keeping
+        col_indexes = []
+        for new_col in new_columns:
+            if new_col in old_column_names:
+                col_indexes.append(old_column_names.index(new_col))
+            else:
+                col_indexes.append(None)  # Column doesn't exist yet
+
+        new_data = []
+        for row in allocations_data:
+            new_row = []
+            for idx in col_indexes:
+                if idx is not None:
+                    new_row.append(row[idx])
+                else:
+                    new_row.append(None)
+            new_data.append(tuple(new_row))
+
+        # Step 4: Drop old table
+        cursor.execute("DROP TABLE allocations")
+
+        # Step 5: Create new table with clean schema
+        cursor.execute('''
+            CREATE TABLE allocations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT,
+                employee_id INTEGER,
+                allocated_fte REAL,
+                allocation_date TEXT,
+                role TEXT,
+                bill_rate REAL,
+                created_at TEXT,
+                updated_at TEXT,
+                FOREIGN KEY (project_id) REFERENCES projects (id),
+                FOREIGN KEY (employee_id) REFERENCES employees (id)
+            )
+        ''')
+
+        # Step 6: Restore data
+        if new_data:
+            placeholders = ','.join('?' * len(new_columns))
+            query = f"INSERT INTO allocations ({','.join(new_columns)}) VALUES ({placeholders})"
+            cursor.executemany(query, new_data)
+            print(f"  - Migrated {len(new_data)} allocation records")
+
+        self.conn.commit()
+        print("✅ Allocation table cleanup complete")
+        print("   - Removed: start_date, end_date, working_days, remaining_days")
+        print("   - Kept: allocation_date (source of truth)")
 
     def create_indexes(self):
         """

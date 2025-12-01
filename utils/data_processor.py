@@ -543,61 +543,6 @@ class DataProcessor:
         return pd.DataFrame(results)
     
     @staticmethod
-    def calculate_fte_requirements(
-        project_df: pd.DataFrame,
-        allocations_df: pd.DataFrame,
-        time_period: str = 'monthly'
-    ) -> pd.DataFrame:
-        """Calculate FTE requirements by project and time period"""
-        if allocations_df.empty:
-            return pd.DataFrame()
-        
-        allocations_df['start_date'] = pd.to_datetime(allocations_df['start_date'])
-        allocations_df['end_date'] = pd.to_datetime(allocations_df['end_date'])
-        
-        # Create date range
-        date_range = pd.date_range(
-            start=allocations_df['start_date'].min(),
-            end=allocations_df['end_date'].max(),
-            freq='D'
-        )
-        
-        fte_requirements = []
-        
-        for date in date_range:
-            # Find active allocations for this date
-            active = allocations_df[
-                (allocations_df['start_date'] <= date) & 
-                (allocations_df['end_date'] >= date)
-            ]
-            
-            if not active.empty:
-                # Calculate FTE by project
-                project_fte = active.groupby('project_name')['allocated_fte'].sum()
-
-                for project, fte in project_fte.items():
-                    fte_requirements.append({
-                        'date': date,
-                        'project': project,
-                        'fte_required': fte
-                    })
-        
-        fte_df = pd.DataFrame(fte_requirements)
-        
-        if not fte_df.empty:
-            # Aggregate by time period
-            if time_period == 'weekly':
-                fte_df['period'] = fte_df['date'].dt.to_period('W').astype(str)
-            elif time_period == 'monthly':
-                fte_df['period'] = fte_df['date'].dt.to_period('M').astype(str)
-            else:
-                fte_df['period'] = fte_df['date'].dt.to_period('Q').astype(str)
-
-            fte_summary = fte_df.groupby(['period', 'project'])['fte_required'].mean().reset_index()
-            return fte_summary
-
-        return pd.DataFrame()
-
     @staticmethod
     def calculate_working_days(year: int, month: int, project_working_days: Dict = None) -> Dict:
         """Calculate working days for a given month

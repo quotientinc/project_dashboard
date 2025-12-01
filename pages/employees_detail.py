@@ -162,11 +162,9 @@ def render_employee_detail_tab(db, processor):
                                         'project_id': selected_proj['id'],
                                         'employee_id': employee_id,
                                         'allocated_fte': allocated_fte,
-                                        'allocation_date': month_date.strftime('%Y-%m'),  # Monthly allocation_date
+                                        'allocation_date': month_date.strftime('%Y-%m'),  # Monthly allocation_date (source of truth)
                                         'role': role_in_project,
-                                        'bill_rate': bill_rate,
-                                        'start_date': alloc_start.strftime('%Y-%m-%d'),
-                                        'end_date': alloc_end.strftime('%Y-%m-%d')
+                                        'bill_rate': bill_rate
                                     }
 
                                     db.add_allocation(allocation_data)

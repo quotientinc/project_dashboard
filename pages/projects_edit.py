@@ -371,9 +371,7 @@ def render_project_edit_tab(db, processor):
                                                 'allocated_fte': float(fte_val),
                                                 'allocation_date': month_date.strftime('%Y-%m'),
                                                 'role': new_emp['role'],
-                                                'bill_rate': float(rate_val),
-                                                'start_date': project['start_date'],
-                                                'end_date': project['end_date']
+                                                'bill_rate': float(rate_val)
                                             })
 
                                 # Process modifications
@@ -402,9 +400,7 @@ def render_project_edit_tab(db, processor):
                                             'allocated_fte': float(change['new_fte']),
                                             'allocation_date': month_allocation_date,
                                             'role': change['role'],
-                                            'bill_rate': float(change['new_rate']),
-                                            'start_date': project['start_date'],
-                                            'end_date': project['end_date']
+                                            'bill_rate': float(change['new_rate'])
                                         })
 
                                 # Clear session state and show success
