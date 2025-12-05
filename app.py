@@ -78,6 +78,16 @@ overview_page = st.Page(
     icon="📊",
     default=True
 )
+project_details_page = st.Page(
+    "pages/project_details.py",
+    title="Project Details",
+    icon="📋"
+)
+employee_utilization_page = st.Page(
+    "pages/employee_utilization.py",
+    title="Employee Utilization",
+    icon="📊"
+)
 projects_page = st.Page(
     "pages/projects.py",
     title="Projects",
@@ -122,6 +132,8 @@ budget_mockup_page = st.Page(
 # Create navigation
 pg = st.navigation([
     overview_page,
+    project_details_page,
+    employee_utilization_page,
     projects_page,
     employees_page,
     timesheets_page,
