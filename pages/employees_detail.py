@@ -38,199 +38,348 @@ def render_employee_detail_tab(db, processor):
                 # Current allocations
                 allocations_df = db.get_allocations(employee_id=employee_id)
 
+                # Parse allocation dates
+                allocations_df['allocation_date'] = pd.to_datetime(allocations_df['allocation_date'])
+                allocations_df['year'] = allocations_df['allocation_date'].dt.year
+                allocations_df['month'] = allocations_df['allocation_date'].dt.month
+
+                # Get available years (or default to current year if no allocations)
                 if not allocations_df.empty:
-                    # Parse allocation dates
-                    allocations_df['allocation_date'] = pd.to_datetime(allocations_df['allocation_date'])
-                    allocations_df['year'] = allocations_df['allocation_date'].dt.year
-                    allocations_df['month'] = allocations_df['allocation_date'].dt.month
-
-                    # Get available years
                     available_years = sorted(allocations_df['year'].unique(), reverse=True)
+                else:
+                    available_years = [pd.Timestamp.now().year]
 
-                    st.markdown("##### Current Allocations by Month")
+                st.markdown("##### Project Allocations by Month")
 
-                    # Year selector
-                    selected_year = st.selectbox(
-                        "Select Year",
-                        options=available_years,
-                        key=f"alloc_year_select_{employee_id}"
-                    )
+                # Year selector
+                selected_year = st.selectbox(
+                    "Select Year",
+                    options=available_years,
+                    key=f"alloc_year_select_{employee_id}"
+                )
 
-                    # Filter to selected year
+                # Filter to selected year
+                if not allocations_df.empty:
                     year_allocs = allocations_df[allocations_df['year'] == selected_year].copy()
-
-                    # Get unique projects for this year
                     unique_projects = year_allocs[['project_id', 'project_name']].drop_duplicates()
+                else:
+                    year_allocs = pd.DataFrame()
+                    unique_projects = pd.DataFrame()
 
-                    # Build table with projects as rows, months as columns
-                    table_rows = []
+                # Get all projects for dropdown
+                projects_df = db.get_projects()
 
+                # Build table with projects as rows, months as columns
+                table_rows = []
+
+                if not unique_projects.empty:
                     for _, proj in unique_projects.iterrows():
                         proj_allocs = year_allocs[year_allocs['project_id'] == proj['project_id']]
 
+                        # Get role from any allocation record
+                        role = proj_allocs['role'].iloc[0] if pd.notna(proj_allocs['role'].iloc[0]) else ''
+
                         row = {
                             'project_id': proj['project_id'],
-                            'Project': proj['project_name']
+                            'project_name': proj['project_name'],
+                            'role': role
                         }
 
                         # Add columns for each month (Jan-Dec)
                         for month_num in range(1, 13):
                             month_data = proj_allocs[proj_allocs['month'] == month_num]
-
                             month_abbr = pd.Timestamp(year=selected_year, month=month_num, day=1).strftime('%b')
 
                             if not month_data.empty:
-                                row[f'{month_abbr} FTE'] = float(month_data['allocated_fte'].iloc[0])
-                                row[f'{month_abbr} Rate'] = float(month_data['bill_rate'].iloc[0]) if pd.notna(month_data['bill_rate'].iloc[0]) else 0.0
+                                row[f'fte_{month_num}'] = float(month_data['allocated_fte'].iloc[0])
+                                row[f'rate_{month_num}'] = float(month_data['bill_rate'].iloc[0]) if pd.notna(month_data['bill_rate'].iloc[0]) else 0.0
                             else:
-                                row[f'{month_abbr} FTE'] = 0.0
-                                row[f'{month_abbr} Rate'] = 0.0
+                                row[f'fte_{month_num}'] = 0.0
+                                row[f'rate_{month_num}'] = 0.0
 
                         table_rows.append(row)
 
-                    # Create DataFrame
-                    display_df = pd.DataFrame(table_rows)
-
-                    # Build column configuration
-                    column_config = {
-                        'project_id': None,  # Hide project_id
-                        'Project': st.column_config.TextColumn(
-                            'Project',
-                            width='medium',
-                            disabled=True
-                        )
-                    }
-
-                    # Add month columns
+                # Create DataFrame (with correct columns even if empty)
+                if table_rows:
+                    editor_df = pd.DataFrame(table_rows)
+                else:
+                    columns = ['project_id', 'project_name', 'role']
                     for month_num in range(1, 13):
-                        month_abbr = pd.Timestamp(year=selected_year, month=month_num, day=1).strftime('%b')
+                        columns.extend([f'fte_{month_num}', f'rate_{month_num}'])
+                    editor_df = pd.DataFrame(columns=columns)
 
-                        column_config[f'{month_abbr} FTE'] = st.column_config.NumberColumn(
-                            f'{month_abbr} FTE',
-                            help=f'FTE allocation for {month_abbr} {selected_year}',
-                            format='%.2f',
-                            width='small',
-                            disabled=True
-                        )
+                # Store original for change detection
+                if 'original_employee_allocations' not in st.session_state or st.session_state.get('current_employee_id') != employee_id or st.session_state.get('current_alloc_year') != selected_year:
+                    st.session_state.original_employee_allocations = editor_df.copy()
+                    st.session_state.current_employee_id = employee_id
+                    st.session_state.current_alloc_year = selected_year
 
-                        column_config[f'{month_abbr} Rate'] = st.column_config.NumberColumn(
-                            f'{month_abbr} Rate',
-                            help=f'Bill rate for {month_abbr} {selected_year}',
-                            format='$%.2f',
-                            width='small',
-                            disabled=True
-                        )
+                # Build column configuration
+                column_config = {
+                    'project_id': None,  # Hide project_id (it's a TEXT field, not numeric)
+                    'project_name': st.column_config.SelectboxColumn(
+                        'Project',
+                        help='Select project to add',
+                        options=projects_df['name'].tolist(),
+                        required=True,
+                        width='medium'
+                    ),
+                    'role': st.column_config.TextColumn(
+                        'Role',
+                        help='Your role on this project',
+                        max_chars=50,
+                        width='medium'
+                    )
+                }
 
-                    # Display table
-                    st.dataframe(
-                        display_df,
-                        column_config=column_config,
-                        hide_index=True,
-                        use_container_width=True,
-                        height=400
+                # Add month columns - alternating FTE and Rate
+                for month_num in range(1, 13):
+                    month_abbr = pd.Timestamp(year=selected_year, month=month_num, day=1).strftime('%b')
+
+                    # FTE column
+                    column_config[f'fte_{month_num}'] = st.column_config.NumberColumn(
+                        f'{month_abbr} FTE',
+                        help=f'FTE allocation for {month_abbr} {selected_year} (0.0-2.0)',
+                        min_value=0.0,
+                        max_value=2.0,
+                        step=0.05,
+                        format='%.2f',
+                        width='small'
                     )
 
-                    # Calculate and display monthly totals
-                    st.markdown("##### Monthly Totals")
-                    total_cols = st.columns(12)
+                    # Bill Rate column
+                    column_config[f'rate_{month_num}'] = st.column_config.NumberColumn(
+                        f'{month_abbr} Rate',
+                        help=f'Hourly bill rate for {month_abbr} {selected_year}',
+                        min_value=0.0,
+                        max_value=500.0,
+                        step=5.0,
+                        format='$%.2f',
+                        width='small'
+                    )
 
-                    for month_num in range(1, 13):
-                        month_abbr = pd.Timestamp(year=selected_year, month=month_num, day=1).strftime('%b')
-                        month_total = display_df[f'{month_abbr} FTE'].sum()
+                # Display editable table
+                edited_df = st.data_editor(
+                    editor_df,
+                    column_config=column_config,
+                    width='stretch',
+                    hide_index=True,
+                    num_rows="dynamic",  # Allow adding/deleting rows
+                    key=f'employee_allocation_editor_{employee_id}_{selected_year}',
+                    height=400
+                )
 
-                        # Calculate allocation percentage
-                        allocation_pct = (month_total / target_fte * 100) if target_fte > 0 else 0
+                # Info helper
+                st.caption("""
+💡 **Tips:**
+- Click **+** to add a new project row
+- Click **🗑️** to remove a project
+- Edit FTE values (0.0-2.0) and Bill Rates per month
+- Only months with non-zero FTE or Rate will create allocation records
+- Changes are saved when you click **Save Changes**
+                """)
 
-                        # Determine color based on allocation
-                        if allocation_pct > 120:
-                            emoji = "🔴"
-                        elif allocation_pct >= 100:
-                            emoji = "🟡"
-                        elif allocation_pct >= 80:
-                            emoji = "🟢"
-                        else:
-                            emoji = "🔵"
+                # Calculate and display monthly totals
+                st.markdown("##### Monthly Totals")
+                total_cols = st.columns(12)
 
-                        with total_cols[month_num - 1]:
-                            st.metric(
-                                label=month_abbr,
-                                value=f"{month_total:.2f}",
-                                delta=f"{allocation_pct:.0f}% {emoji}",
-                                help=f"Target: {target_fte:.2f} FTE"
-                            )
+                for month_num in range(1, 13):
+                    month_abbr = pd.Timestamp(year=selected_year, month=month_num, day=1).strftime('%b')
+                    month_total = edited_df[f'fte_{month_num}'].sum()
 
-                else:
-                    st.info("Not allocated to any projects")
+                    # Calculate allocation percentage
+                    allocation_pct = (month_total / target_fte * 100) if target_fte > 0 else 0
 
-                # Add new allocation
-                st.markdown("##### Add to Project")
+                    # Determine color based on allocation
+                    if allocation_pct > 120:
+                        emoji = "🔴"
+                    elif allocation_pct >= 100:
+                        emoji = "🟡"
+                    elif allocation_pct >= 80:
+                        emoji = "🟢"
+                    else:
+                        emoji = "🔵"
 
-                projects_df = db.get_projects()
+                    with total_cols[month_num - 1]:
+                        st.metric(
+                            label=month_abbr,
+                            value=f"{month_total:.2f}",
+                            delta=f"{allocation_pct:.0f}% {emoji}",
+                            help=f"Target: {target_fte:.2f} FTE"
+                        )
 
-                # Filter out projects already allocated
-                if not allocations_df.empty:
-                    allocated_proj_ids = allocations_df['project_id'].tolist()
-                    available_projects = projects_df[~projects_df['id'].isin(allocated_proj_ids)]
-                else:
-                    available_projects = projects_df
+                # Detect changes
+                changes = []
+                new_projects = []
+                deleted_projects = []
 
-                if not available_projects.empty:
-                    with st.form(key=f"add_alloc_employee_{employee_id}"):
-                        col1, col2 = st.columns(2)
+                # Check for new rows (project_id is empty/NaN for new)
+                for idx, row in edited_df.iterrows():
+                    proj_id = row.get('project_id')
+                    # Check if project_id is empty, NaN, or empty string
+                    if pd.isna(proj_id) or proj_id == '' or proj_id == 0:
+                        # New project - need to create allocations
+                        project_name = row.get('project_name')
+                        if project_name:
+                            # Look up project_id from projects_df
+                            proj_match = projects_df[projects_df['name'] == project_name]
+                            if not proj_match.empty:
+                                new_projects.append({
+                                    'idx': idx,
+                                    'project_id': proj_match.iloc[0]['id'],  # Keep as TEXT
+                                    'project_name': project_name,
+                                    'role': row.get('role', ''),
+                                    'row': row
+                                })
 
-                        with col1:
-                            project_name = st.selectbox(
-                                "Select Project",
-                                options=available_projects['name'].tolist(),
-                                key=f"new_proj_select_{employee_id}"
-                            )
-                            allocated_fte = st.number_input("Allocation (FTE)", min_value=0.0, max_value=1.0, step=0.05, value=0.5, key=f"emp_alloc_{employee_id}", help="0.5 = 50% of full-time, 1.0 = 100% full-time")
+                # Check for deleted rows (in original but not in edited)
+                original_ids = set(st.session_state.original_employee_allocations['project_id'].dropna())
+                edited_ids = set(edited_df['project_id'].dropna())
+                deleted_ids = original_ids - edited_ids
 
-                        with col2:
-                            role_in_project = st.text_input("Role in Project", key=f"emp_role_{employee_id}")
+                if deleted_ids:
+                    for proj_id in deleted_ids:
+                        proj_name = st.session_state.original_employee_allocations[
+                            st.session_state.original_employee_allocations['project_id'] == proj_id
+                        ]['project_name'].iloc[0]
+                        deleted_projects.append({'project_id': proj_id, 'project_name': proj_name})
 
-                        selected_proj = available_projects[available_projects['name'] == project_name].iloc[0]
+                # Check for modified values (FTE or Rate changed)
+                for idx, row in edited_df.iterrows():
+                    proj_id = row.get('project_id')
 
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            alloc_start = st.date_input("Start Date", value=pd.to_datetime(selected_proj['start_date']), key=f"emp_alloc_start_{employee_id}")
-                        with col2:
-                            alloc_end = st.date_input("End Date", value=pd.to_datetime(selected_proj['end_date']), key=f"emp_alloc_end_{employee_id}")
+                    # Skip if project_id is empty/NaN (new rows handled above)
+                    if pd.notna(proj_id) and proj_id != '' and proj_id != 0:
+                        # Find original row (project_id is TEXT, no conversion needed)
+                        orig_row = st.session_state.original_employee_allocations[
+                            st.session_state.original_employee_allocations['project_id'] == proj_id
+                        ]
 
-                        if st.form_submit_button("Add to Project"):
+                        if not orig_row.empty:
+                            orig_row = orig_row.iloc[0]
+
+                            # Check each month for changes
+                            for month_num in range(1, 13):
+                                # Check FTE change
+                                orig_fte = orig_row.get(f'fte_{month_num}', 0.0)
+                                new_fte = row.get(f'fte_{month_num}', 0.0)
+
+                                # Check Rate change
+                                orig_rate = orig_row.get(f'rate_{month_num}', 0.0)
+                                new_rate = row.get(f'rate_{month_num}', 0.0)
+
+                                if orig_fte != new_fte or orig_rate != new_rate:
+                                    month_abbr = pd.Timestamp(year=selected_year, month=month_num, day=1).strftime('%b')
+                                    changes.append({
+                                        'project_id': proj_id,
+                                        'project_name': row.get('project_name'),
+                                        'month_num': month_num,
+                                        'month_abbr': month_abbr,
+                                        'orig_fte': orig_fte,
+                                        'new_fte': new_fte,
+                                        'orig_rate': orig_rate,
+                                        'new_rate': new_rate,
+                                        'role': row.get('role', '')
+                                    })
+
+                # Count total changes
+                total_changes = len(changes) + len(new_projects) + len(deleted_projects)
+
+                # Show save button if changes detected
+                if total_changes > 0:
+                    col1, col2 = st.columns([4, 1])
+
+                    with col1:
+                        # Summary of changes
+                        change_summary = []
+                        if new_projects:
+                            change_summary.append(f"{len(new_projects)} project(s) added")
+                        if deleted_projects:
+                            change_summary.append(f"{len(deleted_projects)} project(s) removed")
+                        if changes:
+                            change_summary.append(f"{len(changes)} allocation(s) modified")
+
+                        st.info(f"ℹ️ Unsaved changes: {', '.join(change_summary)}")
+
+                    with col2:
+                        if st.button("💾 Save Changes", type="primary", key=f"save_emp_alloc_{employee_id}"):
                             try:
-                                # Get employee's cost_rate to use as bill_rate
-                                bill_rate = employee.get('cost_rate', None)
+                                # Process deletions first
+                                for deleted in deleted_projects:
+                                    # Delete all allocations for this project for this employee in this year
+                                    proj_allocs = allocations_df[
+                                        (allocations_df['project_id'] == deleted['project_id']) &
+                                        (allocations_df['year'] == selected_year)
+                                    ]
+                                    for _, alloc in proj_allocs.iterrows():
+                                        db.delete_allocation(alloc['id'])
 
-                                # Generate monthly allocation records (matching Project Edit logic)
-                                # Create list of first-of-month dates between start and end
-                                months = pd.date_range(
-                                    start=pd.to_datetime(alloc_start).replace(day=1),
-                                    end=pd.to_datetime(alloc_end) + pd.DateOffset(months=1),
-                                    freq='MS'  # Month Start
-                                )[:-1]  # Remove extra month
+                                # Process new projects
+                                for new_proj in new_projects:
+                                    # Create allocation records for months with non-zero FTE or Rate
+                                    for month_num in range(1, 13):
+                                        fte_val = new_proj['row'].get(f'fte_{month_num}', 0.0)
+                                        rate_val = new_proj['row'].get(f'rate_{month_num}', 0.0)
 
-                                # Create one allocation record per month
-                                records_created = 0
-                                for month_date in months:
-                                    allocation_data = {
-                                        'project_id': selected_proj['id'],
-                                        'employee_id': employee_id,
-                                        'allocated_fte': allocated_fte,
-                                        'allocation_date': month_date.strftime('%Y-%m'),  # Monthly allocation_date (source of truth)
-                                        'role': role_in_project,
-                                        'bill_rate': bill_rate
-                                    }
+                                        # Only create if FTE or Rate is non-zero
+                                        if fte_val != 0.0 or rate_val != 0.0:
+                                            allocation_date = f"{selected_year}-{month_num:02d}"
+                                            db.add_allocation({
+                                                'project_id': new_proj['project_id'],
+                                                'employee_id': employee_id,
+                                                'allocated_fte': float(fte_val),
+                                                'allocation_date': allocation_date,
+                                                'role': new_proj['role'],
+                                                'bill_rate': float(rate_val)
+                                            })
 
-                                    db.add_allocation(allocation_data)
-                                    records_created += 1
+                                # Process modifications
+                                for change in changes:
+                                    allocation_date = f"{selected_year}-{change['month_num']:02d}"
 
-                                st.success(f"Added {employee['name']} to {project_name}! Created {records_created} monthly allocation record(s).")
+                                    # Find existing allocation record
+                                    existing = allocations_df[
+                                        (allocations_df['project_id'] == change['project_id']) &
+                                        (allocations_df['employee_id'] == employee_id) &
+                                        (allocations_df['month'] == change['month_num']) &
+                                        (allocations_df['year'] == selected_year)
+                                    ]
+
+                                    if not existing.empty:
+                                        # Update existing record
+                                        allocation_id = existing.iloc[0]['id']
+                                        db.update_allocation(allocation_id, {
+                                            'allocated_fte': float(change['new_fte']),
+                                            'bill_rate': float(change['new_rate']),
+                                            'role': change['role']
+                                        })
+                                    else:
+                                        # Create new record (project exists but no allocation for this month)
+                                        if change['new_fte'] != 0.0 or change['new_rate'] != 0.0:
+                                            db.add_allocation({
+                                                'project_id': change['project_id'],
+                                                'employee_id': employee_id,
+                                                'allocated_fte': float(change['new_fte']),
+                                                'allocation_date': allocation_date,
+                                                'role': change['role'],
+                                                'bill_rate': float(change['new_rate'])
+                                            })
+
+                                # Clear session state and show success
+                                if 'original_employee_allocations' in st.session_state:
+                                    del st.session_state.original_employee_allocations
+                                if 'current_employee_id' in st.session_state:
+                                    del st.session_state.current_employee_id
+                                if 'current_alloc_year' in st.session_state:
+                                    del st.session_state.current_alloc_year
+
+                                st.success(f"✅ Successfully saved {total_changes} change(s)!")
                                 st.rerun()
+
                             except Exception as e:
-                                st.error(f"Error adding to project: {str(e)}")
+                                st.error(f"❌ Error saving changes: {str(e)}")
                 else:
-                    st.info("Employee is already allocated to all available projects")
+                    st.success("✅ All allocations saved")
 
             # Subtab 2: Edit Employee Data
             with detail_tab2:
