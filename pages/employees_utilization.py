@@ -13,6 +13,10 @@ def render_utilization_tab(db, processor):
     """Render the Employee Utilization Analysis tab with monthly and YTD metrics."""
     st.markdown("#### Employee Utilization Analysis")
 
+    # Initialize session state for grid selection versioning
+    if "grid_selection_version" not in st.session_state:
+        st.session_state.grid_selection_version = 0
+
     # Date range selection
     col1, col2 = st.columns([1, 1])
 
@@ -158,8 +162,12 @@ def render_utilization_tab(db, processor):
 
             return breakdown_pivot
 
+        def clear_grid_selection():
+            """Callback to clear grid selection when dialog is dismissed"""
+            st.session_state.grid_selection_version += 1
+
         # Dialog function for showing employee project breakdown
-        @st.dialog("Employee Project Breakdown", width="large")
+        @st.dialog("Employee Project Breakdown", width="large", on_dismiss=clear_grid_selection)
         def show_project_breakdown(emp_id, emp_name, month_key, time_entries_df):
             """Display project-level breakdown for a selected employee in a modal dialog"""
             st.markdown(f"### {emp_name}")
@@ -580,7 +588,7 @@ def render_utilization_tab(db, processor):
                 update_mode=GridUpdateMode.SELECTION_CHANGED,
                 allow_unsafe_jscode=True,  # Required for JsCode cell styling
                 theme='streamlit',
-                key="employee_utilization_aggrid"
+                key=f"employee_utilization_aggrid_v{st.session_state.grid_selection_version}"
             )
 
             # Handle row selection - open dialog to show project breakdown
