@@ -6,11 +6,16 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime
 import calendar
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 
 
 def render_utilization_tab(db, processor):
     """Render the Employee Utilization Analysis tab with monthly and YTD metrics."""
     st.markdown("#### Employee Utilization Analysis")
+
+    # Initialize session state for grid selection versioning
+    if "grid_selection_version" not in st.session_state:
+        st.session_state.grid_selection_version = 0
 
     # Date range selection
     col1, col2 = st.columns([1, 1])
@@ -157,8 +162,12 @@ def render_utilization_tab(db, processor):
 
             return breakdown_pivot
 
+        def clear_grid_selection():
+            """Callback to clear grid selection when dialog is dismissed"""
+            st.session_state.grid_selection_version += 1
+
         # Dialog function for showing employee project breakdown
-        @st.dialog("Employee Project Breakdown", width="large")
+        @st.dialog("Employee Project Breakdown", width="large", on_dismiss=clear_grid_selection)
         def show_project_breakdown(emp_id, emp_name, month_key, time_entries_df):
             """Display project-level breakdown for a selected employee in a modal dialog"""
             st.markdown(f"### {emp_name}")
@@ -460,40 +469,37 @@ def render_utilization_tab(db, processor):
                 'ytd_utilization_pct': '📅 YTD Billable Utilization %'
             })
 
-            # Conditional formatting
-            def color_utilization_status(val):
-                if val > 120:
-                    return 'background-color: #ffcccc'  # Red
-                elif val >= 100:
-                    return 'background-color: #fff9cc'  # Yellow
-                elif val >= 80:
-                    return 'background-color: #ccffcc'  # Green
-                else:
-                    return 'background-color: #cce5ff'  # Blue
+            # JsCode for conditional cell styling on Billable Utilization % column
+            utilization_cell_style = JsCode("""
+            function(params) {
+                if (params.value > 120) {
+                    return {'backgroundColor': '#ffcccc'};
+                } else if (params.value >= 100) {
+                    return {'backgroundColor': '#fff9cc'};
+                } else if (params.value >= 80) {
+                    return {'backgroundColor': '#ccffcc'};
+                } else {
+                    return {'backgroundColor': '#cce5ff'};
+                }
+            }
+            """)
 
-            def ytd_background(val):
-                return 'background-color: #f0f0f0'  # Light gray for YTD columns
+            # JsCode for YTD columns - light gray background
+            ytd_cell_style = JsCode("""
+            function(params) {
+                return {'backgroundColor': '#f0f0f0'};
+            }
+            """)
 
-            # Apply styling and formatting to display_df
-            styled_df = display_df.style.map(color_utilization_status, subset=['Billable Utilization %'])
-            styled_df = styled_df.map(ytd_background, subset=[
-                '📅 YTD Possible Billable Hrs',
-                '📅 YTD Actual Billable Hrs',
-                '📅 YTD Billable Utilization %'
-            ])
-
-            # Format numeric columns to 2 decimal places
-            styled_df = styled_df.format({
-                'Possible Billable Hrs': '{:.2f}',
-                'Actual Hrs': '{:.2f}',
-                'Actual Billable Hrs': '{:.2f}',
-                'PTO Hrs': '{:.2f}',
-                'Other Non-billable Hrs': '{:.2f}',
-                'Billable Utilization %': '{:.2f}',
-                '📅 YTD Possible Billable Hrs': '{:.2f}',
-                '📅 YTD Actual Billable Hrs': '{:.2f}',
-                '📅 YTD Billable Utilization %': '{:.2f}'
-            })
+            # Value formatter for numeric columns (2 decimal places)
+            numeric_formatter = JsCode("""
+            function(params) {
+                if (params.value === null || params.value === undefined) {
+                    return '';
+                }
+                return params.value.toFixed(2);
+            }
+            """)
 
             st.markdown("#### Utilization Report")
 
@@ -527,25 +533,68 @@ def render_utilization_tab(db, processor):
 
             # Display table with row selection
             with col2:
-                st.info("👆 Click on any row to view detailed project breakdown for that employee")
+                st.info("Click on any row to view detailed project breakdown for that employee")
 
-            selection = st.dataframe(
-                styled_df,
-                width='stretch',
-                hide_index=True,
+            # Build AgGrid options
+            gb = GridOptionsBuilder.from_dataframe(display_df)
+
+            # Configure single-row selection without checkbox
+            gb.configure_selection(selection_mode='single', use_checkbox=False)
+
+            # Hide the employee_id column
+            gb.configure_column("employee_id", hide=True)
+
+            # Make columns sortable but not filterable
+            gb.configure_default_column(sortable=True, filterable=False)
+
+            # Configure numeric columns with formatter
+            numeric_columns = [
+                'Possible Billable Hrs',
+                'Actual Hrs',
+                'Actual Billable Hrs',
+                'PTO Hrs',
+                'Other Non-billable Hrs'
+            ]
+            for col in numeric_columns:
+                gb.configure_column(col, valueFormatter=numeric_formatter)
+
+            # Configure Billable Utilization % column with conditional styling and formatter
+            gb.configure_column(
+                'Billable Utilization %',
+                cellStyle=utilization_cell_style,
+                valueFormatter=numeric_formatter
+            )
+
+            # Configure YTD columns with gray background and formatter
+            ytd_columns = [
+                '📅 YTD Possible Billable Hrs',
+                '📅 YTD Actual Billable Hrs',
+                '📅 YTD Billable Utilization %'
+            ]
+            for col in ytd_columns:
+                gb.configure_column(
+                    col,
+                    cellStyle=ytd_cell_style,
+                    valueFormatter=numeric_formatter
+                )
+
+            grid_options = gb.build()
+
+            # Display AgGrid
+            grid_response = AgGrid(
+                display_df,
+                gridOptions=grid_options,
                 height=500,
-                on_select="rerun",
-                selection_mode="single-row",
-                key="employee_utilization_table",
-                column_config={
-                    "employee_id": None  # Hide employee_id column
-                }
+                update_mode=GridUpdateMode.SELECTION_CHANGED,
+                allow_unsafe_jscode=True,  # Required for JsCode cell styling
+                theme='streamlit',
+                key=f"employee_utilization_aggrid_v{st.session_state.grid_selection_version}"
             )
 
             # Handle row selection - open dialog to show project breakdown
-            if selection and selection.selection.rows:
-                selected_idx = selection.selection.rows[0]
-                selected_row = display_df.iloc[selected_idx]
+            selected_rows = grid_response['selected_rows']
+            if selected_rows is not None and len(selected_rows) > 0:
+                selected_row = selected_rows.iloc[0] if hasattr(selected_rows, 'iloc') else selected_rows[0]
                 emp_id = selected_row['employee_id']
                 emp_name = selected_row['Employee']
 
