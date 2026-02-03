@@ -240,8 +240,12 @@ def resource_allocation_scenarios(db, processor):
             # Calculate scenarios
             scenarios_data = []
 
+            # TODO: For consistency with the rest of the application, consider calculating
+            # monthly hours based on actual working days minus holidays from the months table,
+            # instead of using the standard 160 hours. See data_processor.py and burn_rate_editor.py
+            # for examples of holiday-aware calculations.
             # Current state
-            current_capacity = current_total_fte * 160  # Monthly hours
+            current_capacity = current_total_fte * 160  # Monthly hours (standard 20 days × 8 hours)
             current_cost = current_capacity * current_avg_rate
             scenarios_data.append({
                 'Scenario': 'Current',
