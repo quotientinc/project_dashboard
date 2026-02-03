@@ -678,7 +678,29 @@ class DataProcessor:
                         actual_hours = time_entry['actual_hours'].iloc[0]
 
                 # Calculate Projected hours - use custom remaining_days if available
-                projected_hours = remaining_days * 8 * fte if fte <= 1 else 0
+                # Account for holidays by prorating them for the remaining portion of the month
+                # Get holidays from months table via session state db_manager
+                holidays_in_month = 0
+                if 'db_manager' in st.session_state:
+                    try:
+                        months_df = st.session_state.db_manager.get_months()
+                        month_info = months_df[
+                            (months_df['year'] == year) &
+                            (months_df['month'] == month)
+                        ]
+                        if not month_info.empty and 'holidays' in month_info.columns:
+                            holidays_in_month = int(month_info['holidays'].iloc[0]) if pd.notna(month_info['holidays'].iloc[0]) else 0
+                    except Exception:
+                        # Fallback to 0 holidays if unable to fetch
+                        holidays_in_month = 0
+
+                # Prorate holidays for remaining portion of month
+                # Assumption: holidays are evenly distributed throughout the month
+                working_days_total = days_info.get('working_days', 22) if isinstance(days_info, dict) else 22
+                remaining_ratio = remaining_days / working_days_total if working_days_total > 0 else 0
+                remaining_holidays = int(holidays_in_month * remaining_ratio)
+                available_remaining = max(remaining_days - remaining_holidays, 0)
+                projected_hours = available_remaining * 8 * fte if fte <= 1 else 0
 
                 # Total hours
                 total_hours = actual_hours + projected_hours
@@ -1069,13 +1091,10 @@ class DataProcessor:
             allocations_df['holidays'] = 0
 
         # Calculate projected hours and revenue
-        # TODO: Factor PTO?
-        # Formula: hours = (working_days) × allocated_fte × 8
-        allocations_df['hours'] = (
-            (allocations_df['working_days']) *
-            allocations_df['allocated_fte'] *
-            8
-        )
+        # Subtract holidays from working days before calculating hours
+        # The holidays column is merged from months_df above
+        allocations_df['available_days'] = (allocations_df['working_days'] - allocations_df['holidays']).clip(lower=0)
+        allocations_df['hours'] = allocations_df['available_days'] * allocations_df['allocated_fte'] * 8
         allocations_df['revenue'] = allocations_df['hours'] * allocations_df['bill_rate']
 
         # Determine grouping key based on filter type
@@ -1086,7 +1105,7 @@ class DataProcessor:
             group_key = 'employee_id'
 
         # Group by month and employee/project
-        grouped = allocations_df.groupby(['month_name', group_key, 'working_days']).agg({
+        grouped = allocations_df.groupby(['month_name', group_key, 'available_days']).agg({
             'hours': 'sum',
             'revenue': 'sum'
         }).reset_index()
@@ -1103,7 +1122,7 @@ class DataProcessor:
             projected[month][key] = {
                 'hours': float(row['hours']),
                 'revenue': float(row['revenue']),
-                'worked_days': int(row['working_days'])
+                'worked_days': int(row['available_days'])
             }
 
         return projected

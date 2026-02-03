@@ -498,12 +498,16 @@ def render_monthly_allocation_report():
     projects_df = db.get_projects()
     months_df = db.get_months()
 
-    # Get working days
+    # Get working days and holidays to calculate available working days
     month_info = months_df[
         (months_df['year'] == selected_month.year) &
         (months_df['month'] == selected_month.month)
     ]
     working_days = month_info['working_days'].iloc[0] if not month_info.empty else 21
+    # Subtract holidays from working days to get actual available days for projected hours
+    holidays = month_info['holidays'].iloc[0] if (not month_info.empty and 'holidays' in month_info.columns) else 0
+    holidays = holidays if pd.notna(holidays) else 0
+    available_days = max(working_days - holidays, 0)
 
     st.divider()
 
@@ -736,12 +740,13 @@ def render_monthly_allocation_report():
             employees = project_allocations['employee_name'].unique().tolist()
             employees_str = ", ".join(employees[:3]) + (f" (+{len(employees)-3} more)" if len(employees) > 3 else "")
 
-            projected_hours = total_fte * working_days * 8
+            # Use available_days (working_days - holidays) for projected hours
+            projected_hours = total_fte * available_days * 8
 
             projected_revenue = 0
             for _, alloc in project_allocations.iterrows():
                 bill_rate = alloc.get('bill_rate', 0) if pd.notna(alloc.get('bill_rate')) else 0
-                alloc_hours = alloc['allocated_fte'] * working_days * 8
+                alloc_hours = alloc['allocated_fte'] * available_days * 8
                 projected_revenue += alloc_hours * bill_rate
 
             project_summary.append({

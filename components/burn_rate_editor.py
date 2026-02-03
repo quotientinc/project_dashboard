@@ -756,13 +756,35 @@ def recalculate_month_values(employee_idx, month_key, processor):
 
     fte = st.session_state.burn_rate_hours_df.at[employee_idx, f'fte_{month_key}']
     actual = st.session_state.burn_rate_hours_df.at[employee_idx, f'actual_{month_key}']
+    remaining_days = days_info['remaining_days']
 
     # Recalculate Possible
     possible = days_info['working_days'] * 8 * fte if fte <= 1 else fte
     st.session_state.burn_rate_hours_df.at[employee_idx, f'possible_{month_key}'] = possible
 
-    # Recalculate Projected
-    projected = days_info['remaining_days'] * 8 * fte if fte <= 1 else 0
+    # Recalculate Projected - account for holidays by prorating them for remaining days
+    # Get holidays from months table via session state db_manager
+    holidays_in_month = 0
+    if 'db_manager' in st.session_state:
+        try:
+            months_df = st.session_state.db_manager.get_months()
+            month_info = months_df[
+                (months_df['year'] == year) &
+                (months_df['month'] == month_num)
+            ]
+            if not month_info.empty and 'holidays' in month_info.columns:
+                holidays_in_month = int(month_info['holidays'].iloc[0]) if pd.notna(month_info['holidays'].iloc[0]) else 0
+        except Exception:
+            # Fallback to 0 holidays if unable to fetch
+            holidays_in_month = 0
+
+    # Prorate holidays for remaining portion of month
+    # Assumption: holidays are evenly distributed throughout the month
+    working_days_total = days_info.get('working_days', 22) if isinstance(days_info, dict) else 22
+    remaining_ratio = remaining_days / working_days_total if working_days_total > 0 else 0
+    remaining_holidays = int(holidays_in_month * remaining_ratio)
+    available_remaining = max(remaining_days - remaining_holidays, 0)
+    projected = available_remaining * 8 * fte if fte <= 1 else 0
     st.session_state.burn_rate_hours_df.at[employee_idx, f'projected_{month_key}'] = projected
 
     # Recalculate Total
