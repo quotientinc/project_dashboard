@@ -664,21 +664,6 @@ class DataProcessor:
                     days_info = DataProcessor.calculate_working_days(year, month)
                     remaining_days = days_info['remaining_days']
 
-                # Calculate Possible hours
-                possible_hours = days_info['working_days'] * 8 * fte if fte <= 1 else fte
-
-                # Get actual hours from time_entries
-                actual_hours = 0
-                if not time_entries_by_month.empty:
-                    time_entry = time_entries_by_month[
-                        (time_entries_by_month['employee_id'] == emp['employee_id']) &
-                        (time_entries_by_month['month'] == month_key)
-                    ]
-                    if not time_entry.empty:
-                        actual_hours = time_entry['actual_hours'].iloc[0]
-
-                # Calculate Projected hours - use custom remaining_days if available
-                # Account for holidays by prorating them for the remaining portion of the month
                 # Get holidays from months table via session state db_manager
                 holidays_in_month = 0
                 if 'db_manager' in st.session_state:
@@ -694,6 +679,24 @@ class DataProcessor:
                         # Fallback to 0 holidays if unable to fetch
                         holidays_in_month = 0
 
+                # Calculate available days (working days minus holidays)
+                available_days = max(days_info['working_days'] - holidays_in_month, 0)
+
+                # Calculate Possible hours
+                possible_hours = available_days * 8 * fte if fte <= 1 else fte
+
+                # Get actual hours from time_entries
+                actual_hours = 0
+                if not time_entries_by_month.empty:
+                    time_entry = time_entries_by_month[
+                        (time_entries_by_month['employee_id'] == emp['employee_id']) &
+                        (time_entries_by_month['month'] == month_key)
+                    ]
+                    if not time_entry.empty:
+                        actual_hours = time_entry['actual_hours'].iloc[0]
+
+                # Calculate Projected hours - use custom remaining_days if available
+                # Account for holidays by prorating them for the remaining portion of the month
                 # Prorate holidays for remaining portion of month
                 # Assumption: holidays are evenly distributed throughout the month
                 working_days_total = days_info.get('working_days', 22) if isinstance(days_info, dict) else 22

@@ -118,8 +118,8 @@ def show_burn_rate_editor(project, db_manager, processor):
 
     st.markdown("""
     **Formulas:**
-    - **Possible** = Working Days × 8 hours/day × FTE
-    - **Projected** = Remaining Days × 8 hours/day × FTE
+    - **Possible** = (Working Days - Holidays) × 8 hours/day × FTE
+    - **Projected** = (Remaining Days - Prorated Holidays) × 8 hours/day × FTE
     - **Total** = Actual + Projected
     - **Total Hours** = Sum of all monthly Total values
     """)
@@ -758,11 +758,6 @@ def recalculate_month_values(employee_idx, month_key, processor):
     actual = st.session_state.burn_rate_hours_df.at[employee_idx, f'actual_{month_key}']
     remaining_days = days_info['remaining_days']
 
-    # Recalculate Possible
-    possible = days_info['working_days'] * 8 * fte if fte <= 1 else fte
-    st.session_state.burn_rate_hours_df.at[employee_idx, f'possible_{month_key}'] = possible
-
-    # Recalculate Projected - account for holidays by prorating them for remaining days
     # Get holidays from months table via session state db_manager
     holidays_in_month = 0
     if 'db_manager' in st.session_state:
@@ -778,6 +773,14 @@ def recalculate_month_values(employee_idx, month_key, processor):
             # Fallback to 0 holidays if unable to fetch
             holidays_in_month = 0
 
+    # Calculate available days (working days minus holidays)
+    available_days = max(days_info['working_days'] - holidays_in_month, 0)
+
+    # Recalculate Possible
+    possible = available_days * 8 * fte if fte <= 1 else fte
+    st.session_state.burn_rate_hours_df.at[employee_idx, f'possible_{month_key}'] = possible
+
+    # Recalculate Projected - account for holidays by prorating them for remaining days
     # Prorate holidays for remaining portion of month
     # Assumption: holidays are evenly distributed throughout the month
     working_days_total = days_info.get('working_days', 22) if isinstance(days_info, dict) else 22
@@ -1411,6 +1414,25 @@ def display_days_editor(project, allocations_df, db_manager, processor, hours_df
                 # Store the new configuration
                 st.session_state.burn_rate_last_days_config[last_config_key] = (edited_working, edited_remaining)
 
+                # Get holidays for this month (fetch once, before the employee loop)
+                year = int(month_key.split('-')[0])
+                month_num = int(month_key.split('-')[1])
+                holidays_in_month = 0
+                if 'db_manager' in st.session_state:
+                    try:
+                        months_df = st.session_state.db_manager.get_months()
+                        month_info = months_df[
+                            (months_df['year'] == year) &
+                            (months_df['month'] == month_num)
+                        ]
+                        if not month_info.empty and 'holidays' in month_info.columns:
+                            holidays_in_month = int(month_info['holidays'].iloc[0]) if pd.notna(month_info['holidays'].iloc[0]) else 0
+                    except Exception:
+                        holidays_in_month = 0
+
+                # Calculate available working days (subtract holidays)
+                available_working = max(edited_working - holidays_in_month, 0)
+
                 # Update hours_df with new working/remaining days for this month
                 # This will automatically recalculate Possible and Projected hours
                 for idx in range(len(hours_df)):
@@ -1418,13 +1440,16 @@ def display_days_editor(project, allocations_df, db_manager, processor, hours_df
                     fte = hours_df.at[idx, f'fte_{month_key}']
                     actual = hours_df.at[idx, f'actual_{month_key}']
 
-                    # Recalculate Possible with new working days
-                    possible = edited_working * 8 * fte if fte <= 1 else fte
+                    # Recalculate Possible with available working days (holidays subtracted)
+                    possible = available_working * 8 * fte if fte <= 1 else fte
                     st.session_state.burn_rate_hours_df.at[idx, f'possible_{month_key}'] = possible
                     st.session_state.burn_rate_hours_df.at[idx, f'working_days_{month_key}'] = edited_working
 
-                    # Recalculate Projected with new remaining days
-                    projected = edited_remaining * 8 * fte if fte <= 1 else 0
+                    # Recalculate Projected with new remaining days (prorate holidays)
+                    remaining_ratio = edited_remaining / edited_working if edited_working > 0 else 0
+                    remaining_holidays = int(holidays_in_month * remaining_ratio)
+                    available_remaining = max(edited_remaining - remaining_holidays, 0)
+                    projected = available_remaining * 8 * fte if fte <= 1 else 0
                     st.session_state.burn_rate_hours_df.at[idx, f'projected_{month_key}'] = projected
                     st.session_state.burn_rate_hours_df.at[idx, f'remaining_days_{month_key}'] = edited_remaining
 
