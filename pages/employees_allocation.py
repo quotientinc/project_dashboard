@@ -125,11 +125,16 @@ def render_allocation_tab(db, processor):
             month_info = months_df[(months_df['year'] == year) & (months_df['month'] == month)]
             working_days = int(month_info['working_days'].iloc[0]) if not month_info.empty else 21
 
+            # Subtract holidays from working days to get available days
+            holidays = month_info['holidays'].iloc[0] if (not month_info.empty and 'holidays' in month_info.columns) else 0
+            holidays = holidays if pd.notna(holidays) else 0
+            available_days = max(working_days - int(holidays), 0)
+
             # Group by project
             breakdown = []
             for _, alloc in emp_allocs.iterrows():
                 allocated_fte = alloc.get('allocated_fte', 0)
-                allocated_hours = allocated_fte * working_days * 8  # FTE × days × 8 hrs/day
+                allocated_hours = allocated_fte * available_days * 8  # FTE × available days × 8 hrs/day
 
                 breakdown.append({
                     'Project': alloc.get('project_name', 'Unknown'),

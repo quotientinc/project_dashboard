@@ -1213,6 +1213,23 @@ def add_planning_month(hours_df, project, processor):
     working_days = days_info['working_days']
     remaining_days = days_info['remaining_days']
 
+    # Get holidays from months table for the new month
+    holidays_in_month = 0
+    if 'db_manager' in st.session_state:
+        try:
+            months_df = st.session_state.db_manager.get_months()
+            month_info = months_df[
+                (months_df['year'] == year) &
+                (months_df['month'] == month_num)
+            ]
+            if not month_info.empty and 'holidays' in month_info.columns:
+                holidays_in_month = int(month_info['holidays'].iloc[0]) if pd.notna(month_info['holidays'].iloc[0]) else 0
+        except Exception:
+            holidays_in_month = 0
+
+    # Calculate available working days by subtracting holidays
+    available_days = max(working_days - holidays_in_month, 0)
+
     # Add columns for each employee in the dataframe
     for idx in range(len(hours_df)):
         # Get the last month's FTE value as default for the new month
@@ -1226,9 +1243,9 @@ def add_planning_month(hours_df, project, processor):
         # For planning months, we assume they are all in the future, so:
         # - Actual = 0 (no hours worked yet)
         # - Projected = full month's hours based on FTE
-        # - Possible = working_days * 8 * FTE
+        # - Possible = available_days * 8 * FTE (working_days minus holidays)
 
-        possible = working_days * 8 * fte if fte <= 1 else fte
+        possible = available_days * 8 * fte if fte <= 1 else fte
         actual = 0.0
         projected = remaining_days * 8 * fte if fte <= 1 else fte
         total = actual + projected
