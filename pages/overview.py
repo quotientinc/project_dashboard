@@ -2,6 +2,7 @@ import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
+import calendar
 from datetime import datetime, timedelta
 from utils.logger import get_logger
 
@@ -140,6 +141,12 @@ full_year_end = datetime(current_date.year, 12, 31).strftime('%Y-%m-%d')
 ytd_start = datetime(current_date.year, 1, 1).strftime('%Y-%m-%d')
 ytd_end = current_date.strftime('%Y-%m-%d')
 
+# Get full year time entries for PTO/Holiday calculations (optimization: fetch once)
+full_year_time_entries_all = db.get_time_entries(
+    start_date=full_year_start,
+    end_date=full_year_end
+)
+
 if not billable_employees_df.empty:
     performance_data = processor.get_performance_metrics(
         start_date=full_year_start,
@@ -219,9 +226,40 @@ if not billable_employees_df.empty:
             total_billable_hours = sum(emp_data.get('hours', 0) for emp_data in month_data.values())
             total_possible_hours = sum(emp_data.get('hours', 0) for emp_data in possible_data.values())
 
-        # Calculate utilization percentage
-        if total_possible_hours > 0:
-            avg_utilization = (total_billable_hours / total_possible_hours) * 100
+        # Get PTO and Holiday hours for this month from billable employees
+        total_pto_hours = 0
+        total_holiday_hours = 0
+        if not full_year_time_entries_all.empty:
+            # Calculate month date range
+            month_start_str = f"{current_date.year}-{month_num:02d}-01"
+            month_end_day = calendar.monthrange(current_date.year, month_num)[1]
+            month_end_str = f"{current_date.year}-{month_num:02d}-{month_end_day}"
+
+            # Filter time entries for this month
+            month_entries = full_year_time_entries_all[
+                (full_year_time_entries_all['date'] >= month_start_str) &
+                (full_year_time_entries_all['date'] <= month_end_str)
+            ]
+
+            if not month_entries.empty:
+                # Filter to billable employees only
+                billable_emp_ids = billable_employees_df['id'].tolist()
+                billable_entries = month_entries[month_entries['employee_id'].isin(billable_emp_ids)]
+
+                # Get PTO hours (FRINGE.PTO)
+                pto_entries = billable_entries[billable_entries['project_id'] == 'FRINGE.PTO']
+                total_pto_hours = pto_entries['hours'].sum() if not pto_entries.empty else 0
+
+                # Get Holiday hours (FRINGE.HOL)
+                holiday_entries = billable_entries[billable_entries['project_id'] == 'FRINGE.HOL']
+                total_holiday_hours = holiday_entries['hours'].sum() if not holiday_entries.empty else 0
+
+        # Calculate available hours (exclude PTO and Holiday)
+        available_hours = max(total_possible_hours - total_pto_hours - total_holiday_hours, 0)
+
+        # Calculate utilization percentage using available hours
+        if available_hours > 0:
+            avg_utilization = (total_billable_hours / available_hours) * 100
         else:
             avg_utilization = 0
 
@@ -236,11 +274,13 @@ if not billable_employees_df.empty:
 else:
     utilization_trend_df = pd.DataFrame()
 
-# Calculate YTD average utilization using aggregate formula (total billable / total possible)
+# Calculate YTD average utilization using aggregate formula (total billable / total available)
 if not utilization_trend_df.empty:
-    # Sum up all billable and possible hours from actual months only
+    # Sum up all billable, possible, PTO, and Holiday hours from actual months only
     ytd_total_billable = 0
     ytd_total_possible = 0
+    ytd_total_pto = 0
+    ytd_total_holiday = 0
 
     for month_num in range(1, current_date.month + 1):
         month_name = f"{utilization_trend_df.iloc[month_num-1]['month_name']} {current_date.year}"
@@ -253,8 +293,30 @@ if not utilization_trend_df.empty:
         possible_month_data = performance_data['possible'].get(month_name, {})
         ytd_total_possible += sum(emp_data.get('hours', 0) for emp_data in possible_month_data.values())
 
-    # Calculate aggregate utilization percentage
-    avg_employee_utilization = (ytd_total_billable / ytd_total_possible * 100) if ytd_total_possible > 0 else 0
+        # Get PTO and Holiday hours for this month
+        if not full_year_time_entries_all.empty:
+            month_start_str = f"{current_date.year}-{month_num:02d}-01"
+            month_end_day = calendar.monthrange(current_date.year, month_num)[1]
+            month_end_str = f"{current_date.year}-{month_num:02d}-{month_end_day}"
+
+            month_entries = full_year_time_entries_all[
+                (full_year_time_entries_all['date'] >= month_start_str) &
+                (full_year_time_entries_all['date'] <= month_end_str)
+            ]
+
+            if not month_entries.empty:
+                billable_emp_ids = billable_employees_df['id'].tolist()
+                billable_entries = month_entries[month_entries['employee_id'].isin(billable_emp_ids)]
+
+                pto_entries = billable_entries[billable_entries['project_id'] == 'FRINGE.PTO']
+                ytd_total_pto += pto_entries['hours'].sum() if not pto_entries.empty else 0
+
+                holiday_entries = billable_entries[billable_entries['project_id'] == 'FRINGE.HOL']
+                ytd_total_holiday += holiday_entries['hours'].sum() if not holiday_entries.empty else 0
+
+    # Calculate aggregate utilization percentage using available hours
+    ytd_available = max(ytd_total_possible - ytd_total_pto - ytd_total_holiday, 0)
+    avg_employee_utilization = (ytd_total_billable / ytd_available * 100) if ytd_available > 0 else 0
 else:
     avg_employee_utilization = 0
 
@@ -384,9 +446,11 @@ with col1:
         for _, emp in billable_employees_df.iterrows():
             emp_id_str = str(emp['id'])
 
-            # Sum billable and possible hours across all YTD months
+            # Sum billable, possible, PTO, and Holiday hours across all YTD months
             ytd_billable = 0
             ytd_possible = 0
+            emp_ytd_pto = 0
+            emp_ytd_holiday = 0
 
             for month_num in range(1, current_date.month + 1):
                 month_name = f"{utilization_trend_df.iloc[month_num-1]['month_name']} {current_date.year}"
@@ -425,8 +489,31 @@ with col1:
 
                 ytd_possible += adjusted_possible
 
-            # Calculate utilization percentage
-            utilization_pct = (ytd_billable / ytd_possible * 100) if ytd_possible > 0 else 0
+                # Get PTO and Holiday hours for this employee for this month
+                if not full_year_time_entries_all.empty:
+                    month_start_str = f"{current_date.year}-{month_num:02d}-01"
+                    month_end_day = calendar.monthrange(current_date.year, month_num)[1]
+                    month_end_str = f"{current_date.year}-{month_num:02d}-{month_end_day}"
+
+                    month_entries = full_year_time_entries_all[
+                        (full_year_time_entries_all['date'] >= month_start_str) &
+                        (full_year_time_entries_all['date'] <= month_end_str)
+                    ]
+
+                    if not month_entries.empty:
+                        emp_entries = month_entries[month_entries['employee_id'] == emp['id']]
+
+                        pto_entries = emp_entries[emp_entries['project_id'] == 'FRINGE.PTO']
+                        emp_ytd_pto += pto_entries['hours'].sum() if not pto_entries.empty else 0
+
+                        holiday_entries = emp_entries[emp_entries['project_id'] == 'FRINGE.HOL']
+                        emp_ytd_holiday += holiday_entries['hours'].sum() if not holiday_entries.empty else 0
+
+            # Calculate available hours for this employee (exclude PTO and Holiday)
+            emp_available = max(ytd_possible - emp_ytd_pto - emp_ytd_holiday, 0)
+
+            # Calculate utilization percentage using available hours
+            utilization_pct = (ytd_billable / emp_available * 100) if emp_available > 0 else 0
 
             employee_util_data.append({
                 'name': emp['name'],

@@ -454,9 +454,14 @@ def render_project_details_tab(db, processor):
 
                                     if not month_info.empty:
                                         working_days = month_info['working_days'].iloc[0]
-                                        allocated_hours = working_days * fte * 8
+                                        # Get holidays and calculate available days (working days minus holidays)
+                                        holidays = month_info['holidays'].iloc[0] if 'holidays' in month_info.columns else 0
+                                        holidays = holidays if pd.notna(holidays) else 0
+                                        available_days = max(working_days - holidays, 0)
+                                        # Calculate allocated hours using available days (excludes holidays)
+                                        allocated_hours = available_days * fte * 8
                                     else:
-                                        # Fallback to 21 working days
+                                        # Fallback to 21 working days (no holiday adjustment for fallback)
                                         allocated_hours = 21 * fte * 8
 
                                     # Get actual hours for this month
@@ -503,8 +508,14 @@ def render_project_details_tab(db, processor):
 
                             if not month_info.empty:
                                 working_days = month_info['working_days'].iloc[0]
-                                allocated_hours = working_days * row['allocated_fte'] * 8
+                                # Get holidays and calculate available days (working days minus holidays)
+                                holidays = month_info['holidays'].iloc[0] if 'holidays' in month_info.columns else 0
+                                holidays = holidays if pd.notna(holidays) else 0
+                                available_days = max(working_days - holidays, 0)
+                                # Calculate allocated hours using available days (excludes holidays)
+                                allocated_hours = available_days * row['allocated_fte'] * 8
                             else:
+                                # Fallback to 21 working days (no holiday adjustment for fallback)
                                 allocated_hours = 21 * row['allocated_fte'] * 8
 
                             allocated_hours_list.append(allocated_hours)
