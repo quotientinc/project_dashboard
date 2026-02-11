@@ -1,29 +1,70 @@
 """
 Employee Utilization Analysis tab - detailed monthly and YTD utilization tracking.
 """
+import html
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 from datetime import datetime
 import calendar
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 
+from utils.logger import get_logger
 
-def render_utilization_tab(db, processor):
-    """Render the Employee Utilization Analysis tab with monthly and YTD metrics."""
+logger = get_logger(__name__)
+
+
+def render_utilization_tab(db, processor, employee_id=None):
+    """Render the Employee Utilization Analysis tab with monthly and YTD metrics.
+
+    Args:
+        db: DatabaseManager instance
+        processor: DataProcessor instance
+        employee_id: Optional employee ID. If provided, filters the view to show only that employee's utilization.
+    """
     st.markdown("#### Employee Utilization Analysis")
+
+    # Tab selector
+    tab_selection = st.radio(
+        "View",
+        ["Monthly Detail", "Utilization Summary", "Utilization Timeline"],
+        horizontal=True,
+        key="util_tab_selection"
+    )
 
     # Initialize session state for grid selection versioning
     if "grid_selection_version" not in st.session_state:
         st.session_state.grid_selection_version = 0
 
+    # Shared year selector
+    current_year = datetime.now().year
+    year_options = list(range(current_year - 2, current_year + 2))
+
+    if tab_selection == "Monthly Detail":
+        _render_monthly_detail_tab(db, processor, year_options, current_year, employee_id=employee_id)
+    elif tab_selection == "Utilization Summary":
+        _render_utilization_summary_tab(db, processor, year_options, current_year, employee_id=employee_id)
+    elif tab_selection == "Utilization Timeline":
+        _render_utilization_timeline_tab(db, processor, year_options, current_year, employee_id=employee_id)
+
+
+def _render_monthly_detail_tab(db, processor, year_options, current_year, employee_id=None):
+    """Render the Monthly Detail tab (original utilization table).
+
+    Args:
+        db: DatabaseManager instance
+        processor: DataProcessor instance
+        year_options: List of years for the year selector
+        current_year: Current year for default selection
+        employee_id: Optional employee ID to filter results to a single employee
+    """
     # Date range selection
     col1, col2 = st.columns([1, 1])
 
     with col1:
         # Year selector
-        current_year = datetime.now().year
-        year_options = list(range(current_year - 2, current_year + 2))
         selected_year = st.selectbox(
             "Year",
             options=year_options,
@@ -102,7 +143,11 @@ def render_utilization_tab(db, processor):
             return int(working_days_in_month * proportion)
 
         # Extract month key (should only be one month)
-        month_key = f"{month_names[selected_month - 1]} {selected_year}"
+        month_names_list = [
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December"
+        ]
+        month_key = f"{month_names_list[selected_month - 1]} {selected_year}"
 
         # Calculate first and last day of report month for filtering
         first_day_of_month = datetime(selected_year, selected_month, 1).date()
@@ -242,6 +287,13 @@ def render_utilization_tab(db, processor):
 
         # Get employees dataframe for utilization calculations
         employees_df = db.get_employees()
+
+        # Filter to specific employee if employee_id is provided
+        if employee_id is not None:
+            employees_df = employees_df[employees_df['id'] == employee_id]
+            if employees_df.empty:
+                st.error(f"Employee {employee_id} not found")
+                return
 
         # Build utilization DataFrame
         util_data = []
@@ -465,7 +517,7 @@ def render_utilization_tab(db, processor):
             elif sort_by == "Variance":
                 filtered_df = filtered_df.sort_values('variance', ascending=False)
 
-        st.markdown(f"### 📋 Detailed Utilization - {month_key}")
+        st.markdown(f"### Detailed Utilization - {month_key}")
 
         # Check if there are any billable employees
         if util_df.empty:
@@ -478,19 +530,19 @@ def render_utilization_tab(db, processor):
 
             with col1:
                 over_util = len(util_df[util_df['utilization_pct'] > 120])
-                st.metric("🔴 Over-Utilized (>120%)", over_util)
+                st.metric("Over-Utilized (>120%)", over_util)
 
             with col2:
                 high_util = len(util_df[(util_df['utilization_pct'] >= 100) & (util_df['utilization_pct'] <= 120)])
-                st.metric("🟡 High Utilization (100-120%)", high_util)
+                st.metric("High Utilization (100-120%)", high_util)
 
             with col3:
                 good_util = len(util_df[(util_df['utilization_pct'] >= 80) & (util_df['utilization_pct'] < 100)])
-                st.metric("🟢 Well-Utilized (80-100%)", good_util)
+                st.metric("Well-Utilized (80-100%)", good_util)
 
             with col4:
                 under_util = len(util_df[util_df['utilization_pct'] < 80])
-                st.metric("🔵 Under-Utilized (<80%)", under_util)
+                st.metric("Under-Utilized (<80%)", under_util)
 
             # Display table
             display_df = filtered_df[[
@@ -509,9 +561,9 @@ def render_utilization_tab(db, processor):
                 'other_nonbillable_hours': 'Other Non-billable Hrs',
                 'utilization_pct': 'Billable Utilization %',
                 'status': 'Status',
-                'ytd_possible_hours': '📅 YTD Possible Billable Hrs',
-                'ytd_actual_billable_hours': '📅 YTD Actual Billable Hrs',
-                'ytd_utilization_pct': '📅 YTD Billable Utilization %'
+                'ytd_possible_hours': 'YTD Possible Billable Hrs',
+                'ytd_actual_billable_hours': 'YTD Actual Billable Hrs',
+                'ytd_utilization_pct': 'YTD Billable Utilization %'
             })
 
             # JsCode for conditional cell styling on Billable Utilization % column
@@ -552,23 +604,23 @@ def render_utilization_tab(db, processor):
 
             # Show the logic behind the table for reference
             with col1:
-                with st.popover("💡Logic for Utilization Table"):
+                with st.popover("Logic for Utilization Table"):
                     st.markdown("""For each employee in the utilization table:
 
   | Column                           | Source                                                  | Calculation                                                                          |
   |----------------------------------|---------------------------------------------------------|--------------------------------------------------------------------------------------|
   | Employee                         | employees_df['name']                                    | Direct from employees table                                                          |
-  | Possible Billable Hrs            | metrics['possible'][month_key][emp_id]['hours']         | From employees table: (working_days) × (target_allocation - overhead_allocation) × 8 |
+  | Possible Billable Hrs            | metrics['possible'][month_key][emp_id]['hours']         | From employees table: (working_days) x (target_allocation - overhead_allocation) x 8 |
   | Actual Hrs                       | metrics['actuals'][month_key][emp_id]['hours']          | From time_entries table: sum of ALL hours logged (billable + non-billable)           |
   | Actual Billable Hrs              | metrics['actuals'][month_key][emp_id]['billable_hours'] | From time_entries table: sum of hours where billable=1                               |
   | PTO Hrs                          | time_entries_df where project_id='FRINGE.PTO'           | Sum of hours from time_entries for PTO project                                       |
   | Holiday Hrs                      | time_entries_df where project_id='FRINGE.HOL'           | Sum of hours from time_entries for Holiday project                                   |
   | Other Non-billable Hrs           | Calculated                                              | (actual_hours - actual_billable_hours) - pto_hours - holiday_hours                   |
-  | Billable Utilization %           | Calculated                                              | (actual_billable_hours / (possible_hours - pto_hours - holiday_hours)) × 100         |
-  | Status                           | Calculated                                              | Based on Billable Utilization %: 🔴 >120%, 🟡 100-120%, 🟢 80-100%, 🔵 <80%         |
-  | 📅 YTD Possible Billable Hrs    | ytd_metrics['possible']                                 | Sum of possible hours from Jan 1 to end of selected month                            |
-  | 📅 YTD Actual Billable Hrs      | ytd_metrics['actuals']                                  | Sum of actual billable hours from Jan 1 to end of selected month                     |
-  | 📅 YTD Billable Utilization %   | Calculated                                              | (ytd_actual_billable_hours / (ytd_possible_hours - ytd_pto_hours - ytd_holiday_hours)) × 100 |
+  | Billable Utilization %           | Calculated                                              | (actual_billable_hours / (possible_hours - pto_hours - holiday_hours)) x 100         |
+  | Status                           | Calculated                                              | Based on Billable Utilization %: >120%, 100-120%, 80-100%, <80%                      |
+  | YTD Possible Billable Hrs        | ytd_metrics['possible']                                 | Sum of possible hours from Jan 1 to end of selected month                            |
+  | YTD Actual Billable Hrs          | ytd_metrics['actuals']                                  | Sum of actual billable hours from Jan 1 to end of selected month                     |
+  | YTD Billable Utilization %       | Calculated                                              | (ytd_actual_billable_hours / (ytd_possible_hours - ytd_pto_hours - ytd_holiday_hours)) x 100 |
 
 **Notes:**
 - Possible hours are adjusted only for employees hired or terminated mid-month, not based on which days they logged time entries.
@@ -615,9 +667,9 @@ def render_utilization_tab(db, processor):
 
             # Configure YTD columns with gray background and formatter
             ytd_columns = [
-                '📅 YTD Possible Billable Hrs',
-                '📅 YTD Actual Billable Hrs',
-                '📅 YTD Billable Utilization %'
+                'YTD Possible Billable Hrs',
+                'YTD Actual Billable Hrs',
+                'YTD Billable Utilization %'
             ]
             for col in ytd_columns:
                 gb.configure_column(
@@ -672,7 +724,7 @@ def render_utilization_tab(db, processor):
             csv_df = display_df.drop(columns=['employee_id'])
             csv = csv_df.to_csv(index=False)
             st.download_button(
-                label="📥 Download Utilization Report",
+                label="Download Utilization Report",
                 data=csv,
                 file_name=f"utilization_{selected_year}_{selected_month:02d}.csv",
                 mime="text/csv"
@@ -680,6 +732,439 @@ def render_utilization_tab(db, processor):
 
     except Exception as e:
         st.error(f"Error loading utilization data: {str(e)}")
-        from utils.logger import get_logger
-        logger = get_logger(__name__)
         logger.error(f"Error in utilization tab: {str(e)}", exc_info=True)
+
+
+def _get_billable_employees(db, period_start, period_end):
+    """Get billable employees active during the given period.
+
+    Returns a DataFrame of employees where billable=1 and who have not been
+    terminated before the period start date.
+    """
+    employees_df = db.get_employees()
+    if employees_df.empty:
+        return employees_df
+
+    # Filter to billable employees only
+    billable_df = employees_df[employees_df['billable'] == 1].copy()
+
+    # Exclude employees terminated before the period start
+    period_start_date = pd.to_datetime(period_start).date()
+    period_end_date = pd.to_datetime(period_end).date()
+
+    def is_active_in_period(row):
+        # Check termination date
+        if pd.notna(row.get('term_date')):
+            term_date = pd.to_datetime(row['term_date']).date()
+            if term_date < period_start_date:
+                return False
+        # Check hire date
+        if pd.notna(row.get('hire_date')):
+            hire_date = pd.to_datetime(row['hire_date']).date()
+            if hire_date > period_end_date:
+                return False
+        return True
+
+    billable_df = billable_df[billable_df.apply(is_active_in_period, axis=1)]
+    return billable_df
+
+
+def _get_period_date_range(time_frame, year):
+    """Calculate start and end dates for the selected time frame.
+
+    Returns (start_date, end_date) as strings in YYYY-MM-DD format.
+    """
+    quarter_ranges = {
+        "Quarter 1": (f"{year}-01-01", f"{year}-03-31"),
+        "Quarter 2": (f"{year}-04-01", f"{year}-06-30"),
+        "Quarter 3": (f"{year}-07-01", f"{year}-09-30"),
+        "Quarter 4": (f"{year}-10-01", f"{year}-12-31"),
+    }
+
+    if time_frame == "Current Month":
+        now = datetime.now()
+        if year == now.year:
+            month = now.month
+        else:
+            month = 1  # Default to January for non-current years
+        last_day = calendar.monthrange(year, month)[1]
+        start_date = f"{year}-{month:02d}-01"
+        end_date = f"{year}-{month:02d}-{last_day}"
+    else:
+        start_date, end_date = quarter_ranges[time_frame]
+
+    return start_date, end_date
+
+
+def _get_months_in_range(start_date, end_date):
+    """Return a list of month keys (e.g. 'January 2025') for all months in the date range."""
+    start = pd.to_datetime(start_date)
+    end = pd.to_datetime(end_date)
+    months = []
+    current = start.replace(day=1)
+    while current <= end:
+        months.append(current.strftime('%B %Y'))
+        # Move to next month
+        if current.month == 12:
+            current = current.replace(year=current.year + 1, month=1)
+        else:
+            current = current.replace(month=current.month + 1)
+    return months
+
+
+def _render_utilization_summary_tab(db, processor, year_options, current_year, employee_id=None):
+    """Render the Utilization Summary tab with category cards.
+
+    Args:
+        db: DatabaseManager instance
+        processor: DataProcessor instance
+        year_options: List of years for the year selector
+        current_year: Current year for default selection
+        employee_id: Optional employee ID to filter results to a single employee
+    """
+    col1, col2 = st.columns([1, 1])
+
+    with col1:
+        selected_year = st.selectbox(
+            "Year",
+            options=year_options,
+            index=year_options.index(current_year),
+            key="util_summary_year"
+        )
+
+    with col2:
+        time_frame = st.selectbox(
+            "Time Frame",
+            ["Current Month", "Quarter 1", "Quarter 2", "Quarter 3", "Quarter 4"],
+            key="util_summary_timeframe"
+        )
+
+    start_date, end_date = _get_period_date_range(time_frame, selected_year)
+    months_in_range = _get_months_in_range(start_date, end_date)
+
+    try:
+        with st.spinner("Loading utilization summary..."):
+            metrics = processor.get_performance_metrics(
+                start_date=start_date,
+                end_date=end_date
+            )
+
+        billable_df = _get_billable_employees(db, start_date, end_date)
+
+        # Filter to specific employee if employee_id is provided
+        if employee_id is not None:
+            billable_df = billable_df[billable_df['id'] == employee_id]
+            if billable_df.empty:
+                st.error(f"Employee {employee_id} not found or is not billable")
+                return
+
+        if billable_df.empty:
+            st.info("No billable employees found for the selected period.")
+            return
+
+        # Calculate utilization for each employee across the period
+        employee_utilizations = []
+
+        for _, emp in billable_df.iterrows():
+            emp_id_str = str(emp['id'])
+            total_billable_hours = 0
+            total_possible_hours = 0
+
+            for month_key in months_in_range:
+                # Get actual billable hours for this month
+                actuals_emp = metrics['actuals'].get(month_key, {}).get(emp_id_str, {})
+                total_billable_hours += actuals_emp.get('billable_hours', 0)
+
+                # Get possible hours for this month
+                possible_emp = metrics['possible'].get(month_key, {}).get(emp_id_str, {})
+                total_possible_hours += possible_emp.get('hours', 0)
+
+            utilization_pct = (total_billable_hours / total_possible_hours * 100) if total_possible_hours > 0 else 0
+
+            employee_utilizations.append({
+                'name': emp['name'],
+                'utilization_pct': utilization_pct,
+                'billable_hours': total_billable_hours,
+                'possible_hours': total_possible_hours,
+            })
+
+        # Categorize employees
+        categories = [
+            {
+                'label': '100%+',
+                'icon': '\U0001f7e2',
+                'bg_color': '#e8f5e9',
+                'border_color': '#28a745',
+                'filter': lambda pct: pct >= 100,
+            },
+            {
+                'label': '90% - 99%',
+                'icon': '\U0001f7e1',
+                'bg_color': '#fff8e1',
+                'border_color': '#ffc107',
+                'filter': lambda pct: 90 <= pct < 100,
+            },
+            {
+                'label': '75% - 89%',
+                'icon': '\U0001f7e0',
+                'bg_color': '#fff3e0',
+                'border_color': '#fd7e14',
+                'filter': lambda pct: 75 <= pct < 90,
+            },
+            {
+                'label': '< 75%',
+                'icon': '\U0001f534',
+                'bg_color': '#ffebee',
+                'border_color': '#dc3545',
+                'filter': lambda pct: pct < 75,
+            },
+        ]
+
+        if time_frame == "Current Month":
+            # Derive the month name from the resolved start_date to stay consistent
+            period_month = pd.to_datetime(start_date).strftime('%B')
+            period_label = f"{period_month} {selected_year}"
+        else:
+            period_label = time_frame
+        st.markdown(f"### Utilization Summary - {period_label}")
+
+        cols = st.columns(4)
+
+        for idx, cat in enumerate(categories):
+            matching = [e for e in employee_utilizations if cat['filter'](e['utilization_pct'])]
+            count = len(matching)
+
+            # Build names list with utilization percentage
+            if matching:
+                names_lines = [
+                    f"{html.escape(e['name'])} ({e['utilization_pct']:.0f}%)"
+                    for e in sorted(matching, key=lambda x: x['utilization_pct'], reverse=True)
+                ]
+                names_html = "<br>".join(names_lines)
+            else:
+                names_html = "<em>None</em>"
+
+            with cols[idx]:
+                st.markdown(f'''
+<div style="background-color: {cat['bg_color']}; padding: 15px; border-radius: 10px; border-left: 5px solid {cat['border_color']}; margin-bottom: 10px;">
+    <div style="display: flex; align-items: center; margin-bottom: 8px;">
+        <span style="font-size: 24px; margin-right: 8px;">{cat['icon']}</span>
+        <span style="font-size: 18px; font-weight: bold;">{cat['label']}</span>
+    </div>
+    <div style="font-size: 28px; font-weight: bold; margin-bottom: 5px;">{count} Employees</div>
+    <div style="font-size: 13px; color: #555;">{names_html}</div>
+</div>
+''', unsafe_allow_html=True)
+
+        # Overall summary metrics
+        st.markdown("---")
+        total_billable = sum(e['billable_hours'] for e in employee_utilizations)
+        total_possible = sum(e['possible_hours'] for e in employee_utilizations)
+        overall_util = (total_billable / total_possible * 100) if total_possible > 0 else 0
+
+        summary_cols = st.columns(4)
+        with summary_cols[0]:
+            st.metric("Total Billable Employees", len(employee_utilizations))
+        with summary_cols[1]:
+            st.metric("Total Billable Hours", f"{total_billable:,.0f}")
+        with summary_cols[2]:
+            st.metric("Total Possible Hours", f"{total_possible:,.0f}")
+        with summary_cols[3]:
+            st.metric("Overall Utilization", f"{overall_util:.1f}%")
+
+    except Exception as e:
+        st.error(f"Error loading utilization summary: {str(e)}")
+        logger.error(f"Error in utilization summary tab: {str(e)}", exc_info=True)
+
+
+def _render_utilization_timeline_tab(db, processor, year_options, current_year, employee_id=None):
+    """Render the Utilization Timeline tab with planned vs actual charts.
+
+    Args:
+        db: DatabaseManager instance
+        processor: DataProcessor instance
+        year_options: List of years for the year selector
+        current_year: Current year for default selection
+        employee_id: Optional employee ID to filter results to a single employee
+    """
+    col1, col2 = st.columns([1, 1])
+
+    with col1:
+        selected_year = st.selectbox(
+            "Year",
+            options=year_options,
+            index=year_options.index(current_year),
+            key="util_timeline_year"
+        )
+
+    with col2:
+        time_frame = st.selectbox(
+            "Time Frame",
+            ["Current Month", "Quarter 1", "Quarter 2", "Quarter 3", "Quarter 4"],
+            key="util_timeline_timeframe"
+        )
+
+    start_date, end_date = _get_period_date_range(time_frame, selected_year)
+    months_in_range = _get_months_in_range(start_date, end_date)
+
+    try:
+        with st.spinner("Loading timeline data..."):
+            metrics = processor.get_performance_metrics(
+                start_date=start_date,
+                end_date=end_date
+            )
+
+        billable_df = _get_billable_employees(db, start_date, end_date)
+
+        # Filter to specific employee if employee_id is provided
+        if employee_id is not None:
+            billable_df = billable_df[billable_df['id'] == employee_id]
+            if billable_df.empty:
+                st.error(f"Employee {employee_id} not found or is not billable")
+                return
+
+        if billable_df.empty:
+            st.info("No billable employees found for the selected period.")
+            return
+
+        # ---------------------------------------------------------------
+        # Section 1: Utilization Timeline - All Employees (or single employee if filtered)
+        # ---------------------------------------------------------------
+        if employee_id is not None:
+            emp_name = billable_df['name'].iloc[0]
+            st.markdown(f"### Utilization Timeline: {emp_name}")
+        else:
+            st.markdown("### Utilization Timeline: All")
+
+        # Aggregate planned and actual hours per month across all employees
+        planned_hours_list = []
+        actual_hours_list = []
+
+        for month_key in months_in_range:
+            month_planned = 0
+            month_actual = 0
+
+            projected_month = metrics['projected'].get(month_key, {})
+            actuals_month = metrics['actuals'].get(month_key, {})
+
+            for _, emp in billable_df.iterrows():
+                emp_id_str = str(emp['id'])
+                # Planned (projected) hours
+                proj_emp = projected_month.get(emp_id_str, {})
+                month_planned += proj_emp.get('hours', 0)
+
+                # Actual billable hours
+                act_emp = actuals_month.get(emp_id_str, {})
+                month_actual += act_emp.get('billable_hours', 0)
+
+            planned_hours_list.append(month_planned)
+            actual_hours_list.append(month_actual)
+
+        if any(h > 0 for h in planned_hours_list) or any(h > 0 for h in actual_hours_list):
+            fig_all = go.Figure()
+            fig_all.add_trace(go.Bar(
+                name='Planned Hours',
+                x=months_in_range,
+                y=planned_hours_list,
+                marker_color='#28a745'
+            ))
+            fig_all.add_trace(go.Bar(
+                name='Actual Billable Hours',
+                x=months_in_range,
+                y=actual_hours_list,
+                marker_color='#ffc107'
+            ))
+            fig_all.update_layout(
+                barmode='group',
+                title="Planned vs Actual Billable Hours - All Employees",
+                xaxis_title="Month",
+                yaxis_title="Hours",
+                height=400
+            )
+            st.plotly_chart(fig_all, use_container_width=True)
+        else:
+            st.info("No planned or actual hours data available for the selected period.")
+
+        # ---------------------------------------------------------------
+        # Section 2: Utilization Timeline - Individual Employee
+        # ---------------------------------------------------------------
+        # Skip this section if already filtered to a specific employee
+        if employee_id is not None:
+            # Already showing single employee data in section 1
+            return
+
+        st.markdown("### Utilization Timeline: Individual Employee")
+
+        sorted_billable_df = billable_df.sort_values('name')
+
+        if sorted_billable_df.empty:
+            st.info("No billable employees available for individual timeline.")
+            return
+
+        selected_emp_id = st.selectbox(
+            "Select Employee",
+            options=sorted_billable_df['id'].tolist(),
+            format_func=lambda eid: billable_df[billable_df['id'] == eid]['name'].iloc[0],
+            key="util_timeline_employee"
+        )
+
+        selected_emp_name = billable_df[billable_df['id'] == selected_emp_id]['name'].iloc[0]
+
+        # Get individual employee metrics using constraint
+        with st.spinner(f"Loading timeline for {selected_emp_name}..."):
+            emp_metrics = processor.get_performance_metrics(
+                start_date=start_date,
+                end_date=end_date,
+                constraint={'employee_id': selected_emp_id}
+            )
+
+        # When using employee constraint, data is keyed by project_id.
+        # We need to sum across all projects for each month.
+        emp_planned_list = []
+        emp_actual_list = []
+
+        for month_key in months_in_range:
+            # Sum projected hours across all projects for this month
+            projected_month = emp_metrics['projected'].get(month_key, {})
+            month_planned = sum(
+                proj_data.get('hours', 0)
+                for proj_data in projected_month.values()
+            )
+            emp_planned_list.append(month_planned)
+
+            # Sum actual billable hours across all projects for this month
+            actuals_month = emp_metrics['actuals'].get(month_key, {})
+            month_actual = sum(
+                act_data.get('billable_hours', 0)
+                for act_data in actuals_month.values()
+            )
+            emp_actual_list.append(month_actual)
+
+        if any(h > 0 for h in emp_planned_list) or any(h > 0 for h in emp_actual_list):
+            fig_emp = go.Figure()
+            fig_emp.add_trace(go.Bar(
+                name='Planned Hours',
+                x=months_in_range,
+                y=emp_planned_list,
+                marker_color='#28a745'
+            ))
+            fig_emp.add_trace(go.Bar(
+                name='Actual Billable Hours',
+                x=months_in_range,
+                y=emp_actual_list,
+                marker_color='#ffc107'
+            ))
+            fig_emp.update_layout(
+                barmode='group',
+                title=f"Planned vs Actual Billable Hours - {selected_emp_name}",
+                xaxis_title="Month",
+                yaxis_title="Hours",
+                height=400
+            )
+            st.plotly_chart(fig_emp, use_container_width=True)
+        else:
+            st.info(f"No planned or actual hours data available for {selected_emp_name} in the selected period.")
+
+    except Exception as e:
+        st.error(f"Error loading utilization timeline: {str(e)}")
+        logger.error(f"Error in utilization timeline tab: {str(e)}", exc_info=True)

@@ -22,6 +22,7 @@ class DatabaseManager:
         self.migrate_contract_value_split()
         self.migrate_remove_deprecated_allocation_columns()
         self.create_indexes()
+        self.migrate_add_project_phases_table()
 
     def create_tables(self):
         """Create all necessary tables"""
@@ -661,6 +662,10 @@ class DatabaseManager:
              'CREATE INDEX idx_employees_billable ON employees(billable)'),
             ('idx_time_entries_billable',
              'CREATE INDEX idx_time_entries_billable ON time_entries(billable)'),
+
+            # Project phases index
+            ('idx_project_phases_project_id',
+             'CREATE INDEX idx_project_phases_project_id ON project_phases(project_id)'),
         ]
 
         created_count = 0
@@ -678,6 +683,35 @@ class DatabaseManager:
             cursor.execute("ANALYZE")
             self.conn.commit()
             logger.info(f"Created {created_count} database indexes for improved performance")
+
+    def migrate_add_project_phases_table(self):
+        """
+        Create the project_phases table if it does not exist.
+        Tracks phases/milestones within a project lifecycle.
+        This migration is safe to run multiple times.
+        """
+        cursor = self.conn.cursor()
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS project_phases (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT,
+                phase_name TEXT NOT NULL,
+                phase_type TEXT,
+                start_date TEXT,
+                end_date TEXT,
+                predecessors TEXT,
+                risk TEXT,
+                status TEXT,
+                completion_pct REAL DEFAULT 0,
+                notes TEXT,
+                created_at TEXT,
+                updated_at TEXT,
+                FOREIGN KEY (project_id) REFERENCES projects (id)
+            )
+        ''')
+
+        self.conn.commit()
 
     def is_empty(self):
         """Check if database is empty"""
@@ -787,6 +821,115 @@ class DatabaseManager:
         self.conn.commit()
         logger.info("Commit successful")
         return rows_affected
+
+    # Project Phase methods
+    @st.cache_data(ttl=60, show_spinner=False)
+    def get_project_phases(_self, project_id=None):
+        """Get all project phases or filtered by project_id, ordered by start_date"""
+        query = "SELECT * FROM project_phases"
+        params = []
+
+        if project_id is not None:
+            query += " WHERE project_id = ?"
+            # Convert numpy types to Python types (project_id is TEXT)
+            params.append(str(project_id) if hasattr(project_id, 'item') else project_id)
+
+        query += " ORDER BY start_date"
+        return pd.read_sql_query(query, _self.conn, params=params)
+
+    def add_project_phase(self, phase_data):
+        """Add a new project phase"""
+        phase_data['created_at'] = datetime.now().isoformat()
+        phase_data['updated_at'] = datetime.now().isoformat()
+
+        # Convert numpy types to Python types
+        for key, value in phase_data.items():
+            if hasattr(value, 'item'):
+                phase_data[key] = value.item()
+
+        columns = list(phase_data.keys())
+        placeholders = ','.join('?' * len(columns))
+        query = f"INSERT INTO project_phases ({','.join(columns)}) VALUES ({placeholders})"
+
+        cursor = self.conn.cursor()
+        cursor.execute(query, list(phase_data.values()))
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def update_project_phase(self, phase_id, updates):
+        """Update a project phase"""
+        updates['updated_at'] = datetime.now().isoformat()
+
+        # Convert numpy types to Python types
+        for key, value in updates.items():
+            if hasattr(value, 'item'):
+                updates[key] = value.item()
+
+        set_clause = ','.join([f"{k}=?" for k in updates.keys()])
+        query = f"UPDATE project_phases SET {set_clause} WHERE id=?"
+
+        # Convert numpy types to Python types for the phase_id
+        phase_id = int(phase_id) if hasattr(phase_id, 'item') else phase_id
+
+        cursor = self.conn.cursor()
+        cursor.execute(query, list(updates.values()) + [phase_id])
+        self.conn.commit()
+        return cursor.rowcount
+
+    def delete_project_phase(self, phase_id):
+        """Delete a project phase"""
+        # Convert numpy types to Python types
+        phase_id = int(phase_id) if hasattr(phase_id, 'item') else phase_id
+
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM project_phases WHERE id = ?", (phase_id,))
+        self.conn.commit()
+
+    def bulk_insert_project_phases(self, phases_list, project_id):
+        """
+        Bulk insert project phases for a given project.
+        First deletes all existing phases for the project_id,
+        then inserts all phases from phases_list.
+        Wrapped in an explicit transaction for atomicity.
+
+        Args:
+            phases_list: List of dicts with phase data
+            project_id: The project ID to associate phases with
+        """
+        if not phases_list:
+            return
+
+        cursor = self.conn.cursor()
+        now = datetime.now().isoformat()
+
+        # Convert numpy types to Python types for project_id (TEXT)
+        project_id = str(project_id) if hasattr(project_id, 'item') else project_id
+
+        cursor.execute("BEGIN")
+        try:
+            # Delete existing phases for this project
+            cursor.execute("DELETE FROM project_phases WHERE project_id = ?", (project_id,))
+
+            # Insert all phases
+            for phase in phases_list:
+                phase['project_id'] = project_id
+                phase['created_at'] = now
+                phase['updated_at'] = now
+
+                # Convert numpy types to Python types
+                for key, value in phase.items():
+                    if hasattr(value, 'item'):
+                        phase[key] = value.item()
+
+                columns = list(phase.keys())
+                placeholders = ','.join('?' * len(columns))
+                query = f"INSERT INTO project_phases ({','.join(columns)}) VALUES ({placeholders})"
+                cursor.execute(query, list(phase.values()))
+
+            cursor.execute("COMMIT")
+        except Exception:
+            cursor.execute("ROLLBACK")
+            raise
 
     # Employee methods
     @st.cache_data(ttl=300, show_spinner=False)

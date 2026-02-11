@@ -72,21 +72,12 @@ if 'filters' not in st.session_state:
     }
 
 # Define pages using st.Page
+# Main sidebar navigation pages
 overview_page = st.Page(
     "pages/overview.py",
     title="Overview Dashboard",
     icon="📊",
     default=True
-)
-project_details_page = st.Page(
-    "pages/project_details.py",
-    title="Project Details",
-    icon="📋"
-)
-employee_utilization_page = st.Page(
-    "pages/employee_utilization.py",
-    title="Employee Utilization",
-    icon="📊"
 )
 projects_page = st.Page(
     "pages/projects.py",
@@ -126,23 +117,41 @@ data_page = st.Page(
 budget_mockup_page = st.Page(
     "pages/budget_mockup.py",
     title="Budget Mockup",
-    icon="💾"
+    icon="💰"
 )
 
-# Create navigation
-pg = st.navigation([
-    overview_page,
-    project_details_page,
-    employee_utilization_page,
-    projects_page,
-    employees_page,
-    timesheets_page,
-    reports_page,
-    whatif_page,
-    months_page,
-    data_page,
-    budget_mockup_page
-])
+# Hidden pages - accessible via st.switch_page() but not shown prominently
+# These are detail/view pages navigated to from list pages
+project_view_page = st.Page(
+    "pages/project_view.py",
+    title="Project View",
+    icon="📋"
+)
+employee_view_page = st.Page(
+    "pages/employee_view.py",
+    title="Employee View",
+    icon="👤"
+)
+
+# Create navigation with sections
+# Main pages in "Menu" section, detail pages in separate section
+pg = st.navigation({
+    "Menu": [
+        overview_page,
+        projects_page,
+        employees_page,
+        timesheets_page,
+        reports_page,
+        whatif_page,
+        months_page,
+        data_page,
+        budget_mockup_page
+    ],
+    "Details": [
+        project_view_page,
+        employee_view_page
+    ]
+})
 
 # Quick stats in sidebar
 @st.cache_data(ttl=300, show_spinner=False)

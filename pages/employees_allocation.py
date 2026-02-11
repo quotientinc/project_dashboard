@@ -11,8 +11,14 @@ from datetime import datetime
 import calendar
 
 
-def render_allocation_tab(db, processor):
-    """Render the Employee Allocation Planning tab showing allocated vs possible hours."""
+def render_allocation_tab(db, processor, employee_id=None):
+    """Render the Employee Allocation Planning tab showing allocated vs possible hours.
+
+    Args:
+        db: DatabaseManager instance
+        processor: DataProcessor instance
+        employee_id: Optional employee ID to filter results to a single employee
+    """
     st.markdown("#### Employee Allocation Planning")
     st.caption("Identify employees who are projected to be over/under-allocated")
 
@@ -221,6 +227,13 @@ def render_allocation_tab(db, processor):
 
         # Get employees dataframe for allocation calculations
         employees_df = db.get_employees()
+
+        # Filter to specific employee if employee_id is provided
+        if employee_id is not None:
+            employees_df = employees_df[employees_df['id'] == employee_id]
+            if employees_df.empty:
+                st.error(f"Employee {employee_id} not found")
+                return
 
         # Build allocation DataFrame
         alloc_data = []
