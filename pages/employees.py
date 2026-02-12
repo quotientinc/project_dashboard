@@ -3,7 +3,7 @@ Employees List page - displays all employees in AgGrid with click-to-navigate.
 """
 import streamlit as st
 import pandas as pd
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode, ColumnsAutoSizeMode
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -161,6 +161,7 @@ st.info("Click on any employee row to view details")
 grid_response = AgGrid(
     display_df,
     gridOptions=grid_options,
+    columns_auto_size_mode=ColumnsAutoSizeMode.FIT_ALL_COLUMNS_TO_VIEW,
     height=500,
     update_mode=GridUpdateMode.SELECTION_CHANGED,
     allow_unsafe_jscode=True,

@@ -510,18 +510,22 @@ def burn_rate_scenarios(db, processor):
                 )
                 st.plotly_chart(fig, width='stretch')
 
-# Scenario type selection
-scenario_type = st.selectbox(
-    "Select Scenario Type",
-    ["Project Cost Scenarios", "Resource Allocation", "Revenue Projections", "Burn Rate Analysis"]
-)
+# Scenario type tabs
+tab1, tab2, tab3, tab4 = st.tabs([
+    "Project Cost Scenarios",
+    "Resource Allocation",
+    "Revenue Projections",
+    "Burn Rate Analysis"
+])
 
-# Call the appropriate function
-if scenario_type == "Project Cost Scenarios":
+with tab1:
     project_cost_scenarios(db, processor)
-elif scenario_type == "Resource Allocation":
+
+with tab2:
     resource_allocation_scenarios(db, processor)
-elif scenario_type == "Revenue Projections":
+
+with tab3:
     revenue_projection_scenarios(db, processor)
-else:
+
+with tab4:
     burn_rate_scenarios(db, processor)

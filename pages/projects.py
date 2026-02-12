@@ -4,7 +4,7 @@ Projects List page - displays all projects in AgGrid with click-to-navigate.
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode, ColumnsAutoSizeMode
 from utils.project_helpers import safe_budget_percentage, safe_currency_display
 from utils.logger import get_logger
 
@@ -66,7 +66,7 @@ if date_filter == "Custom Date Range":
 # Search
 search_term = st.text_input(
     "Search",
-    placeholder="Search by name, client, or PM...",
+    placeholder="Search by project code, name, client, or PM...",
     label_visibility="collapsed"
 )
 
@@ -104,6 +104,7 @@ elif date_filter == "Custom Date Range":
 # Search filter
 if search_term:
     search_mask = (
+        filtered_df['id'].astype(str).str.contains(search_term, case=False, na=False) |
         filtered_df['name'].str.contains(search_term, case=False, na=False) |
         filtered_df['client'].str.contains(search_term, case=False, na=False) |
         filtered_df['project_manager'].str.contains(search_term, case=False, na=False)
@@ -117,6 +118,7 @@ if filtered_df.empty:
 # --- Build Display DataFrame ---
 display_df = pd.DataFrame()
 display_df['id'] = filtered_df['id']
+display_df['Project Code'] = filtered_df['id'].astype(str)
 display_df['Project Name'] = filtered_df['name']
 display_df['Client'] = filtered_df['client']
 display_df['PM'] = filtered_df['project_manager']
@@ -206,6 +208,7 @@ st.info("Click on any project row to view details")
 grid_response = AgGrid(
     display_df,
     gridOptions=grid_options,
+    columns_auto_size_mode=ColumnsAutoSizeMode.FIT_ALL_COLUMNS_TO_VIEW,
     height=500,
     update_mode=GridUpdateMode.SELECTION_CHANGED,
     allow_unsafe_jscode=True,

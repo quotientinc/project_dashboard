@@ -1,14 +1,19 @@
 import logging
 from datetime import datetime, timedelta
-
-# Setup logging FIRST, before any Streamlit imports
 from utils.logger import setup_logging, get_logger
-setup_logging(log_level=logging.INFO)
-logger = get_logger(__name__)
 
-# Now import Streamlit and other dependencies
+# import Streamlit and other dependencies
 import streamlit as st
 import pandas as pd
+
+@st.cache_resource
+def _init_logging():
+    """Initialize logging once across all Streamlit reruns."""
+    return setup_logging(log_level=logging.INFO)
+
+
+_init_logging()
+logger = get_logger(__name__)
 
 # Page configuration - must be first Streamlit command
 st.set_page_config(
@@ -125,18 +130,20 @@ budget_mockup_page = st.Page(
 project_view_page = st.Page(
     "pages/project_view.py",
     title="Project View",
-    icon="📋"
+    icon="📋",
+    url_path="project-view"
 )
 employee_view_page = st.Page(
     "pages/employee_view.py",
     title="Employee View",
-    icon="👤"
+    icon="👤",
+    url_path="employee-view"
 )
 
 # Create navigation with sections
 # Main pages in "Menu" section, detail pages in separate section
-pg = st.navigation({
-    "Menu": [
+pg = st.navigation(
+    [
         overview_page,
         projects_page,
         employees_page,
@@ -145,13 +152,12 @@ pg = st.navigation({
         whatif_page,
         months_page,
         data_page,
-        budget_mockup_page
-    ],
-    "Details": [
+        budget_mockup_page,
         project_view_page,
         employee_view_page
-    ]
-})
+    ],
+    position="hidden"
+)
 
 # Quick stats in sidebar
 @st.cache_data(ttl=300, show_spinner=False)
@@ -274,6 +280,17 @@ def calculate_sidebar_stats():
 
 
 with st.sidebar:
+    st.page_link(overview_page, label="Overview Dashboard", icon="📊")
+    st.page_link(projects_page, label="Projects", icon="🚀")
+    st.page_link(employees_page, label="Employees", icon="👥")
+    st.page_link(timesheets_page, label="Timesheets", icon="🕐")
+    st.page_link(reports_page, label="Reports", icon="📈")
+    st.page_link(whatif_page, label="What-If Scenarios", icon="🔮")
+    st.page_link(months_page, label="Months", icon="📅")
+    st.page_link(data_page, label="Data Management", icon="💾")
+    st.page_link(budget_mockup_page, label="Budget Mockup", icon="💰")
+
+    st.markdown("---")
     st.markdown("### 📈 Quick Stats")
 
     # Get cached stats

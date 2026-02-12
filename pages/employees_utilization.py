@@ -9,44 +9,50 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 import calendar
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode, ColumnsAutoSizeMode
 
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-def render_utilization_tab(db, processor, employee_id=None):
+def render_utilization_tab(db, processor, employee_id=None, default_subtab=None):
     """Render the Employee Utilization Analysis tab with monthly and YTD metrics.
 
     Args:
         db: DatabaseManager instance
         processor: DataProcessor instance
         employee_id: Optional employee ID. If provided, filters the view to show only that employee's utilization.
+        default_subtab: Optional default subtab to select. Must be one of: "Monthly Detail", "Utilization Summary", "Utilization Timeline"
     """
     st.markdown("#### Employee Utilization Analysis")
-
-    # Tab selector
-    tab_selection = st.radio(
-        "View",
-        ["Monthly Detail", "Utilization Summary", "Utilization Timeline"],
-        horizontal=True,
-        key="util_tab_selection"
-    )
 
     # Initialize session state for grid selection versioning
     if "grid_selection_version" not in st.session_state:
         st.session_state.grid_selection_version = 0
 
-    # Shared year selector
+    # Shared year selector - used by all subtabs
     current_year = datetime.now().year
     year_options = list(range(current_year - 2, current_year + 2))
 
-    if tab_selection == "Monthly Detail":
+    # Validate default_subtab
+    valid_subtabs = ["Monthly Detail", "Utilization Summary", "Utilization Timeline"]
+    if default_subtab and default_subtab not in valid_subtabs:
+        default_subtab = None
+
+    # Create subtabs
+    tab1, tab2, tab3 = st.tabs(
+        ["Monthly Detail", "Utilization Summary", "Utilization Timeline"],
+        default=default_subtab
+    )
+
+    with tab1:
         _render_monthly_detail_tab(db, processor, year_options, current_year, employee_id=employee_id)
-    elif tab_selection == "Utilization Summary":
+
+    with tab2:
         _render_utilization_summary_tab(db, processor, year_options, current_year, employee_id=employee_id)
-    elif tab_selection == "Utilization Timeline":
+
+    with tab3:
         _render_utilization_timeline_tab(db, processor, year_options, current_year, employee_id=employee_id)
 
 
@@ -179,17 +185,17 @@ def _render_monthly_detail_tab(db, processor, year_options, current_year, employ
             emp_entries = time_entries_df[time_entries_df['employee_id'] == employee_id]
 
             if emp_entries.empty:
-                return pd.DataFrame(columns=['Project', 'Billable Hrs', 'Non-billable Hrs', 'Total Hrs', '% of Total'])
+                return pd.DataFrame(columns=['Project Code', 'Project', 'Billable Hrs', 'Non-billable Hrs', 'Total Hrs', '% of Total'])
 
             # Group by project and billable status
-            breakdown = emp_entries.groupby(['project_name', 'billable'])['hours'].sum().reset_index()
+            breakdown = emp_entries.groupby(['project_id', 'project_name', 'billable'])['hours'].sum().reset_index()
 
             # Pivot to get billable and non-billable columns
-            breakdown_pivot = breakdown.pivot(index='project_name', columns='billable', values='hours').reset_index()
+            breakdown_pivot = breakdown.pivot(index=['project_id', 'project_name'], columns='billable', values='hours').reset_index()
             breakdown_pivot.columns.name = None
 
             # Rename columns - billable=0 is non-billable, billable=1 is billable
-            column_map = {'project_name': 'Project'}
+            column_map = {'project_id': 'Project Code', 'project_name': 'Project'}
             if 0 in breakdown_pivot.columns:
                 column_map[0] = 'Non-billable Hrs'
             if 1 in breakdown_pivot.columns:
@@ -684,6 +690,7 @@ def _render_monthly_detail_tab(db, processor, year_options, current_year, employ
             grid_response = AgGrid(
                 display_df,
                 gridOptions=grid_options,
+                columns_auto_size_mode=ColumnsAutoSizeMode.FIT_ALL_COLUMNS_TO_VIEW,
                 height=500,
                 update_mode=GridUpdateMode.SELECTION_CHANGED,
                 allow_unsafe_jscode=True,  # Required for JsCode cell styling

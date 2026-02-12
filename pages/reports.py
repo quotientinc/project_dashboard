@@ -11,12 +11,21 @@ import pandas as pd
 from datetime import datetime
 import plotly.graph_objects as go
 import plotly.express as px
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode, ColumnsAutoSizeMode
 from utils.logger import get_logger
+from pages.project_review_details import render_project_review_tab
 
 logger = get_logger(__name__)
 
 db = st.session_state.db_manager
 processor = st.session_state.data_processor
+
+if "reports_coverage_grid_version" not in st.session_state:
+    st.session_state.reports_coverage_grid_version = 0
+if "reports_emp_alloc_grid_version" not in st.session_state:
+    st.session_state.reports_emp_alloc_grid_version = 0
+if "reports_proj_alloc_grid_version" not in st.session_state:
+    st.session_state.reports_proj_alloc_grid_version = 0
 
 
 # ============================================================================
@@ -232,7 +241,7 @@ def render_allocation_coverage_report():
                 reason.append("Missing end date")
 
             skipped_projects.append({
-                'Project ID': project_id,
+                'Project Code': project_id,
                 'Project Name': project_name,
                 'Client': client,
                 'Status': status,
@@ -274,7 +283,7 @@ def render_allocation_coverage_report():
                 partial_coverage.append(project_name)
 
         project_details.append({
-            'Project ID': project_id,
+            'Project Code': project_id,
             'Project Name': project_name,
             'Client': client,
             'Status': status,
@@ -366,33 +375,62 @@ def render_allocation_coverage_report():
     # Display table with row selection
     st.caption("💡 Click on a row to generate an allocation CSV template for that project")
 
-    selection = st.dataframe(
-        filtered_df,
-        width='stretch',
-        hide_index=True,
-        on_select="rerun",
-        selection_mode="single-row",
-        key="allocation_gaps_table",
-        column_config={
-            "Coverage %": st.column_config.ProgressColumn(
-                "Coverage %",
-                format="%.1f%%",
-                min_value=0,
-                max_value=100
-            ),
-            "Avg FTE": st.column_config.NumberColumn(
-                "Avg FTE",
-                format="%.2f"
-            )
+    gb = GridOptionsBuilder.from_dataframe(filtered_df)
+    gb.configure_selection(selection_mode='single', use_checkbox=False)
+    gb.configure_default_column(sortable=True, filterable=False)
+    gb.configure_column("Coverage %", type=["numericColumn"], cellRenderer=JsCode("""
+class CoverageRenderer {
+    init(params) {
+        this.eGui = document.createElement('div');
+        this.eGui.style.cssText = 'display:flex;align-items:center;height:100%';
+        const val = params.value;
+        if (val === null || val === undefined) {
+            this.eGui.textContent = '-';
+            return;
         }
+        const pct = Math.min(Math.max(val, 0), 100);
+        const color = pct >= 100 ? '#4caf50' : pct >= 50 ? '#ff9800' : '#f44336';
+        const track = document.createElement('div');
+        track.style.cssText = 'flex:1;background:#e0e0e0;border-radius:4px;height:16px;overflow:hidden;margin-right:8px';
+        const fill = document.createElement('div');
+        fill.style.cssText = 'height:100%;border-radius:4px;width:' + pct + '%;background:' + color;
+        track.appendChild(fill);
+        const label = document.createElement('span');
+        label.style.cssText = 'min-width:45px;text-align:right';
+        label.textContent = val.toFixed(1) + '%';
+        this.eGui.appendChild(track);
+        this.eGui.appendChild(label);
+    }
+    getGui() { return this.eGui; }
+    refresh() { return false; }
+}
+"""))
+    gb.configure_column("Avg FTE", type=["numericColumn"], valueFormatter=JsCode("""
+function(params) {
+    if (params.value === null || params.value === undefined) return '-';
+    return params.value.toFixed(2);
+}
+"""))
+    grid_options = gb.build()
+
+    grid_response = AgGrid(
+        filtered_df,
+        gridOptions=grid_options,
+        columns_auto_size_mode=ColumnsAutoSizeMode.FIT_ALL_COLUMNS_TO_VIEW,
+        height=500,
+        update_mode=GridUpdateMode.SELECTION_CHANGED,
+        allow_unsafe_jscode=True,
+        theme='streamlit',
+        key=f"coverage_aggrid_v{st.session_state.reports_coverage_grid_version}"
     )
 
     # Handle row selection
-    if selection and selection.selection.rows:
-        selected_idx = selection.selection.rows[0]
-        selected_row = filtered_df.iloc[selected_idx]
+    selected_rows = grid_response['selected_rows']
+    if selected_rows is not None and len(selected_rows) > 0:
+        selected_row = selected_rows.iloc[0] if hasattr(selected_rows, 'iloc') else selected_rows[0]
+        st.session_state.reports_coverage_grid_version += 1
         generate_allocation_csv_template(
-            selected_row['Project ID'],
+            selected_row['Project Code'],
             selected_row['Project Name'],
             selected_row['Start Date'],
             selected_row['End Date']
@@ -465,24 +503,14 @@ def render_monthly_allocation_report():
         return
 
     # Month selection
-    col1, col2 = st.columns([2, 1])
-
-    with col1:
-        month_options = {str(m): m.strftime('%B %Y') for m in unique_months}
-        selected_month_str = st.selectbox(
-            "Select Month",
-            options=list(month_options.keys()),
-            format_func=lambda x: month_options[x],
-            key="alloc_month_selector"
-        )
-        selected_month = pd.Period(selected_month_str)
-
-    with col2:
-        view_mode = st.radio(
-            "View",
-            ["Employee View", "Project View"],
-            key="alloc_view_mode"
-        )
+    month_options = {str(m): m.strftime('%B %Y') for m in unique_months}
+    selected_month_str = st.selectbox(
+        "Select Month",
+        options=list(month_options.keys()),
+        format_func=lambda x: month_options[x],
+        key="alloc_month_selector"
+    )
+    selected_month = pd.Period(selected_month_str)
 
     # Filter allocations for selected month
     month_allocations = allocations_df[
@@ -511,8 +539,10 @@ def render_monthly_allocation_report():
 
     st.divider()
 
+    emp_tab, proj_tab = st.tabs(["Employee View", "Project View"])
+
     # EMPLOYEE VIEW
-    if view_mode == "Employee View":
+    with emp_tab:
         employee_summary = []
 
         for _, emp in employees_df.iterrows():
@@ -558,170 +588,225 @@ def render_monthly_allocation_report():
 
         if summary_df.empty:
             st.info("No employee allocation data for this month.")
-            return
+        else:
+            # Summary metrics
+            st.markdown("##### Summary Dashboard")
 
-        # Summary metrics
-        st.markdown("##### Summary Dashboard")
+            total_employees = len(summary_df)
+            over_allocated = len(summary_df[summary_df['Variance %'] > 100])
+            under_allocated = len(summary_df[summary_df['Variance %'] < 80])
+            healthy = len(summary_df[(summary_df['Variance %'] >= 80) & (summary_df['Variance %'] <= 100)])
 
-        total_employees = len(summary_df)
-        over_allocated = len(summary_df[summary_df['Variance %'] > 100])
-        under_allocated = len(summary_df[summary_df['Variance %'] < 80])
-        healthy = len(summary_df[(summary_df['Variance %'] >= 80) & (summary_df['Variance %'] <= 100)])
+            col1, col2, col3, col4 = st.columns(4)
 
-        col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Active Employees", total_employees)
+            with col2:
+                over_pct = (over_allocated / total_employees * 100) if total_employees > 0 else 0
+                st.metric("Over-Allocated", over_allocated, delta=f"{over_pct:.1f}%", delta_color="inverse")
+            with col3:
+                under_pct = (under_allocated / total_employees * 100) if total_employees > 0 else 0
+                st.metric("Under-Allocated", under_allocated, delta=f"{under_pct:.1f}%", delta_color="off")
+            with col4:
+                healthy_pct = (healthy / total_employees * 100) if total_employees > 0 else 0
+                st.metric("Healthy Allocation", healthy, delta=f"{healthy_pct:.1f}%", delta_color="normal")
 
-        with col1:
-            st.metric("Total Active Employees", total_employees)
-        with col2:
-            over_pct = (over_allocated / total_employees * 100) if total_employees > 0 else 0
-            st.metric("Over-Allocated", over_allocated, delta=f"{over_pct:.1f}%", delta_color="inverse")
-        with col3:
-            under_pct = (under_allocated / total_employees * 100) if total_employees > 0 else 0
-            st.metric("Under-Allocated", under_allocated, delta=f"{under_pct:.1f}%", delta_color="off")
-        with col4:
-            healthy_pct = (healthy / total_employees * 100) if total_employees > 0 else 0
-            st.metric("Healthy Allocation", healthy, delta=f"{healthy_pct:.1f}%", delta_color="normal")
+            st.divider()
 
-        st.divider()
+            # Alerts
+            if over_allocated > 0:
+                critical_over = summary_df[summary_df['Variance %'] > 120]
+                if not critical_over.empty:
+                    st.warning(f"⚠️ **{len(critical_over)} employee(s) allocated >120%** - review workload: {', '.join(critical_over['Employee'].tolist()[:5])}")
 
-        # Alerts
-        if over_allocated > 0:
-            critical_over = summary_df[summary_df['Variance %'] > 120]
-            if not critical_over.empty:
-                st.warning(f"⚠️ **{len(critical_over)} employee(s) allocated >120%** - review workload: {', '.join(critical_over['Employee'].tolist()[:5])}")
+            if under_allocated > total_employees * 0.3:
+                st.info(f"📊 **{under_allocated} employees <80% allocated** - opportunities available for new projects")
 
-        if under_allocated > total_employees * 0.3:
-            st.info(f"📊 **{under_allocated} employees <80% allocated** - opportunities available for new projects")
+            # Filter and sort
+            st.markdown("##### Employee Allocation Details")
 
-        # Filter and sort
-        st.markdown("##### Employee Allocation Details")
+            col1, col2 = st.columns(2)
 
-        col1, col2 = st.columns(2)
-
-        with col1:
-            status_filter = st.selectbox(
-                "Filter by Status",
-                ["All", "🔴 Over", "🟢 Healthy", "🟡 Under"],
-                key="emp_status_filter"
-            )
-
-        with col2:
-            sort_by = st.selectbox(
-                "Sort by",
-                ["Variance % (High to Low)", "Variance % (Low to High)", "Employee Name", "Allocated FTE"],
-                key="emp_sort_by"
-            )
-
-        # Apply filter
-        filtered_df = summary_df.copy()
-        if status_filter != "All":
-            filtered_df = filtered_df[filtered_df['Status'] == status_filter]
-
-        # Apply sorting
-        if sort_by == "Variance % (High to Low)":
-            filtered_df = filtered_df.sort_values('Variance %', ascending=False)
-        elif sort_by == "Variance % (Low to High)":
-            filtered_df = filtered_df.sort_values('Variance %', ascending=True)
-        elif sort_by == "Employee Name":
-            filtered_df = filtered_df.sort_values('Employee')
-        elif sort_by == "Allocated FTE":
-            filtered_df = filtered_df.sort_values('Allocated FTE', ascending=False)
-
-        # Display table
-        display_df = filtered_df[[
-            'Employee', 'Role', 'Target FTE', 'Allocated FTE',
-            'Variance', 'Variance %', 'Project Count', 'Projects', 'Status'
-        ]].copy()
-
-        st.dataframe(
-            display_df,
-            width='stretch',
-            hide_index=True,
-            column_config={
-                "Target FTE": st.column_config.NumberColumn("Target FTE", format="%.2f"),
-                "Allocated FTE": st.column_config.NumberColumn("Allocated FTE", format="%.2f"),
-                "Variance": st.column_config.NumberColumn("Variance", format="%+.2f", help="Allocated - Target"),
-                "Variance %": st.column_config.ProgressColumn(
-                    "Utilization %",
-                    format="%.1f%%",
-                    min_value=0,
-                    max_value=150
+            with col1:
+                status_filter = st.selectbox(
+                    "Filter by Status",
+                    ["All", "🔴 Over", "🟢 Healthy", "🟡 Under"],
+                    key="emp_status_filter"
                 )
-            },
-            height=500
-        )
 
-        # Visualization
-        st.divider()
-        st.markdown("##### Allocation by Employee")
+            with col2:
+                sort_by = st.selectbox(
+                    "Sort by",
+                    ["Variance % (High to Low)", "Variance % (Low to High)", "Employee Name", "Allocated FTE"],
+                    key="emp_sort_by"
+                )
 
-        chart_data = []
-        for _, emp in filtered_df.iterrows():
-            emp_id = emp['Employee ID']
-            emp_name = emp['Employee']
-            target_fte = emp['Target FTE']
+            # Apply filter
+            filtered_df = summary_df.copy()
+            if status_filter != "All":
+                filtered_df = filtered_df[filtered_df['Status'] == status_filter]
 
-            emp_allocations = month_allocations[month_allocations['employee_id'] == emp_id]
+            # Apply sorting
+            if sort_by == "Variance % (High to Low)":
+                filtered_df = filtered_df.sort_values('Variance %', ascending=False)
+            elif sort_by == "Variance % (Low to High)":
+                filtered_df = filtered_df.sort_values('Variance %', ascending=True)
+            elif sort_by == "Employee Name":
+                filtered_df = filtered_df.sort_values('Employee')
+            elif sort_by == "Allocated FTE":
+                filtered_df = filtered_df.sort_values('Allocated FTE', ascending=False)
 
-            for _, alloc in emp_allocations.iterrows():
-                chart_data.append({
-                    'Employee': emp_name,
-                    'Project': alloc['project_name'],
-                    'FTE': alloc['allocated_fte'],
-                    'Target': target_fte
-                })
+            # Display table
+            # Include Employee ID for selection (will be hidden in grid)
+            display_df = filtered_df[[
+                'Employee ID', 'Employee', 'Role', 'Target FTE', 'Allocated FTE',
+                'Variance', 'Variance %', 'Project Count', 'Projects', 'Status'
+            ]].copy()
 
-        if chart_data:
-            chart_df = pd.DataFrame(chart_data)
+            st.caption("Click on an employee row to view details")
 
-            fig = go.Figure()
+            fte_formatter = JsCode("""
+function(params) {
+    if (params.value === null || params.value === undefined) return '-';
+    return params.value.toFixed(2);
+}
+""")
+            variance_formatter = JsCode("""
+function(params) {
+    if (params.value === null || params.value === undefined) return '-';
+    return (params.value >= 0 ? '+' : '') + params.value.toFixed(2);
+}
+""")
+            gb = GridOptionsBuilder.from_dataframe(display_df)
+            gb.configure_selection(selection_mode='single', use_checkbox=False)
+            gb.configure_default_column(sortable=True, filterable=False)
+            gb.configure_column("Employee ID", hide=True)
+            gb.configure_column("Target FTE", type=["numericColumn"], valueFormatter=fte_formatter)
+            gb.configure_column("Allocated FTE", type=["numericColumn"], valueFormatter=fte_formatter)
+            gb.configure_column("Variance", type=["numericColumn"], valueFormatter=variance_formatter)
+            gb.configure_column("Variance %", headerName="Utilization %", type=["numericColumn"], cellRenderer=JsCode("""
+class UtilizationRenderer {
+    init(params) {
+        this.eGui = document.createElement('div');
+        this.eGui.style.cssText = 'display:flex;align-items:center;height:100%';
+        const val = params.value;
+        if (val === null || val === undefined) {
+            this.eGui.textContent = '-';
+            return;
+        }
+        const pct = Math.min(Math.max(val, 0), 150);
+        const barWidth = pct / 150 * 100;
+        const color = val > 100 ? '#f44336' : val >= 80 ? '#4caf50' : '#ff9800';
+        const track = document.createElement('div');
+        track.style.cssText = 'flex:1;background:#e0e0e0;border-radius:4px;height:16px;overflow:hidden;margin-right:8px';
+        const fill = document.createElement('div');
+        fill.style.cssText = 'height:100%;border-radius:4px;width:' + barWidth + '%;background:' + color;
+        track.appendChild(fill);
+        const label = document.createElement('span');
+        label.style.cssText = 'min-width:45px;text-align:right';
+        label.textContent = val.toFixed(1) + '%';
+        this.eGui.appendChild(track);
+        this.eGui.appendChild(label);
+    }
+    getGui() { return this.eGui; }
+    refresh() { return false; }
+}
+"""))
+            grid_options = gb.build()
 
-            for project in chart_df['Project'].unique():
-                project_data = chart_df[chart_df['Project'] == project]
-                fig.add_trace(go.Bar(
-                    name=project,
-                    x=project_data['Employee'],
-                    y=project_data['FTE'],
-                    text=project_data['FTE'].apply(lambda x: f"{x:.2f}"),
-                    textposition='inside'
+            emp_grid_response = AgGrid(
+                display_df,
+                gridOptions=grid_options,
+                columns_auto_size_mode=ColumnsAutoSizeMode.FIT_ALL_COLUMNS_TO_VIEW,
+                height=500,
+                update_mode=GridUpdateMode.SELECTION_CHANGED,
+                allow_unsafe_jscode=True,
+                theme='streamlit',
+                key=f"emp_alloc_aggrid_v{st.session_state.reports_emp_alloc_grid_version}"
+            )
+
+            # Visualization
+            st.divider()
+            st.markdown("##### Allocation by Employee")
+
+            chart_data = []
+            for _, emp in filtered_df.iterrows():
+                emp_id = emp['Employee ID']
+                emp_name = emp['Employee']
+                target_fte = emp['Target FTE']
+
+                emp_allocations = month_allocations[month_allocations['employee_id'] == emp_id]
+
+                for _, alloc in emp_allocations.iterrows():
+                    chart_data.append({
+                        'Employee': emp_name,
+                        'Project': alloc['project_name'],
+                        'FTE': alloc['allocated_fte'],
+                        'Target': target_fte
+                    })
+
+            if chart_data:
+                chart_df = pd.DataFrame(chart_data)
+
+                fig = go.Figure()
+
+                for project in chart_df['Project'].unique():
+                    project_data = chart_df[chart_df['Project'] == project]
+                    fig.add_trace(go.Bar(
+                        name=project,
+                        x=project_data['Employee'],
+                        y=project_data['FTE'],
+                        text=project_data['FTE'].apply(lambda x: f"{x:.2f}"),
+                        textposition='inside'
+                    ))
+
+                employees_ordered = filtered_df.sort_values('Allocated FTE', ascending=False)['Employee'].tolist()
+                target_values = [filtered_df[filtered_df['Employee'] == emp]['Target FTE'].values[0] for emp in employees_ordered]
+
+                fig.add_trace(go.Scatter(
+                    x=employees_ordered,
+                    y=target_values,
+                    name='Target FTE',
+                    mode='lines+markers',
+                    line=dict(color='red', width=2, dash='dash'),
+                    marker=dict(size=8)
                 ))
 
-            employees_ordered = filtered_df.sort_values('Allocated FTE', ascending=False)['Employee'].tolist()
-            target_values = [filtered_df[filtered_df['Employee'] == emp]['Target FTE'].values[0] for emp in employees_ordered]
+                fig.update_layout(
+                    title="Employee Allocation vs Target",
+                    xaxis_title="Employee",
+                    yaxis_title="FTE",
+                    barmode='stack',
+                    height=500,
+                    hovermode='x unified',
+                    showlegend=True
+                )
 
-            fig.add_trace(go.Scatter(
-                x=employees_ordered,
-                y=target_values,
-                name='Target FTE',
-                mode='lines+markers',
-                line=dict(color='red', width=2, dash='dash'),
-                marker=dict(size=8)
-            ))
+                st.plotly_chart(fig, width='stretch')
 
-            fig.update_layout(
-                title="Employee Allocation vs Target",
-                xaxis_title="Employee",
-                yaxis_title="FTE",
-                barmode='stack',
-                height=500,
-                hovermode='x unified',
-                showlegend=True
+            # Export
+            st.divider()
+            csv = display_df.drop(columns=['Employee ID']).to_csv(index=False)
+            st.download_button(
+                label="📥 Download Employee Allocation Report",
+                data=csv,
+                file_name=f"employee_allocation_{selected_month.strftime('%Y_%m')}_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv"
             )
 
-            st.plotly_chart(fig, width='stretch')
+            # Handle employee row selection - navigate to detail page
+            selected_rows = emp_grid_response['selected_rows']
+            if selected_rows is not None and len(selected_rows) > 0:
+                selected_row = selected_rows.iloc[0] if hasattr(selected_rows, 'iloc') else selected_rows[0]
+                selected_emp_id = int(selected_row['Employee ID'])
 
-        # Export
-        st.divider()
-        csv = display_df.to_csv(index=False)
-        st.download_button(
-            label="📥 Download Employee Allocation Report",
-            data=csv,
-            file_name=f"employee_allocation_{selected_month.strftime('%Y_%m')}_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv"
-        )
+                st.session_state.selected_employee_id = selected_emp_id
+                st.session_state.selected_employee_name = selected_row['Employee']
+                st.session_state.reports_emp_alloc_grid_version += 1
+                st.switch_page("pages/employee_view.py")
 
     # PROJECT VIEW
-    else:
+    with proj_tab:
         project_summary = []
 
         for project_id in month_allocations['project_id'].unique():
@@ -750,7 +835,7 @@ def render_monthly_allocation_report():
                 projected_revenue += alloc_hours * bill_rate
 
             project_summary.append({
-                'Project ID': project_id,
+                'Project Code': project_id,
                 'Project Name': project_name,
                 'Status': project_status,
                 'Total FTE': total_fte,
@@ -764,126 +849,164 @@ def render_monthly_allocation_report():
 
         if project_summary_df.empty:
             st.info("No project allocation data for this month.")
-            return
+        else:
+            # Summary metrics
+            st.markdown("##### Project Summary Dashboard")
 
-        # Summary metrics
-        st.markdown("##### Project Summary Dashboard")
+            total_projects = len(project_summary_df)
+            total_fte_allocated = project_summary_df['Total FTE'].sum()
+            total_hours = project_summary_df['Projected Hours'].sum()
+            total_revenue = project_summary_df['Projected Revenue'].sum()
 
-        total_projects = len(project_summary_df)
-        total_fte_allocated = project_summary_df['Total FTE'].sum()
-        total_hours = project_summary_df['Projected Hours'].sum()
-        total_revenue = project_summary_df['Projected Revenue'].sum()
+            col1, col2, col3, col4 = st.columns(4)
 
-        col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Projects", total_projects)
+            with col2:
+                st.metric("Total FTE Allocated", f"{total_fte_allocated:.1f}")
+            with col3:
+                st.metric("Projected Hours", f"{total_hours:,.0f}")
+            with col4:
+                st.metric("Projected Revenue", f"${total_revenue:,.0f}")
 
-        with col1:
-            st.metric("Total Projects", total_projects)
-        with col2:
-            st.metric("Total FTE Allocated", f"{total_fte_allocated:.1f}")
-        with col3:
-            st.metric("Projected Hours", f"{total_hours:,.0f}")
-        with col4:
-            st.metric("Projected Revenue", f"${total_revenue:,.0f}")
+            st.divider()
 
-        st.divider()
+            # Check for unallocated active projects
+            active_projects = projects_df[projects_df['status'].isin(['Active', 'Future'])]
+            allocated_project_ids = month_allocations['project_id'].unique()
+            unallocated_projects = active_projects[~active_projects['id'].isin(allocated_project_ids)]
 
-        # Check for unallocated active projects
-        active_projects = projects_df[projects_df['status'].isin(['Active', 'Future'])]
-        allocated_project_ids = month_allocations['project_id'].unique()
-        unallocated_projects = active_projects[~active_projects['id'].isin(allocated_project_ids)]
+            if not unallocated_projects.empty:
+                st.warning(f"🔴 **{len(unallocated_projects)} active/future project(s) have no team allocations** for {selected_month.strftime('%B %Y')}")
 
-        if not unallocated_projects.empty:
-            st.warning(f"🔴 **{len(unallocated_projects)} active/future project(s) have no team allocations** for {selected_month.strftime('%B %Y')}")
+            # Filter and sort
+            st.markdown("##### Project Allocation Details")
 
-        # Filter and sort
-        st.markdown("##### Project Allocation Details")
+            col1, col2 = st.columns(2)
 
-        col1, col2 = st.columns(2)
+            with col1:
+                project_status_filter = st.selectbox(
+                    "Filter by Status",
+                    ["All"] + sorted(project_summary_df['Status'].unique().tolist()),
+                    key="proj_status_filter"
+                )
 
-        with col1:
-            project_status_filter = st.selectbox(
-                "Filter by Status",
-                ["All"] + sorted(project_summary_df['Status'].unique().tolist()),
-                key="proj_status_filter"
+            with col2:
+                proj_sort_by = st.selectbox(
+                    "Sort by",
+                    ["Total FTE (High to Low)", "Total FTE (Low to High)", "Project Name", "Projected Revenue"],
+                    key="proj_sort_by"
+                )
+
+            # Apply filter
+            filtered_proj_df = project_summary_df.copy()
+            if project_status_filter != "All":
+                filtered_proj_df = filtered_proj_df[filtered_proj_df['Status'] == project_status_filter]
+
+            # Apply sorting
+            if proj_sort_by == "Total FTE (High to Low)":
+                filtered_proj_df = filtered_proj_df.sort_values('Total FTE', ascending=False)
+            elif proj_sort_by == "Total FTE (Low to High)":
+                filtered_proj_df = filtered_proj_df.sort_values('Total FTE', ascending=True)
+            elif proj_sort_by == "Project Name":
+                filtered_proj_df = filtered_proj_df.sort_values('Project Name')
+            elif proj_sort_by == "Projected Revenue":
+                filtered_proj_df = filtered_proj_df.sort_values('Projected Revenue', ascending=False)
+
+            # Display table
+            display_proj_df = filtered_proj_df[[
+                'Project Code', 'Project Name', 'Status', 'Total FTE', 'Employee Count',
+                'Employees', 'Projected Hours', 'Projected Revenue'
+            ]].copy()
+
+            st.caption("Click on a project row to view details")
+
+            fte_formatter = JsCode("""
+function(params) {
+    if (params.value === null || params.value === undefined) return '-';
+    return params.value.toFixed(2);
+}
+""")
+            hours_formatter = JsCode("""
+function(params) {
+    if (params.value === null || params.value === undefined) return '-';
+    return Math.round(params.value).toLocaleString();
+}
+""")
+            currency_formatter = JsCode("""
+function(params) {
+    if (params.value === null || params.value === undefined) return '-';
+    return '$' + Math.round(params.value).toLocaleString();
+}
+""")
+
+            gb = GridOptionsBuilder.from_dataframe(display_proj_df)
+            gb.configure_selection(selection_mode='single', use_checkbox=False)
+            gb.configure_default_column(sortable=True, filterable=False)
+            gb.configure_column("Total FTE", type=["numericColumn"], valueFormatter=fte_formatter)
+            gb.configure_column("Projected Hours", type=["numericColumn"], valueFormatter=hours_formatter)
+            gb.configure_column("Projected Revenue", type=["numericColumn"], valueFormatter=currency_formatter)
+            grid_options = gb.build()
+
+            proj_grid_response = AgGrid(
+                display_proj_df,
+                gridOptions=grid_options,
+                columns_auto_size_mode=ColumnsAutoSizeMode.FIT_ALL_COLUMNS_TO_VIEW,
+                height=500,
+                update_mode=GridUpdateMode.SELECTION_CHANGED,
+                allow_unsafe_jscode=True,
+                theme='streamlit',
+                key=f"proj_alloc_aggrid_v{st.session_state.reports_proj_alloc_grid_version}"
             )
 
-        with col2:
-            proj_sort_by = st.selectbox(
-                "Sort by",
-                ["Total FTE (High to Low)", "Total FTE (Low to High)", "Project Name", "Projected Revenue"],
-                key="proj_sort_by"
+            # Visualization
+            st.divider()
+            st.markdown("##### FTE Allocation by Project")
+
+            top_projects = filtered_proj_df.nlargest(20, 'Total FTE')
+
+            fig = go.Figure()
+
+            fig.add_trace(go.Bar(
+                x=top_projects['Project Name'],
+                y=top_projects['Total FTE'],
+                text=top_projects['Total FTE'].apply(lambda x: f"{x:.1f}"),
+                textposition='outside',
+                marker_color='#007bff'
+            ))
+
+            fig.update_layout(
+                title=f"Top {len(top_projects)} Projects by FTE Allocation",
+                xaxis_title="Project",
+                yaxis_title="Total FTE",
+                height=500,
+                showlegend=False
             )
 
-        # Apply filter
-        filtered_proj_df = project_summary_df.copy()
-        if project_status_filter != "All":
-            filtered_proj_df = filtered_proj_df[filtered_proj_df['Status'] == project_status_filter]
+            fig.update_xaxes(tickangle=-45)
 
-        # Apply sorting
-        if proj_sort_by == "Total FTE (High to Low)":
-            filtered_proj_df = filtered_proj_df.sort_values('Total FTE', ascending=False)
-        elif proj_sort_by == "Total FTE (Low to High)":
-            filtered_proj_df = filtered_proj_df.sort_values('Total FTE', ascending=True)
-        elif proj_sort_by == "Project Name":
-            filtered_proj_df = filtered_proj_df.sort_values('Project Name')
-        elif proj_sort_by == "Projected Revenue":
-            filtered_proj_df = filtered_proj_df.sort_values('Projected Revenue', ascending=False)
+            st.plotly_chart(fig, width='stretch')
 
-        # Display table
-        display_proj_df = filtered_proj_df[[
-            'Project Name', 'Status', 'Total FTE', 'Employee Count',
-            'Employees', 'Projected Hours', 'Projected Revenue'
-        ]].copy()
+            # Export
+            st.divider()
+            csv = display_proj_df.to_csv(index=False)
+            st.download_button(
+                label="📥 Download Project Allocation Report",
+                data=csv,
+                file_name=f"project_allocation_{selected_month.strftime('%Y_%m')}_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv"
+            )
 
-        st.dataframe(
-            display_proj_df,
-            width='stretch',
-            hide_index=True,
-            column_config={
-                "Total FTE": st.column_config.NumberColumn("Total FTE", format="%.2f"),
-                "Projected Hours": st.column_config.NumberColumn("Projected Hours", format="%.0f"),
-                "Projected Revenue": st.column_config.NumberColumn("Projected Revenue", format="$%.0f")
-            },
-            height=500
-        )
+            # Handle project row selection - navigate to detail page
+            selected_rows = proj_grid_response['selected_rows']
+            if selected_rows is not None and len(selected_rows) > 0:
+                selected_row = selected_rows.iloc[0] if hasattr(selected_rows, 'iloc') else selected_rows[0]
+                selected_proj_id = selected_row['Project Code']
 
-        # Visualization
-        st.divider()
-        st.markdown("##### FTE Allocation by Project")
-
-        top_projects = filtered_proj_df.nlargest(20, 'Total FTE')
-
-        fig = go.Figure()
-
-        fig.add_trace(go.Bar(
-            x=top_projects['Project Name'],
-            y=top_projects['Total FTE'],
-            text=top_projects['Total FTE'].apply(lambda x: f"{x:.1f}"),
-            textposition='outside',
-            marker_color='#007bff'
-        ))
-
-        fig.update_layout(
-            title=f"Top {len(top_projects)} Projects by FTE Allocation",
-            xaxis_title="Project",
-            yaxis_title="Total FTE",
-            height=500,
-            showlegend=False
-        )
-
-        fig.update_xaxes(tickangle=-45)
-
-        st.plotly_chart(fig, width='stretch')
-
-        # Export
-        st.divider()
-        csv = display_proj_df.to_csv(index=False)
-        st.download_button(
-            label="📥 Download Project Allocation Report",
-            data=csv,
-            file_name=f"project_allocation_{selected_month.strftime('%Y_%m')}_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv"
-        )
+                st.session_state.selected_project_id = selected_proj_id
+                st.session_state.selected_project_name = selected_row['Project Name']
+                st.session_state.reports_proj_alloc_grid_version += 1
+                st.switch_page("pages/project_view.py")
 
 
 # ============================================================================
@@ -960,7 +1083,7 @@ def render_financial_summary_report():
     st.markdown("##### Project Details")
 
     # Prepare display data
-    display_df = filtered_df[['name', 'status', 'quoted_value', 'awarded_value', 'budget_used']].copy()
+    display_df = filtered_df[['id', 'name', 'status', 'quoted_value', 'awarded_value', 'budget_used']].copy()
 
     # Calculate variances
     display_df['Budget %'] = ((display_df['budget_used'] / display_df['quoted_value']) * 100).round(1)
@@ -977,9 +1100,9 @@ def render_financial_summary_report():
 
     # Select columns to show
     final_df = display_df[[
-        'name', 'status', 'Quoted Value', 'Awarded Value', 'Budget Used', 'Budget %', 'Budget Variance', 'Funding Gap'
+        'id', 'name', 'status', 'Quoted Value', 'Awarded Value', 'Budget Used', 'Budget %', 'Budget Variance', 'Funding Gap'
     ]].copy()
-    final_df.rename(columns={'name': 'Project Name', 'status': 'Status'}, inplace=True)
+    final_df.rename(columns={'id': 'Project Code', 'name': 'Project Name', 'status': 'Status'}, inplace=True)
 
     st.dataframe(
         final_df,
@@ -1533,35 +1656,30 @@ def render_financial_analysis_report():
 
 
 # ============================================================================
-# MAIN PAGE LOGIC - Lazy Loading Pattern
+# MAIN PAGE LOGIC
 # ============================================================================
 
 st.markdown("### 📑 Reports")
 
-# Lazy loading: Use radio buttons to select report and only render the active one
-report_names = [
-    "Allocation Coverage Analysis",
-    "Monthly Resource Allocation",
-    "Project Financial Summary",
-    "Financial Analysis"
-]
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "Allocation Coverage",
+    "Monthly Allocation",
+    "Financial Summary",
+    "Financial Analysis",
+    "Project Review"
+])
 
-selected_report = st.radio(
-    "Select Report",
-    report_names,
-    horizontal=True,
-    key="report_selector",
-    label_visibility="collapsed"
-)
-
-st.markdown("---")
-
-# Lazy render: Only execute the selected report's function
-if selected_report == "Allocation Coverage Analysis":
+with tab1:
     render_allocation_coverage_report()
-elif selected_report == "Monthly Resource Allocation":
+
+with tab2:
     render_monthly_allocation_report()
-elif selected_report == "Project Financial Summary":
+
+with tab3:
     render_financial_summary_report()
-elif selected_report == "Financial Analysis":
+
+with tab4:
     render_financial_analysis_report()
+
+with tab5:
+    render_project_review_tab(db, processor)

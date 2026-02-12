@@ -7,7 +7,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, date
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, ColumnsAutoSizeMode
 from utils.project_helpers import safe_currency_display, safe_budget_percentage
 from utils.logger import get_logger
 
@@ -355,6 +355,7 @@ def _render_phase_management(db, project_id):
     grid_response = AgGrid(
         display_df,
         gridOptions=grid_options,
+        columns_auto_size_mode=ColumnsAutoSizeMode.FIT_ALL_COLUMNS_TO_VIEW,
         height=min(500, max(200, len(display_df) * 45 + 50)),
         update_mode=GridUpdateMode.SELECTION_CHANGED | GridUpdateMode.VALUE_CHANGED,
         theme='streamlit',

@@ -7,7 +7,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode, ColumnsAutoSizeMode
 
 from utils.funding_helpers import (
     calculate_avg_monthly_invoice,
@@ -482,6 +482,7 @@ def render_project_review_tab(db, processor):
         grid_response = AgGrid(
             display_df,
             gridOptions=grid_options,
+            columns_auto_size_mode=ColumnsAutoSizeMode.FIT_ALL_COLUMNS_TO_VIEW,
             height=500,
             update_mode=GridUpdateMode.SELECTION_CHANGED,
             allow_unsafe_jscode=True,

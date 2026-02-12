@@ -5,7 +5,7 @@ import streamlit as st
 import pandas as pd
 
 
-def render_employee_detail_tab(db, processor, employee_id=None):
+def render_employee_detail_tab(db, processor, employee_id=None, default_subtab=None):
     """Render the Employee Detail (Edit) tab with project allocations and employee data subtabs.
 
     Args:
@@ -45,7 +45,14 @@ def render_employee_detail_tab(db, processor, employee_id=None):
     st.markdown(f"### {employee['name']}")
 
     # Create subtabs for Project Allocations and Employee Data
-    detail_tab1, detail_tab2 = st.tabs(["Project Allocations", "Edit Employee Data"])
+    valid_subtabs = ["Project Allocations", "Edit Employee Data"]
+    if default_subtab and default_subtab not in valid_subtabs:
+        default_subtab = None
+
+    detail_tab1, detail_tab2 = st.tabs(
+        ["Project Allocations", "Edit Employee Data"],
+        default=default_subtab
+    )
 
     # Subtab 1: Project Allocation Management
     with detail_tab1:

@@ -651,8 +651,9 @@ if not time_entries_df.empty:
     # Convert date to datetime for proper sorting
     time_entries_df['date'] = pd.to_datetime(time_entries_df['date'])
     recent_entries = time_entries_df.nlargest(10, 'date')[
-        ['date', 'employee_name', 'project_name', 'hours', 'billable', 'description']
+        ['date', 'employee_name', 'project_id', 'project_name', 'hours', 'billable', 'description']
     ].copy()
+    recent_entries = recent_entries.rename(columns={'project_id': 'Project Code'})
     # Format date back to string for display
     recent_entries['date'] = recent_entries['date'].dt.strftime('%Y-%m-%d')
     # Add visual indicator for billable status
