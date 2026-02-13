@@ -480,11 +480,14 @@ Tips:
         if not emp_allocs.empty:
             month_info = months_df[(months_df['year'] == selected_year) & (months_df['month'] == alloc_month)]
             working_days = int(month_info['working_days'].iloc[0]) if not month_info.empty else 21
+            holidays = month_info['holidays'].iloc[0] if not month_info.empty and 'holidays' in month_info.columns else 0
+            holidays = holidays if pd.notna(holidays) else 0
+            available_days = max(working_days - holidays, 0)
 
             breakdown = []
             for _, alloc in emp_allocs.iterrows():
                 allocated_fte = alloc.get('allocated_fte', 0)
-                alloc_hours = allocated_fte * working_days * 8
+                alloc_hours = allocated_fte * available_days * 8
                 breakdown.append({
                     'Project': alloc.get('project_name', 'Unknown'),
                     'Allocated FTE': round(allocated_fte, 2),

@@ -163,10 +163,10 @@ def _render_monthly_detail_tab(db, processor, year_options, current_year, employ
         # Get months data for working days calculation
         months_df = db.get_months()
 
-        # Get time entries for PTO calculation
+        # Get time entries for PTO and Holiday calculation
         time_entries_df = db.get_time_entries(start_date=start_date, end_date=end_date)
 
-        # Calculate PTO hours by employee for this month
+        # Calculate PTO and Holiday hours by employee for this month
         pto_by_employee = {}
         holiday_by_employee = {}
         if not time_entries_df.empty:
@@ -302,6 +302,9 @@ def _render_monthly_detail_tab(db, processor, year_options, current_year, employ
                 st.error(f"Employee {employee_id} not found")
                 return
 
+        # Get YTD time entries for PTO and Holiday calculation (fetched once, used per-employee in the loop below)
+        ytd_time_entries_df = db.get_time_entries(start_date=ytd_start_date, end_date=end_date)
+
         # Build utilization DataFrame
         util_data = []
 
@@ -377,9 +380,6 @@ def _render_monthly_detail_tab(db, processor, year_options, current_year, employ
             ytd_actual_billable_hours = 0
             ytd_pto_hours = 0
             ytd_holiday_hours = 0
-
-            # Get YTD time entries for PTO and Holiday calculation
-            ytd_time_entries_df = db.get_time_entries(start_date=ytd_start_date, end_date=end_date)
 
             for month_num in range(1, selected_month + 1):
                 ytd_month_date = datetime(selected_year, month_num, 1)
@@ -873,7 +873,7 @@ def _get_period_date_range(time_frame, year):
             start_date, end_date = gov_quarters["Q4 (Gov)"]
 
     elif time_frame == "YTD (Company)":
-        # Calendar year-to-date: Jan 1 → today (or Dec 31 for past years)
+        # Calendar year-to-date: Jan 1 -> today (or Dec 31 for past years)
         start_date = f"{year}-01-01"
         if year == now.year:
             end_date = today_str
@@ -881,8 +881,8 @@ def _get_period_date_range(time_frame, year):
             end_date = f"{year}-12-31"
 
     elif time_frame == "YTD (Gov)":
-        # Gov fiscal year-to-date: Oct 1 (prior year) → today (or Sep 30 for past FY)
-        # Gov FY convention: FY2026 = Oct 1, 2025 → Sep 30, 2026
+        # Gov fiscal year-to-date: Oct 1 (prior year) -> today (or Sep 30 for past FY)
+        # Gov FY convention: FY2026 = Oct 1, 2025 -> Sep 30, 2026
         start_date = f"{year - 1}-10-01"
         fy_end = f"{year}-09-30"
         if year == now.year and today_str <= fy_end:
@@ -1145,8 +1145,9 @@ def _calculate_monthly_utilization_data(db, processor, selected_year, selected_m
     Returns:
         tuple: (util_df, month_key, time_entries_df) where util_df is a DataFrame with columns:
             employee_id, name, role, pay_type, possible_hours, projected_hours,
-            actual_hours, actual_billable_hours, pto_hours, other_nonbillable_hours,
-            utilization_pct, variance, status, ytd_possible_hours, ytd_actual_billable_hours,
+            actual_hours, actual_billable_hours, pto_hours, holiday_hours,
+            other_nonbillable_hours, utilization_pct, variance, status,
+            ytd_possible_hours, ytd_actual_billable_hours,
             ytd_utilization_pct, status_num, worked_days
     """
     month_names_list = [
@@ -1180,15 +1181,24 @@ def _calculate_monthly_utilization_data(db, processor, selected_year, selected_m
     # Get months data for working days calculation
     months_df = db.get_months()
 
-    # Get time entries for PTO calculation
+    # Get time entries for PTO and Holiday calculation
     time_entries_df = db.get_time_entries(start_date=start_date, end_date=end_date)
 
-    # Calculate PTO hours by employee for this month
+    # Calculate PTO and Holiday hours by employee for this month
     pto_by_employee = {}
+    holiday_by_employee = {}
     if not time_entries_df.empty:
         pto_entries = time_entries_df[time_entries_df['project_id'] == 'FRINGE.PTO']
         if not pto_entries.empty:
             pto_by_employee = pto_entries.groupby('employee_id')['hours'].sum().to_dict()
+
+        # Extract holiday hours (FRINGE.HOL)
+        holiday_entries = time_entries_df[time_entries_df['project_id'] == 'FRINGE.HOL']
+        if not holiday_entries.empty:
+            holiday_by_employee = holiday_entries.groupby('employee_id')['hours'].sum().to_dict()
+
+    # Get YTD time entries for PTO and Holiday calculation (fetched once, used per-employee in the loop below)
+    ytd_time_entries_df = db.get_time_entries(start_date=ytd_start_date, end_date=end_date)
 
     # Get employees dataframe
     if employees_df is None:
@@ -1257,16 +1267,25 @@ def _calculate_monthly_utilization_data(db, processor, selected_year, selected_m
         # Get PTO hours for this employee
         pto_hours = pto_by_employee.get(emp['id'], 0)
 
-        # Calculate other non-billable hours (excluding PTO)
-        total_nonbillable_hours = actual_hours - actual_billable_hours
-        other_nonbillable_hours = total_nonbillable_hours - pto_hours
+        # Get Holiday hours for this employee
+        holiday_hours = holiday_by_employee.get(emp['id'], 0)
 
-        utilization_pct = (actual_billable_hours / adjusted_possible_hours * 100) if adjusted_possible_hours > 0 else 0
+        # Calculate available hours (exclude PTO and Holiday from denominator)
+        available_hours = max(adjusted_possible_hours - pto_hours - holiday_hours, 0)
+
+        # Calculate other non-billable hours (excluding PTO and Holiday)
+        total_nonbillable_hours = actual_hours - actual_billable_hours
+        other_nonbillable_hours = max(total_nonbillable_hours - pto_hours - holiday_hours, 0)
+
+        # Calculate utilization using available hours as denominator
+        utilization_pct = (actual_billable_hours / available_hours * 100) if available_hours > 0 else 0
         variance = actual_hours - projected_hours
 
         # Calculate YTD metrics
         ytd_possible_hours = 0
         ytd_actual_billable_hours = 0
+        ytd_pto_hours = 0
+        ytd_holiday_hours = 0
 
         for month_num in range(1, selected_month + 1):
             ytd_month_date = datetime(selected_year, month_num, 1)
@@ -1293,7 +1312,33 @@ def _calculate_monthly_utilization_data(db, processor, selected_year, selected_m
             ytd_actuals_emp = ytd_metrics['actuals'].get(ytd_month_key, {}).get(emp_id_str, {})
             ytd_actual_billable_hours += ytd_actuals_emp.get('billable_hours', 0)
 
-        ytd_utilization_pct = (ytd_actual_billable_hours / ytd_possible_hours * 100) if ytd_possible_hours > 0 else 0
+            # Calculate PTO and Holiday hours for this month from YTD time entries
+            if not ytd_time_entries_df.empty:
+                # Filter for this specific month
+                ytd_month_last_day = calendar.monthrange(selected_year, month_num)[1]
+                month_start_str = f"{selected_year}-{month_num:02d}-01"
+                month_end_str = f"{selected_year}-{month_num:02d}-{ytd_month_last_day}"
+
+                month_entries = ytd_time_entries_df[
+                    (ytd_time_entries_df['date'] >= month_start_str) &
+                    (ytd_time_entries_df['date'] <= month_end_str) &
+                    (ytd_time_entries_df['employee_id'] == emp['id'])
+                ]
+
+                if not month_entries.empty:
+                    # PTO hours for this month
+                    month_pto = month_entries[month_entries['project_id'] == 'FRINGE.PTO']['hours'].sum()
+                    ytd_pto_hours += month_pto
+
+                    # Holiday hours for this month
+                    month_holiday = month_entries[month_entries['project_id'] == 'FRINGE.HOL']['hours'].sum()
+                    ytd_holiday_hours += month_holiday
+
+        # Calculate YTD available hours (exclude PTO and Holiday from denominator)
+        ytd_available_hours = max(ytd_possible_hours - ytd_pto_hours - ytd_holiday_hours, 0)
+
+        # Calculate YTD utilization percentage using available hours
+        ytd_utilization_pct = (ytd_actual_billable_hours / ytd_available_hours * 100) if ytd_available_hours > 0 else 0
 
         # Determine status
         if utilization_pct > 120:
@@ -1319,6 +1364,7 @@ def _calculate_monthly_utilization_data(db, processor, selected_year, selected_m
             'actual_hours': actual_hours,
             'actual_billable_hours': actual_billable_hours,
             'pto_hours': pto_hours,
+            'holiday_hours': holiday_hours,
             'other_nonbillable_hours': other_nonbillable_hours,
             'utilization_pct': utilization_pct,
             'variance': variance,
@@ -1352,7 +1398,7 @@ def _calculate_period_utilization_data(db, processor, start_date, end_date,
     Returns:
         tuple: (util_df, period_label, time_entries_df)
             - util_df: DataFrame with columns matching _calculate_monthly_utilization_data output
-            - period_label: Human-readable label like "February 2026" or "January 2026 – March 2026"
+            - period_label: Human-readable label like "February 2026" or "January 2026 - March 2026"
             - time_entries_df: Combined time entries for the period
     """
     month_keys = _get_months_in_range(start_date, end_date)
@@ -1403,8 +1449,8 @@ def _calculate_period_utilization_data(db, processor, start_date, end_date,
     # Define aggregation rules
     sum_cols = [
         'possible_hours', 'projected_hours', 'actual_hours',
-        'actual_billable_hours', 'pto_hours', 'other_nonbillable_hours',
-        'worked_days',
+        'actual_billable_hours', 'pto_hours', 'holiday_hours',
+        'other_nonbillable_hours', 'worked_days',
     ]
     last_cols = [
         'ytd_possible_hours', 'ytd_actual_billable_hours',
@@ -1421,12 +1467,16 @@ def _calculate_period_utilization_data(db, processor, start_date, end_date,
 
     agg_df = combined.groupby(['employee_id', 'name'], as_index=False).agg(agg_dict)
 
-    # Recalculate derived fields
+    # Recalculate derived fields using available hours (excluding PTO and Holiday)
+    agg_df['available_hours'] = (
+        agg_df['possible_hours'] - agg_df['pto_hours'] - agg_df['holiday_hours']
+    ).clip(lower=0)
+
     agg_df['utilization_pct'] = (
-        agg_df['actual_billable_hours'] / agg_df['possible_hours'] * 100
+        agg_df['actual_billable_hours'] / agg_df['available_hours'] * 100
     ).fillna(0)
     agg_df['utilization_pct'] = agg_df['utilization_pct'].where(
-        agg_df['possible_hours'] > 0, 0
+        agg_df['available_hours'] > 0, 0
     )
 
     agg_df['ytd_utilization_pct'] = (
@@ -1449,6 +1499,9 @@ def _calculate_period_utilization_data(db, processor, start_date, end_date,
 
     agg_df['status'] = np.select(conditions, status_choices, default="\U0001f535 Under")
     agg_df['status_num'] = np.select(conditions, status_num_choices, default=1)
+
+    # Drop the temporary available_hours column
+    agg_df = agg_df.drop(columns=['available_hours'], errors='ignore')
 
     # Build period label
     period_label = f"{month_keys[0]} \u2013 {month_keys[-1]}"
@@ -1735,7 +1788,7 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
     # Show resolved date range for current selection
     _start_dt = pd.to_datetime(start_date)
     _end_dt = pd.to_datetime(end_date)
-    st.caption(f"Period: {_start_dt.strftime('%b %d, %Y')} – {_end_dt.strftime('%b %d, %Y')}")
+    st.caption(f"Period: {_start_dt.strftime('%b %d, %Y')} - {_end_dt.strftime('%b %d, %Y')}")
 
     with st.expander("Time Frame Definitions"):
         st.markdown("""| Time Frame | Definition |
@@ -1856,7 +1909,7 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
             # Get detailed data from util_df (single row)
             if not util_df.empty:
                 row = util_df.iloc[0]
-                status_cols = st.columns([1.2, 1, 1, 1, 1, 1, 1, 1, 1])
+                status_cols = st.columns([1.2, 1, 1, 1, 1, 1, 1, 1, 1, 1])
                 with status_cols[0]:
                     st.markdown(f"""<div style="background:{bg_color}; border-left:4px solid {border_color};
                         padding:0.5rem 1rem; border-radius:0.3rem; text-align:center;">
@@ -1873,12 +1926,14 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
                 with status_cols[4]:
                     st.metric("PTO Hrs", f"{row['pto_hours']:,.1f}")
                 with status_cols[5]:
-                    st.metric("Other Non-bill", f"{row['other_nonbillable_hours']:,.1f}")
+                    st.metric("Holiday Hrs", f"{row['holiday_hours']:,.1f}")
                 with status_cols[6]:
-                    st.metric("YTD Possible Billable Hrs", f"{row['ytd_possible_hours']:,.1f}")
+                    st.metric("Other Non-bill", f"{row['other_nonbillable_hours']:,.1f}")
                 with status_cols[7]:
-                    st.metric("YTD Actual Billable Hrs", f"{row['ytd_actual_billable_hours']:,.1f}")
+                    st.metric("YTD Possible Billable Hrs", f"{row['ytd_possible_hours']:,.1f}")
                 with status_cols[8]:
+                    st.metric("YTD Actual Billable Hrs", f"{row['ytd_actual_billable_hours']:,.1f}")
+                with status_cols[9]:
                     st.metric("YTD Billable Utilization %", f"{row['ytd_utilization_pct']:.1f}%")
             else:
                 st.info("No utilization data available for this employee in the selected period.")
@@ -1943,7 +1998,7 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
 
             # Combined summary metrics
             if not util_df.empty:
-                summary_cols = st.columns(6)
+                summary_cols = st.columns(7)
                 with summary_cols[0]:
                     st.metric("Employees", len(util_df))
                 with summary_cols[1]:
@@ -1955,6 +2010,8 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
                 with summary_cols[4]:
                     st.metric("Total PTO Hrs", f"{util_df['pto_hours'].sum():,.0f}")
                 with summary_cols[5]:
+                    st.metric("Total Holiday Hrs", f"{util_df['holiday_hours'].sum():,.0f}")
+                with summary_cols[6]:
                     avg_util = util_df['utilization_pct'].mean()
                     st.metric("Avg Utilization", f"{avg_util:.1f}%")
                 st.markdown("---")
@@ -2023,16 +2080,18 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
   | Actual Hrs                       | metrics['actuals'][month_key][emp_id]['hours']          | From time_entries table: sum of ALL hours logged (billable + non-billable)           |
   | Actual Billable Hrs              | metrics['actuals'][month_key][emp_id]['billable_hours'] | From time_entries table: sum of hours where billable=1                               |
   | PTO Hrs                          | time_entries_df where project_id='FRINGE.PTO'           | Sum of hours from time_entries for PTO project                                       |
-  | Other Non-billable Hrs           | Calculated                                              | (actual_hours - actual_billable_hours) - pto_hours                                   |
-  | Billable Utilization %           | Calculated                                              | (actual_billable_hours / adjusted_possible_hours) x 100                              |
+  | Holiday Hrs                      | time_entries_df where project_id='FRINGE.HOL'           | Sum of hours from time_entries for Holiday project                                   |
+  | Other Non-billable Hrs           | Calculated                                              | (actual_hours - actual_billable_hours) - pto_hours - holiday_hours                   |
+  | Billable Utilization %           | Calculated                                              | (actual_billable_hours / (possible_hours - pto_hours - holiday_hours)) x 100         |
   | Status                           | Calculated                                              | Based on Billable Utilization %: >120%, 100-120%, 80-100%, <80%                      |
   | YTD Possible Billable Hrs        | ytd_metrics['possible']                                 | Sum of possible hours from Jan 1 to end of selected month                            |
   | YTD Actual Billable Hrs          | ytd_metrics['actuals']                                  | Sum of actual billable hours from Jan 1 to end of selected month                     |
-  | YTD Billable Utilization %       | Calculated                                              | (ytd_actual_billable_hours / ytd_possible_hours) x 100                               |
+  | YTD Billable Utilization %       | Calculated                                              | (ytd_actual_billable_hours / (ytd_possible_hours - ytd_pto_hours - ytd_holiday_hours)) x 100 |
 
 **Notes:**
 - Possible hours are adjusted only for employees hired or terminated mid-month, not based on which days they logged time entries.
 - Actual Billable Hrs shows only time entries marked as billable=1 in the database.
+- Billable Utilization % uses available hours (possible - PTO - Holiday) as the denominator to reflect actual time available for billable work.
 - YTD columns show cumulative data from January 1st through the end of the selected month.
 """)
 
@@ -2107,7 +2166,7 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
                 # Prepare display DataFrame
                 display_df = util_df[[
                     'employee_id', 'name', 'possible_hours',
-                    'actual_hours', 'actual_billable_hours', 'pto_hours',
+                    'actual_hours', 'actual_billable_hours', 'pto_hours', 'holiday_hours',
                     'other_nonbillable_hours', 'utilization_pct', 'status',
                     'ytd_possible_hours', 'ytd_actual_billable_hours', 'ytd_utilization_pct'
                 ]].copy()
@@ -2118,6 +2177,7 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
                     'actual_hours': 'Actual Hrs',
                     'actual_billable_hours': 'Actual Billable Hrs',
                     'pto_hours': 'PTO Hrs',
+                    'holiday_hours': 'Holiday Hrs',
                     'other_nonbillable_hours': 'Other Non-billable Hrs',
                     'utilization_pct': 'Billable Utilization %',
                     'status': 'Status',
@@ -2173,16 +2233,18 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
   | Actual Hrs                       | metrics['actuals'][month_key][emp_id]['hours']          | From time_entries table: sum of ALL hours logged (billable + non-billable)           |
   | Actual Billable Hrs              | metrics['actuals'][month_key][emp_id]['billable_hours'] | From time_entries table: sum of hours where billable=1                               |
   | PTO Hrs                          | time_entries_df where project_id='FRINGE.PTO'           | Sum of hours from time_entries for PTO project                                       |
-  | Other Non-billable Hrs           | Calculated                                              | (actual_hours - actual_billable_hours) - pto_hours                                   |
-  | Billable Utilization %           | Calculated                                              | (actual_billable_hours / adjusted_possible_hours) x 100                              |
+  | Holiday Hrs                      | time_entries_df where project_id='FRINGE.HOL'           | Sum of hours from time_entries for Holiday project                                   |
+  | Other Non-billable Hrs           | Calculated                                              | (actual_hours - actual_billable_hours) - pto_hours - holiday_hours                   |
+  | Billable Utilization %           | Calculated                                              | (actual_billable_hours / (possible_hours - pto_hours - holiday_hours)) x 100         |
   | Status                           | Calculated                                              | Based on Billable Utilization %: >120%, 100-120%, 80-100%, <80%                      |
   | YTD Possible Billable Hrs        | ytd_metrics['possible']                                 | Sum of possible hours from Jan 1 to end of selected month                            |
   | YTD Actual Billable Hrs          | ytd_metrics['actuals']                                  | Sum of actual billable hours from Jan 1 to end of selected month                     |
-  | YTD Billable Utilization %       | Calculated                                              | (ytd_actual_billable_hours / ytd_possible_hours) x 100                               |
+  | YTD Billable Utilization %       | Calculated                                              | (ytd_actual_billable_hours / (ytd_possible_hours - ytd_pto_hours - ytd_holiday_hours)) x 100 |
 
 **Notes:**
 - Possible hours are adjusted only for employees hired or terminated mid-month, not based on which days they logged time entries.
 - Actual Billable Hrs shows only time entries marked as billable=1 in the database.
+- Billable Utilization % uses available hours (possible - PTO - Holiday) as the denominator to reflect actual time available for billable work.
 - Click on any row to view project-level breakdown.
 - YTD columns show cumulative data from January 1st through the end of the selected month.
 """)
@@ -2208,6 +2270,7 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
                     'Actual Hrs',
                     'Actual Billable Hrs',
                     'PTO Hrs',
+                    'Holiday Hrs',
                     'Other Non-billable Hrs'
                 ]
                 for col_name in numeric_columns:

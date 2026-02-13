@@ -1515,11 +1515,14 @@ def render_financial_analysis_report():
 
                                 if not month_info.empty:
                                     working_days = month_info['working_days'].iloc[0]
+                                    holidays = month_info['holidays'].iloc[0] if 'holidays' in month_info.columns else 0
+                                    holidays = holidays if pd.notna(holidays) else 0
+                                    available_days = max(working_days - holidays, 0)
 
                                     month_revenue = 0
                                     for _, alloc in month_allocs.iterrows():
                                         if pd.notna(alloc.get('bill_rate')) and pd.notna(alloc.get('allocated_fte')):
-                                            hours = working_days * alloc['allocated_fte'] * 8
+                                            hours = available_days * alloc['allocated_fte'] * 8
                                             month_revenue += hours * alloc['bill_rate']
 
                                     projected_monthly[month_num] = month_revenue

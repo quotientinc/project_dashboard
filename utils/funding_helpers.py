@@ -169,6 +169,9 @@ def calculate_current_month_potential(project_id, db):
             ]
             if not current_month_row.empty:
                 working_days = int(current_month_row['working_days'].iloc[0])
+                holidays = current_month_row['holidays'].iloc[0] if 'holidays' in current_month_row.columns else 0
+                holidays = holidays if pd.notna(holidays) else 0
+                working_days = max(working_days - holidays, 0)
     except Exception as e:
         logger.warning(
             f"Could not retrieve working days for {current_year}-{current_month:02d}, "
