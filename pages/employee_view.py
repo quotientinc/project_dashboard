@@ -4,9 +4,8 @@ Unified Employee View page - displays a single employee with tabbed interface.
 import streamlit as st
 import pandas as pd
 from utils.logger import get_logger
-from pages.employees_detail import render_employee_detail_tab
-from pages.employees_allocation import render_allocation_tab
-from pages.employees_utilization import render_utilization_tab
+from pages.employees_detail import render_project_allocations_subtab, render_employee_edit_tab
+from pages.employees_utilization import render_combined_utilization_view
 
 logger = get_logger(__name__)
 
@@ -101,37 +100,35 @@ with col3:
 
 st.markdown("---")
 
-# Read tab/subtab from query params for deep-linking
-default_tab = st.query_params.get("tab")
-valid_tabs = ["Details", "Allocation", "Utilization"]
-if default_tab and default_tab not in valid_tabs:
-    default_tab = None
-
+# Read subtab from query params for deep-linking
 default_subtab = st.query_params.get("subtab")
+valid_subtabs = ["Project Allocations", "Utilization", "Edit Employee Data"]
+if default_subtab and default_subtab not in valid_subtabs:
+    default_subtab = None
 
-# Create tabs
-tab_details, tab_allocation, tab_utilization = st.tabs(
-    ["Details", "Allocation", "Utilization"],
-    default=default_tab
+# Create subtabs
+subtab_alloc, subtab_util, subtab_edit = st.tabs(
+    ["Project Allocations", "Utilization", "Edit Employee Data"],
+    default=default_subtab
 )
 
-with tab_details:
+with subtab_alloc:
     try:
-        render_employee_detail_tab(db, processor, employee_id=employee_id, default_subtab=default_subtab)
+        render_project_allocations_subtab(db, processor, employee_id=employee_id)
     except Exception as e:
-        st.error(f"Error loading employee details: {str(e)}")
-        logger.error(f"Error in Details tab: {str(e)}", exc_info=True)
+        st.error(f"Error loading project allocations: {str(e)}")
+        logger.error(f"Error in Project Allocations subtab: {str(e)}", exc_info=True)
 
-with tab_allocation:
+with subtab_util:
     try:
-        render_allocation_tab(db, processor, employee_id=employee_id)
-    except Exception as e:
-        st.error(f"Error loading allocation data: {str(e)}")
-        logger.error(f"Error in Allocation tab: {str(e)}", exc_info=True)
-
-with tab_utilization:
-    try:
-        render_utilization_tab(db, processor, employee_id=employee_id, default_subtab=default_subtab)
+        render_combined_utilization_view(db, processor, employee_id=employee_id, widget_prefix="emp")
     except Exception as e:
         st.error(f"Error loading utilization data: {str(e)}")
-        logger.error(f"Error in Utilization tab: {str(e)}", exc_info=True)
+        logger.error(f"Error in Utilization subtab: {str(e)}", exc_info=True)
+
+with subtab_edit:
+    try:
+        render_employee_edit_tab(db, processor, employee_id=employee_id)
+    except Exception as e:
+        st.error(f"Error loading employee edit form: {str(e)}")
+        logger.error(f"Error in Edit Employee Data subtab: {str(e)}", exc_info=True)

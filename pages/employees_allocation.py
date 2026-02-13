@@ -9,6 +9,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 import calendar
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode, ColumnsAutoSizeMode
 
 
 def render_allocation_tab(db, processor, employee_id=None):
@@ -21,6 +22,9 @@ def render_allocation_tab(db, processor, employee_id=None):
     """
     st.markdown("#### Employee Allocation Planning")
     st.caption("Identify employees who are projected to be over/under-allocated")
+
+    if "alloc_grid_selection_version" not in st.session_state:
+        st.session_state.alloc_grid_selection_version = 0
 
     # Date range selection
     col1, col2 = st.columns([1, 1])
@@ -161,7 +165,11 @@ def render_allocation_tab(db, processor, employee_id=None):
             return breakdown_df
 
         # Dialog function for showing employee allocation breakdown
-        @st.dialog("Employee Allocation Breakdown", width="large")
+        def clear_alloc_grid_selection():
+            """Callback to clear grid selection when dialog is dismissed"""
+            st.session_state.alloc_grid_selection_version += 1
+
+        @st.dialog("Employee Allocation Breakdown", width="large", on_dismiss=clear_alloc_grid_selection)
         def show_allocation_breakdown(emp_id, emp_name, emp_fte, month_key, possible_hours, allocated_hours, allocation_pct):
             """Display project-level allocation breakdown for a selected employee in a modal dialog"""
             st.markdown(f"### {emp_name}")
@@ -224,6 +232,12 @@ def render_allocation_tab(db, processor, employee_id=None):
                     st.plotly_chart(fig, width='stretch')
             else:
                 st.info(f"No allocations found for {emp_name} in {month_key}")
+
+            st.markdown("---")
+            if st.button("View Employee Details →", key="alloc_view_emp_btn"):
+                st.session_state.selected_employee_id = emp_id
+                st.session_state.selected_employee_name = emp_name
+                st.switch_page("pages/employee_view.py")
 
         # Get employees dataframe for allocation calculations
         employees_df = db.get_employees()
@@ -375,46 +389,95 @@ def render_allocation_tab(db, processor, employee_id=None):
         # Display table
         if not filtered_df.empty:
             st.markdown(f"#### Allocation Overview ({len(filtered_df)} employees)")
+            st.info("Click on any row to view detailed allocation breakdown for that employee")
 
-            # Create display dataframe
+            # Create display dataframe (include employee_id for selection handling, hidden in grid)
             display_df = filtered_df[[
-                'Employee', 'Target FTE', 'Possible Hours', 'Allocated Hours', 'Allocation %', 'Variance', 'Status'
+                'employee_id', 'Employee', 'Target FTE', 'Possible Hours', 'Allocated Hours', 'Allocation %', 'Variance', 'Status'
             ]].copy()
 
-            # Format numbers
+            # Round numbers (keep Variance as numeric -- AgGrid handles formatting)
             display_df['Target FTE'] = display_df['Target FTE'].round(2)
             display_df['Possible Hours'] = display_df['Possible Hours'].round(1)
             display_df['Allocated Hours'] = display_df['Allocated Hours'].round(1)
             display_df['Allocation %'] = display_df['Allocation %'].round(1)
-            display_df['Variance'] = display_df['Variance'].apply(lambda x: f"{x:+.1f}")
+            display_df['Variance'] = display_df['Variance'].round(1)
 
-            # Display with click handler
-            st.dataframe(
+            # JsCode formatters
+            numeric_formatter = JsCode("""
+function(params) {
+    if (params.value === null || params.value === undefined) return '-';
+    return params.value.toFixed(1);
+}
+""")
+
+            variance_formatter = JsCode("""
+function(params) {
+    if (params.value === null || params.value === undefined) return '-';
+    var sign = params.value >= 0 ? '+' : '';
+    return sign + params.value.toFixed(1);
+}
+""")
+
+            pct_formatter = JsCode("""
+function(params) {
+    if (params.value === null || params.value === undefined) return '-';
+    return params.value.toFixed(1) + '%';
+}
+""")
+
+            allocation_cell_style = JsCode("""
+function(params) {
+    if (params.value > 120) {
+        return {'backgroundColor': '#ffcccc'};
+    } else if (params.value > 100) {
+        return {'backgroundColor': '#fff9cc'};
+    } else if (params.value >= 80) {
+        return {'backgroundColor': '#ccffcc'};
+    } else {
+        return {'backgroundColor': '#cce5ff'};
+    }
+}
+""")
+
+            # Build AgGrid options
+            gb = GridOptionsBuilder.from_dataframe(display_df)
+            gb.configure_selection(selection_mode='single', use_checkbox=False)
+            gb.configure_default_column(sortable=True, filterable=False)
+            gb.configure_column("employee_id", hide=True)
+            gb.configure_column('Target FTE', valueFormatter=numeric_formatter)
+            gb.configure_column('Possible Hours', valueFormatter=numeric_formatter)
+            gb.configure_column('Allocated Hours', valueFormatter=numeric_formatter)
+            gb.configure_column('Allocation %', cellStyle=allocation_cell_style, valueFormatter=pct_formatter)
+            gb.configure_column('Variance', valueFormatter=variance_formatter)
+            grid_options = gb.build()
+
+            # Display AgGrid
+            grid_response = AgGrid(
                 display_df,
-                width='stretch',
-                hide_index=True,
+                gridOptions=grid_options,
+                columns_auto_size_mode=ColumnsAutoSizeMode.FIT_ALL_COLUMNS_TO_VIEW,
                 height=500,
-                on_select="rerun",
-                selection_mode="single-row",
-                key="alloc_table"
+                update_mode=GridUpdateMode.SELECTION_CHANGED,
+                allow_unsafe_jscode=True,
+                theme='streamlit',
+                key=f"alloc_aggrid_v{st.session_state.alloc_grid_selection_version}"
             )
 
             # Handle row selection for modal dialog
-            if st.session_state.get('alloc_table') and st.session_state.alloc_table.get('selection'):
-                selected_rows = st.session_state.alloc_table['selection']['rows']
-                if selected_rows:
-                    selected_idx = selected_rows[0]
-                    selected_emp = filtered_df.iloc[selected_idx]
+            selected_rows = grid_response['selected_rows']
+            if selected_rows is not None and len(selected_rows) > 0:
+                selected_row = selected_rows.iloc[0] if hasattr(selected_rows, 'iloc') else selected_rows[0]
 
-                    show_allocation_breakdown(
-                        emp_id=selected_emp['employee_id'],
-                        emp_name=selected_emp['Employee'],
-                        emp_fte=selected_emp['Target FTE'],
-                        month_key=month_key,
-                        possible_hours=selected_emp['Possible Hours'],
-                        allocated_hours=selected_emp['Allocated Hours'],
-                        allocation_pct=selected_emp['Allocation %']
-                    )
+                show_allocation_breakdown(
+                    emp_id=selected_row['employee_id'],
+                    emp_name=selected_row['Employee'],
+                    emp_fte=selected_row['Target FTE'],
+                    month_key=month_key,
+                    possible_hours=selected_row['Possible Hours'],
+                    allocated_hours=selected_row['Allocated Hours'],
+                    allocation_pct=selected_row['Allocation %']
+                )
 
             # Allocation Chart
             st.markdown("---")
