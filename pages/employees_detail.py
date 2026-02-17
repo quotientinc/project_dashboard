@@ -119,13 +119,13 @@ def render_project_allocations_subtab(db, processor, employee_id):
             help='Select project to add',
             options=projects_df['name'].tolist(),
             required=True,
-            width='medium'
+            pinned=True
         ),
         'role': st.column_config.TextColumn(
             'Role',
             help='Your role on this project',
             max_chars=50,
-            width='medium'
+            pinned=True
         )
     }
 
@@ -140,8 +140,7 @@ def render_project_allocations_subtab(db, processor, employee_id):
             min_value=0.0,
             max_value=2.0,
             step=0.05,
-            format='%.2f',
-            width='small'
+            format='%.2f'
         )
 
         # Bill Rate column
@@ -151,8 +150,7 @@ def render_project_allocations_subtab(db, processor, employee_id):
             min_value=0.0,
             max_value=500.0,
             step=5.0,
-            format='$%.2f',
-            width='small'
+            format='$%.2f'
         )
 
     # Display editable table

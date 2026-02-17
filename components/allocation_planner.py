@@ -490,11 +490,11 @@ def display_interactive_allocation_table(budget_analysis, project, allocations_d
         st.dataframe(
             df,
             column_config={
-                'Month': st.column_config.TextColumn('Month', width='medium'),
-                'Current FTE': st.column_config.NumberColumn('Current FTE', format='%.2f', width='small'),
-                'Projected Hours': st.column_config.NumberColumn('Projected Hours', format='%.0f', width='small'),
-                'Projected Cost': st.column_config.NumberColumn('Projected Cost', format='$%.0f', width='medium'),
-                'Status': st.column_config.TextColumn('Status', width='small')
+                'Month': st.column_config.TextColumn('Month'),
+                'Current FTE': st.column_config.NumberColumn('Current FTE', format='%.2f'),
+                'Projected Hours': st.column_config.NumberColumn('Projected Hours', format='%.0f'),
+                'Projected Cost': st.column_config.NumberColumn('Projected Cost', format='$%.0f'),
+                'Status': st.column_config.TextColumn('Status')
             },
             width='stretch',
             hide_index=True
@@ -544,10 +544,10 @@ def display_scenario_analysis(budget_analysis, project, allocations_df, processo
     st.dataframe(
         scenario_df,
         column_config={
-            'name': st.column_config.TextColumn('Scenario', width='medium'),
-            'description': st.column_config.TextColumn('Description', width='large'),
-            'final_pct': st.column_config.NumberColumn('Target %', format='%.1f%%', width='small'),
-            'status': st.column_config.TextColumn('Status', width='small')
+            'name': st.column_config.TextColumn('Scenario'),
+            'description': st.column_config.TextColumn('Description'),
+            'final_pct': st.column_config.NumberColumn('Target %', format='%.1f%%'),
+            'status': st.column_config.TextColumn('Status')
         },
         width='stretch',
         hide_index=True

@@ -232,52 +232,44 @@ def display_hours_by_month_summary(hours_df, project, processor, employees_df, d
     column_config = {
         'Employee': st.column_config.TextColumn(
             'Employee',
-            disabled=True,
-            width='medium'
+            disabled=True
         ),
         'Role': st.column_config.TextColumn(
             'Role',
-            disabled=True,
-            width='medium'
+            disabled=True
         ),
         'Nominal FTE Target': st.column_config.NumberColumn(
             'Nominal FTE Target',
             help='Employee FTE allocation (0.0-2.0)',
             disabled=True,
-            format='%.2f',
-            width='small'
+            format='%.2f'
         ),
         'Target Hours': st.column_config.NumberColumn(
             'Target Hours',
             help='Editable: Target hours for project duration',
             min_value=0.0,
             step=10.0,
-            format='%.2f',
-            width='small'
+            format='%.2f'
         ),
         'Rate': st.column_config.NumberColumn(
             'Rate',
             disabled=True,
-            format='$%.2f',
-            width='small'
+            format='$%.2f'
         ),
         'Over/Under': st.column_config.NumberColumn(
             'Over/Under',
             disabled=True,
-            format='%.2f',
-            width='small'
+            format='%.2f'
         ),
         'Total Hours': st.column_config.NumberColumn(
             'Total Hours',
             disabled=True,
-            format='%.2f',
-            width='small'
+            format='%.2f'
         ),
         'Total Cost': st.column_config.NumberColumn(
             'Total Cost',
             disabled=True,
-            format='$%.2f',
-            width='medium'
+            format='$%.2f'
         )
     }
 
@@ -453,8 +445,7 @@ def display_hours_by_month_monthly(hours_df, project, show_all_months, processor
     column_config = {
         'employee_name': st.column_config.TextColumn(
             'Employee',
-            pinned=True,
-            width='medium'
+            pinned=True
         )
     }
 
@@ -566,10 +557,10 @@ def display_hours_sheet(hours_df, project, show_all_months, processor, allocatio
 
     # Build column configuration for data_editor with pinned fixed columns
     column_config = {
-        'employee_name': st.column_config.TextColumn('Employee', disabled=True, pinned=True, width='medium'),
-        'role': st.column_config.TextColumn('Role', disabled=True, pinned=True, width='medium'),
-        'rate': st.column_config.NumberColumn('Rate', format='$%.2f', disabled=True, pinned=True, width='small'),
-        'total_projected_hours': st.column_config.NumberColumn('Total Hours', format='%.2f', disabled=True, pinned=True, width='small'),
+        'employee_name': st.column_config.TextColumn('Employee', disabled=True, pinned=True),
+        'role': st.column_config.TextColumn('Role', disabled=True, pinned=True),
+        'rate': st.column_config.NumberColumn('Rate', format='$%.2f', disabled=True, pinned=True),
+        'total_projected_hours': st.column_config.NumberColumn('Total Hours', format='%.2f', disabled=True, pinned=True),
     }
 
     # Add month columns with proper configuration
@@ -1065,40 +1056,35 @@ def display_working_days_editor(project, allocations_df, db_manager, processor):
     edited_df = st.data_editor(
         editor_df[['month', 'default_working_days', 'working_days', 'default_remaining_days', 'remaining_days', 'is_customized']],
         column_config={
-            'month': st.column_config.TextColumn('Month', disabled=True, width='medium'),
+            'month': st.column_config.TextColumn('Month', disabled=True),
             'default_working_days': st.column_config.NumberColumn(
                 'Default WD',
                 help='Default working days (calculated)',
-                disabled=True,
-                width='small'
+                disabled=True
             ),
             'working_days': st.column_config.NumberColumn(
                 'Working Days',
                 help='Editable: Total working days in month',
                 min_value=0,
                 max_value=31,
-                step=1,
-                width='small'
+                step=1
             ),
             'default_remaining_days': st.column_config.NumberColumn(
                 'Default RD',
                 help='Default remaining days (calculated)',
-                disabled=True,
-                width='small'
+                disabled=True
             ),
             'remaining_days': st.column_config.NumberColumn(
                 'Remaining Days',
                 help='Editable: Remaining working days in month',
                 min_value=0,
                 max_value=31,
-                step=1,
-                width='small'
+                step=1
             ),
             'is_customized': st.column_config.CheckboxColumn(
                 'Custom?',
                 help='Indicates if customized',
-                disabled=True,
-                width='small'
+                disabled=True
             )
         },
         hide_index=True,
@@ -1321,8 +1307,7 @@ def display_days_editor(project, allocations_df, db_manager, processor, hours_df
         'Metric': st.column_config.TextColumn(
             'Metric',
             disabled=True,
-            pinned=True,
-            width='medium'
+            pinned=True
         )
     }
 
@@ -1335,8 +1320,7 @@ def display_days_editor(project, allocations_df, db_manager, processor, hours_df
                 help='Editable: Enter custom value or leave for calculated default',
                 min_value=0,
                 max_value=31,
-                step=1,
-                width='small'
+                step=1
             )
 
     # Display as editable table (use reset counter in key to force rebuild on reset)
@@ -1531,8 +1515,7 @@ def display_days_reference_table(hours_df, months):
     column_config = {
         'Metric': st.column_config.TextColumn(
             'Metric',
-            pinned=True,
-            width='medium'
+            pinned=True
         )
     }
 
@@ -1541,8 +1524,7 @@ def display_days_reference_table(hours_df, months):
         month_label = month_date.strftime('%b %Y')
         if month_label in ref_df.columns:
             column_config[month_label] = st.column_config.NumberColumn(
-                month_label,
-                width='small'
+                month_label
             )
 
     # Display as a compact table

@@ -203,21 +203,18 @@ def render_project_edit_tab(db, processor, project_id=None):
             'employee_id': st.column_config.NumberColumn(
                 'Employee ID',
                 help='Database employee ID',
-                disabled=True,
-                width='small'
+                disabled=True
             ),
             'employee_name': st.column_config.SelectboxColumn(
                 'Employee',
                 help='Select employee to add to project',
                 options=employees_df['name'].tolist(),
-                required=True,
-                width='medium'
+                required=True
             ),
             'role': st.column_config.TextColumn(
                 'Role',
                 help='Employee role on this project',
-                max_chars=50,
-                width='medium'
+                max_chars=50
             )
         }
 
@@ -233,8 +230,7 @@ def render_project_edit_tab(db, processor, project_id=None):
                 min_value=0.0,
                 max_value=2.0,
                 step=0.05,
-                format='%.2f',
-                width='small'
+                format='%.2f'
             )
 
             # Bill Rate column
@@ -244,8 +240,7 @@ def render_project_edit_tab(db, processor, project_id=None):
                 min_value=0.0,
                 max_value=500.0,
                 step=5.0,
-                format='$%.2f',
-                width='small'
+                format='$%.2f'
             )
 
         # Display the editable table
