@@ -223,6 +223,10 @@ def _get_working_days_in_range(emp_start_date, emp_end_date, months_df, year, mo
     actual_start = max(emp_start_date, month_start)
     actual_end = min(emp_end_date, month_end)
 
+    # Guard: if end is before start, employee is not active in this month
+    if actual_end < actual_start:
+        return 0
+
     # If they worked the entire month, return full working days
     if actual_start == month_start and actual_end == month_end:
         return working_days_in_month
@@ -287,6 +291,14 @@ def _calculate_monthly_utilization_data(db, processor, selected_year, selected_m
     first_day_of_month = datetime(selected_year, selected_month, 1).date()
     last_day_of_month = datetime(selected_year, selected_month, last_day).date()
 
+    # For the current (partial) month, cap the effective end at today so that
+    # possible-hours denominators are prorated to elapsed working days.
+    today = datetime.now().date()
+    if selected_year == today.year and selected_month == today.month and today < last_day_of_month:
+        effective_month_end = today
+    else:
+        effective_month_end = last_day_of_month
+
     # Get months data for working days calculation
     months_df = db.get_months()
 
@@ -339,8 +351,15 @@ def _calculate_monthly_utilization_data(db, processor, selected_year, selected_m
             term_date = pd.to_datetime(emp['term_date']).date()
             if term_date < first_day_of_month:
                 continue  # Skip - terminated before this month
+            # Cap at effective month end for partial-month proration
+            term_date = min(term_date, effective_month_end)
         else:
-            term_date = last_day_of_month  # Assume active through end of month
+            term_date = effective_month_end  # Prorate for partial current month
+
+        # Skip if employee is not yet active within the effective date range
+        # (e.g., hired Feb 25 but today is Feb 3 — not active yet)
+        if hire_date > term_date:
+            continue
 
         # Get data from metrics
         actuals = metrics['actuals'].get(month_key, {}).get(emp_id_str, {
@@ -1001,10 +1020,10 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
   | YTD Billable Utilization %       | Calculated                                              | (ytd_actual_billable_hours / (ytd_possible_hours - ytd_pto_hours - ytd_holiday_hours)) x 100 |
 
 **Notes:**
-- Possible hours are adjusted only for employees hired or terminated mid-month, not based on which days they logged time entries.
+- Possible hours are adjusted for employees hired or terminated mid-month, and for the current (partial) month where hours are prorated to elapsed working days so utilization reflects actual billing pace.
 - Actual Billable Hrs shows only time entries marked as billable=1 in the database.
 - Billable Utilization % uses available hours (possible - PTO - Holiday) as the denominator to reflect actual time available for billable work.
-- YTD columns show cumulative data from January 1st through the end of the selected month.
+- YTD columns show cumulative data from January 1st through the end of the selected month. Current month prorated to elapsed working days.
 """)
 
             else:
@@ -1154,11 +1173,11 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
   | YTD Billable Utilization %       | Calculated                                              | (ytd_actual_billable_hours / (ytd_possible_hours - ytd_pto_hours - ytd_holiday_hours)) x 100 |
 
 **Notes:**
-- Possible hours are adjusted only for employees hired or terminated mid-month, not based on which days they logged time entries.
+- Possible hours are adjusted for employees hired or terminated mid-month, and for the current (partial) month where hours are prorated to elapsed working days so utilization reflects actual billing pace.
 - Actual Billable Hrs shows only time entries marked as billable=1 in the database.
 - Billable Utilization % uses available hours (possible - PTO - Holiday) as the denominator to reflect actual time available for billable work.
 - Click on any row to view project-level breakdown.
-- YTD columns show cumulative data from January 1st through the end of the selected month.
+- YTD columns show cumulative data from January 1st through the end of the selected month. Current month prorated to elapsed working days.
 """)
 
                 with col2:

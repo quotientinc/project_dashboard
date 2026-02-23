@@ -5,6 +5,8 @@ Provides reusable calculations for average monthly invoicing, funding runway,
 funding health status, and current month potential revenue. These functions
 support the Project Review Meeting page and related financial views.
 """
+import calendar
+
 import pandas as pd
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
@@ -200,6 +202,12 @@ def calculate_project_utilization(project_id, db, processor, start_date, end_dat
     actual billable hours to allocated hours. Also calculates the revenue gap
     representing lost revenue from underutilization.
 
+    If end_date falls before the last day of its month (partial month), the
+    allocated hours and projected revenue for that month are prorated by the
+    ratio of elapsed weekdays to total weekdays in the month. This prevents
+    misleadingly low utilization early in a month when actuals only cover
+    days through end_date but allocations cover the full month.
+
     Args:
         project_id: The project identifier (TEXT, e.g. "220300.00.001.00").
         db: DatabaseManager instance (unused directly but required by processor context).
@@ -234,14 +242,45 @@ def calculate_project_utilization(project_id, db, processor, start_date, end_dat
         logger.error(f"Failed to get performance metrics for project {project_id}: {e}")
         return zero_result
 
-    # Sum allocated hours and projected revenue from the projected data
+    # Prorate the end month's allocated hours if it is a partial month.
+    # When end_date falls before the last day of its month (e.g., today is mid-month),
+    # the projected allocation covers the full month but actuals only cover days up to
+    # end_date. Without proration, utilization appears artificially low early in the month.
+    end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+    last_day_of_end_month = calendar.monthrange(end_dt.year, end_dt.month)[1]
+    prorate_ratio = 1.0
+    end_month_name = None
+
+    if end_dt.day < last_day_of_end_month:
+        # Count weekdays from day 1 through end_dt.day
+        elapsed_weekdays = sum(
+            1 for d in range(1, end_dt.day + 1)
+            if calendar.weekday(end_dt.year, end_dt.month, d) < 5
+        )
+        # Count total weekdays in the full month
+        full_month_weekdays = sum(
+            1 for d in range(1, last_day_of_end_month + 1)
+            if calendar.weekday(end_dt.year, end_dt.month, d) < 5
+        )
+        if full_month_weekdays > 0:
+            prorate_ratio = elapsed_weekdays / full_month_weekdays
+        # Build key matching the projected dict format, e.g. "February 2026"
+        end_month_name = end_dt.strftime('%B %Y')
+
+    # Sum allocated hours and projected revenue from the projected data,
+    # applying prorate_ratio to the partial end month.
     projected = metrics.get('projected', {})
     allocated_hours = 0.0
     projected_revenue = 0.0
     for month_name, employees in projected.items():
         for emp_data in employees.values():
-            allocated_hours += emp_data.get('hours', 0) or 0
-            projected_revenue += emp_data.get('revenue', 0) or 0
+            hours = emp_data.get('hours', 0) or 0
+            revenue = emp_data.get('revenue', 0) or 0
+            if end_month_name and month_name == end_month_name:
+                hours *= prorate_ratio
+                revenue *= prorate_ratio
+            allocated_hours += hours
+            projected_revenue += revenue
 
     # Sum actual billable hours from the actuals data
     actuals = metrics.get('actuals', {})
