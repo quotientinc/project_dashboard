@@ -5,6 +5,8 @@ import pandas as pd
 import calendar
 from datetime import datetime, timedelta
 from utils.logger import get_logger
+from utils.funding_helpers import calculate_all_projects_utilization
+from utils.project_helpers import safe_currency_display
 
 logger = get_logger(__name__)
 
@@ -339,6 +341,78 @@ with col4:
     remaining = total_quoted_value - total_accrued
     burn_rate = (total_accrued / total_quoted_value * 100) if total_quoted_value > 0 else 0
     st.metric("Budget Burn Rate", f"{burn_rate:.1f}%", f"${remaining:,.0f} remaining", delta_color="inverse")
+
+# --- Under-Utilized Projects Alert ---
+st.markdown("---")
+
+# Header row with title and help popover
+alert_header_col1, alert_header_col2 = st.columns([4, 1])
+with alert_header_col1:
+    st.markdown("#### Under-Utilized Projects")
+with alert_header_col2:
+    with st.popover("What does this mean?"):
+        st.markdown("""
+**Under-utilized projects** have allocated staff capacity (FTE allocations with bill rates)
+but aren't billing enough hours against that capacity. This represents potential revenue
+that could be captured.
+
+**How it's calculated:**
+
+**Utilization %** = (Actual Billable Hours / Allocated Hours) x 100
+
+- **Allocated Hours**: From FTE allocations -- `allocated_fte x working_days x 8 hrs/day` summed across all team members
+- **Actual Billable Hours**: From time entries marked as billable
+- **Revenue Gap**: Dollar value of unused capacity -- `(Allocated Hours - Actual Billable Hours) x avg bill rate`. The avg bill rate is the blended rate across all team members on the project, weighted by their allocated hours.
+
+**Color Key:**
+- Green (>=90%): Well utilized
+- Yellow (70-89%): Minor risk -- some unused capacity
+- Orange (50-69%): Medium risk -- significant money on the table
+- Red (<50%): Severely under-utilized
+
+**N/A** means the project has no FTE allocations, so utilization cannot be calculated.
+
+*Based on YTD (Year-to-Date) data.*
+        """)
+
+with st.spinner("Checking project utilization..."):
+    try:
+        util_df = calculate_all_projects_utilization(db, processor, ytd_start, ytd_end)
+    except Exception as e:
+        logger.error(f"Failed to calculate project utilization: {e}")
+        util_df = pd.DataFrame()
+        st.error("Could not load project utilization data. Check logs for details.")
+
+if not util_df.empty:
+    # Filter to under-utilized projects (< 70% utilization and has allocations)
+    underutilized = util_df[
+        (util_df['utilization_pct'].notna()) &
+        (util_df['utilization_pct'] < 70) &
+        (util_df['allocated_hours'] > 0)
+    ].sort_values('revenue_gap', ascending=False)
+
+    if not underutilized.empty:
+        total_revenue_gap = underutilized['revenue_gap'].sum()
+
+        st.warning(
+            f"**{len(underutilized)} project(s) are under-utilized** — "
+            f"estimated **{safe_currency_display(total_revenue_gap)}** in potential revenue "
+            f"is not being captured (YTD)."
+        )
+
+        # Show compact table
+        alert_display = underutilized[['project_name', 'utilization_pct', 'revenue_gap', 'health_icon']].copy()
+        alert_display.columns = ['Project', 'Utilization %', 'Revenue Gap', '_icon']
+        alert_display['Utilization %'] = alert_display.apply(
+            lambda row: f"{row['_icon']} {row['Utilization %']:.1f}%", axis=1
+        )
+        alert_display['Revenue Gap'] = alert_display['Revenue Gap'].apply(lambda x: f"${x:,.0f}")
+        alert_display = alert_display.drop(columns=['_icon'])
+        st.dataframe(alert_display, hide_index=True, use_container_width=True)
+    else:
+        st.success("All billable projects are well-utilized (>=70% of allocated capacity).")
+else:
+    st.info("No billable projects with allocations found for utilization analysis.")
 
 # Charts Row 1
 st.markdown("---")

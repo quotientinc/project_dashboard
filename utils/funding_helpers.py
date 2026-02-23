@@ -189,3 +189,177 @@ def calculate_current_month_potential(project_id, db):
         total_potential += potential
 
     return total_potential
+
+
+def calculate_project_utilization(project_id, db, processor, start_date, end_date):
+    """
+    Calculate project-level utilization by comparing allocated hours to actual billable hours.
+
+    Uses get_performance_metrics to retrieve both projected (allocation-based) and
+    actual (time-entry-based) data, then computes utilization as the ratio of
+    actual billable hours to allocated hours. Also calculates the revenue gap
+    representing lost revenue from underutilization.
+
+    Args:
+        project_id: The project identifier (TEXT, e.g. "220300.00.001.00").
+        db: DatabaseManager instance (unused directly but required by processor context).
+        processor: DataProcessor class reference with get_performance_metrics static method.
+        start_date: Start date string 'YYYY-MM-DD'.
+        end_date: End date string 'YYYY-MM-DD'.
+
+    Returns:
+        dict: {
+            'allocated_hours': float,
+            'actual_billable_hours': float,
+            'utilization_pct': float or None,  # None if no allocations
+            'revenue_gap': float,
+            'weighted_avg_bill_rate': float,
+        }
+    """
+    zero_result = {
+        'allocated_hours': 0.0,
+        'actual_billable_hours': 0.0,
+        'utilization_pct': None,
+        'revenue_gap': 0.0,
+        'weighted_avg_bill_rate': 0.0,
+    }
+
+    try:
+        metrics = processor.get_performance_metrics(
+            start_date=start_date,
+            end_date=end_date,
+            constraint={'project_id': str(project_id)}
+        )
+    except Exception as e:
+        logger.error(f"Failed to get performance metrics for project {project_id}: {e}")
+        return zero_result
+
+    # Sum allocated hours and projected revenue from the projected data
+    projected = metrics.get('projected', {})
+    allocated_hours = 0.0
+    projected_revenue = 0.0
+    for month_name, employees in projected.items():
+        for emp_data in employees.values():
+            allocated_hours += emp_data.get('hours', 0) or 0
+            projected_revenue += emp_data.get('revenue', 0) or 0
+
+    # Sum actual billable hours from the actuals data
+    actuals = metrics.get('actuals', {})
+    actual_billable_hours = 0.0
+    for month_name, employees in actuals.items():
+        for emp_data in employees.values():
+            actual_billable_hours += emp_data.get('billable_hours', 0) or 0
+
+    if allocated_hours > 0:
+        utilization_pct = (actual_billable_hours / allocated_hours) * 100
+        weighted_avg_bill_rate = projected_revenue / allocated_hours
+        revenue_gap = (allocated_hours - actual_billable_hours) * weighted_avg_bill_rate
+    else:
+        utilization_pct = None
+        revenue_gap = 0.0
+        weighted_avg_bill_rate = 0.0
+
+    return {
+        'allocated_hours': allocated_hours,
+        'actual_billable_hours': actual_billable_hours,
+        'utilization_pct': utilization_pct,
+        'revenue_gap': revenue_gap,
+        'weighted_avg_bill_rate': weighted_avg_bill_rate,
+    }
+
+
+def get_utilization_health_status(utilization_pct):
+    """
+    Determine utilization health status based on percentage.
+
+    Thresholds:
+        >= 90%  : Good (green)
+        70%-90% : Minor Risk (yellow)
+        50%-70% : Medium (orange)
+        < 50%   : Risk (red)
+
+    Args:
+        utilization_pct: Percentage of allocated hours actually used (0-100+ scale).
+                         Can be None if no allocations exist.
+
+    Returns:
+        tuple: (label: str, color: str, icon: str) suitable for display in
+               Streamlit UI elements. Returns ("N/A", "#999999", "⚪") if
+               utilization_pct is None.
+    """
+    if utilization_pct is None:
+        return ("N/A", "#999999", "\u26aa")
+    if utilization_pct >= 90:
+        return ("Good", "#28a745", "\U0001f7e2")
+    elif utilization_pct >= 70:
+        return ("Minor Risk", "#ffc107", "\U0001f7e1")
+    elif utilization_pct >= 50:
+        return ("Medium", "#fd7e14", "\U0001f7e0")
+    else:
+        return ("Risk", "#dc3545", "\U0001f534")
+
+
+def calculate_all_projects_utilization(db, processor, start_date, end_date):
+    """
+    Calculate utilization metrics for all billable projects.
+
+    Iterates over all billable projects, computes per-project utilization via
+    calculate_project_utilization, and assembles the results into a DataFrame
+    with health status annotations.
+
+    Args:
+        db: DatabaseManager instance.
+        processor: DataProcessor class reference.
+        start_date: Start date string 'YYYY-MM-DD'.
+        end_date: End date string 'YYYY-MM-DD'.
+
+    Returns:
+        pd.DataFrame with columns: project_id, project_name, allocated_hours,
+        actual_billable_hours, utilization_pct, revenue_gap,
+        health_label, health_color, health_icon.
+        Returns empty DataFrame with those columns if no billable projects.
+    """
+    columns = [
+        'project_id', 'project_name', 'allocated_hours',
+        'actual_billable_hours', 'utilization_pct', 'revenue_gap',
+        'health_label', 'health_color', 'health_icon',
+    ]
+
+    try:
+        projects_df = db.get_projects()
+    except Exception as e:
+        logger.error(f"Failed to get projects: {e}")
+        return pd.DataFrame(columns=columns)
+
+    if projects_df.empty:
+        return pd.DataFrame(columns=columns)
+
+    billable_projects = projects_df[projects_df['billable'] == 1]
+    if billable_projects.empty:
+        return pd.DataFrame(columns=columns)
+
+    rows = []
+    for _, project in billable_projects.iterrows():
+        project_id = str(project['id'])
+        project_name = project.get('name', project_id)
+
+        util_data = calculate_project_utilization(
+            project_id, db, processor, start_date, end_date
+        )
+        health_label, health_color, health_icon = get_utilization_health_status(
+            util_data['utilization_pct']
+        )
+
+        rows.append({
+            'project_id': project_id,
+            'project_name': project_name,
+            'allocated_hours': util_data['allocated_hours'],
+            'actual_billable_hours': util_data['actual_billable_hours'],
+            'utilization_pct': util_data['utilization_pct'],
+            'revenue_gap': util_data['revenue_gap'],
+            'health_label': health_label,
+            'health_color': health_color,
+            'health_icon': health_icon,
+        })
+
+    return pd.DataFrame(rows, columns=columns)

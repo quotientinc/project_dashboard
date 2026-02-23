@@ -5,7 +5,8 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode, ColumnsAutoSizeMode
-from utils.project_helpers import safe_budget_percentage, safe_currency_display
+from utils.project_helpers import safe_budget_percentage
+from utils.funding_helpers import calculate_project_utilization
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -19,6 +20,11 @@ if "projects_grid_selection_version" not in st.session_state:
 
 st.markdown("### Projects")
 
+# YTD date range for utilization calculations
+current_date = datetime.now()
+ytd_start = datetime(current_date.year, 1, 1).strftime('%Y-%m-%d')
+ytd_end = current_date.strftime('%Y-%m-%d')
+
 # Load projects
 projects_df = db.get_projects()
 
@@ -27,7 +33,7 @@ if projects_df.empty:
     st.stop()
 
 # --- Filters Section ---
-col1, col2, col3 = st.columns([2, 1.5, 1])
+col1, col2, col3, col4 = st.columns([2, 1.5, 1, 1])
 
 with col1:
     status_options = ['Active', 'Future', 'Completed', 'On Hold', 'Cancelled']
@@ -39,7 +45,7 @@ with col1:
     )
 
 with col2:
-    current_year = datetime.now().year
+    current_year = current_date.year
     date_filter_options = [
         f"Active in {current_year}",
         "All Projects",
@@ -52,6 +58,14 @@ with col2:
     )
 
 with col3:
+    util_filter = st.selectbox(
+        "Utilization",
+        options=["All", "Under-Utilized (<70%)", "Severely (<50%)", "Well Utilized (>=90%)"],
+        index=0,
+        key="projects_util_filter"
+    )
+
+with col4:
     if st.button("+ Add Project", type="primary", use_container_width=True):
         st.info("Project creation dialog coming soon!")
 
@@ -135,13 +149,39 @@ display_df['Budget % Used'] = filtered_df.apply(
     axis=1
 )
 
+# Calculate project utilization (YTD)
+with st.spinner("Computing utilization metrics..."):
+    util_data_list = []
+    for proj_id in filtered_df['id']:
+        util_data = calculate_project_utilization(str(proj_id), db, processor, ytd_start, ytd_end)
+        util_data_list.append({
+            'id': proj_id,
+            'Utilization %': util_data['utilization_pct'],
+            'Revenue Gap ($)': max(util_data['revenue_gap'], 0) if util_data['revenue_gap'] is not None else None,
+        })
+
+    util_df = pd.DataFrame(util_data_list)
+    display_df = display_df.merge(util_df, on='id', how='left')
+
+# Apply utilization filter
+if util_filter == "Under-Utilized (<70%)":
+    display_df = display_df[display_df['Utilization %'].notna() & (display_df['Utilization %'] < 70)]
+elif util_filter == "Severely (<50%)":
+    display_df = display_df[display_df['Utilization %'].notna() & (display_df['Utilization %'] < 50)]
+elif util_filter == "Well Utilized (>=90%)":
+    display_df = display_df[display_df['Utilization %'].notna() & (display_df['Utilization %'] >= 90)]
+
+if display_df.empty:
+    st.info("No projects match the current filters.")
+    st.stop()
+
 # Sort by status, then name
 display_df = display_df.sort_values(['Status', 'Project Name'])
 
 # --- Summary Metrics ---
 st.caption(f"Showing {len(display_df)} of {len(projects_df)} projects")
 
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 with col1:
     st.metric("Active", len(display_df[display_df['Status'] == 'Active']))
 with col2:
@@ -151,6 +191,12 @@ with col3:
 with col4:
     total_quoted = display_df['Quoted Value'].sum()
     st.metric("Total Quoted", f"${total_quoted/1e6:.1f}M")
+with col5:
+    underutilized_count = len(display_df[
+        display_df['Utilization %'].notna() & (display_df['Utilization %'] < 70)
+    ])
+    st.metric("Under-Utilized", underutilized_count,
+              help="Projects with <70% utilization of allocated capacity")
 
 st.markdown("---")
 
@@ -171,6 +217,21 @@ function(params) {
         return {'backgroundColor': '#fff9cc'};
     } else {
         return {'backgroundColor': '#ccffcc'};
+    }
+}
+""")
+
+util_pct_cell_style = JsCode("""
+function(params) {
+    if (params.value === null || params.value === undefined) return {};
+    if (params.value >= 90) {
+        return {'backgroundColor': '#ccffcc'};
+    } else if (params.value >= 70) {
+        return {'backgroundColor': '#fff9cc'};
+    } else if (params.value >= 50) {
+        return {'backgroundColor': '#ffe0b2'};
+    } else {
+        return {'backgroundColor': '#ffcccc', 'fontWeight': 'bold'};
     }
 }
 """)
@@ -200,9 +261,38 @@ gb.configure_column(
     valueFormatter=pct_formatter
 )
 
+# Configure Utilization % with conditional styling
+gb.configure_column(
+    'Utilization %',
+    cellStyle=util_pct_cell_style,
+    valueFormatter=pct_formatter
+)
+
+# Configure Revenue Gap with currency formatting
+gb.configure_column('Revenue Gap ($)', valueFormatter=currency_formatter)
+
 grid_options = gb.build()
 
 # Display AgGrid
+with st.popover("How is utilization calculated?"):
+    st.markdown("""
+**Utilization %** = (Actual Billable Hours / Allocated Hours) x 100
+
+- **Allocated Hours**: From FTE allocations -- `allocated_fte x working_days x 8 hrs/day` summed across all team members
+- **Actual Billable Hours**: From time entries marked as billable
+- **Revenue Gap**: Dollar value of unused capacity -- `(Allocated Hours - Actual Billable Hours) x avg bill rate`. The avg bill rate is the blended rate across all team members on the project, weighted by their allocated hours.
+
+**Color Key:**
+- Green (>=90%): Well utilized
+- Yellow (70-89%): Minor risk -- some unused capacity
+- Orange (50-69%): Medium risk -- significant money on the table
+- Red (<50%): Severely under-utilized
+
+**N/A** means the project has no FTE allocations, so utilization cannot be calculated.
+
+*Based on YTD (Year-to-Date) data.*
+    """)
+
 st.info("Click on any project row to view details")
 
 grid_response = AgGrid(
