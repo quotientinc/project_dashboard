@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7-labs
 FROM python:3.13-slim
 
 WORKDIR /app
@@ -13,7 +14,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY \
   --exclude=.git \
-  --exclude=__py_cache__ \
+  --exclude=__pycache__ \
   . .
 
 VOLUME /apps/data
