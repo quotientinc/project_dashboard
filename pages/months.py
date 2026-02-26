@@ -79,8 +79,8 @@ with tab1:
                 width='small'
             ),
             'working_days': st.column_config.NumberColumn(
-                'Working Days',
-                help='Editable: Number of working days (Mon-Fri)',
+                'Weekdays',
+                help='Editable: Number of weekdays (Mon-Fri)',
                 min_value=0,
                 max_value=31,
                 step=1,
@@ -131,7 +131,7 @@ with tab1:
                             # Validate that working_days + holidays <= total_days
                             total_days = edited_df.iloc[idx]['total_days']
                             if edited_working_days + edited_holidays > total_days:
-                                st.error(f"Row {idx + 1}: Working days ({edited_working_days}) + Holidays ({edited_holidays}) cannot exceed total days ({total_days})")
+                                st.error(f"Row {idx + 1}: Weekdays ({edited_working_days}) + Holidays ({edited_holidays}) cannot exceed total days ({total_days})")
                                 continue
 
                             # Update the record
@@ -282,12 +282,12 @@ with st.expander("ℹ️ Help & Information"):
     ### Field Definitions
 
     - **Total Days**: Actual number of days in the month (auto-calculated, accounts for leap years)
-    - **Working Days**: Number of business days (typically Mon-Fri, excluding holidays)
-    - **Holidays**: Number of federal or company holidays that fall on working days
+    - **Weekdays**: Number of weekdays (Mon-Fri) in the month
+    - **Holidays**: Number of federal or company holidays that fall on weekdays
 
     ### Notes
 
-    - Working days are initially calculated as all weekdays (Mon-Fri)
-    - You should edit the working days to subtract holidays if needed
+    - Weekdays are calculated as all Mon-Fri days in the month
+    - Holidays are tracked separately and subtracted when calculating available working days
     - Each year/month combination can only exist once in the database
     """)
