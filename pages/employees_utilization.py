@@ -164,6 +164,12 @@ def _get_period_date_range(time_frame, year):
         else:
             end_date = fy_end
 
+    elif time_frame in {name for name in calendar.month_name if name}:
+        month_num = list(calendar.month_name).index(time_frame)
+        last_day = calendar.monthrange(year, month_num)[1]
+        start_date = f"{year}-{month_num:02d}-01"
+        end_date = f"{year}-{month_num:02d}-{last_day}"
+
     else:
         if time_frame not in all_quarters:
             raise ValueError(f"Unknown time_frame: {time_frame!r}")
@@ -735,10 +741,10 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
     year_options = list(range(current_year - 2, current_year + 2))
 
     if employee_id is not None:
-        # Single employee: no band filter needed
-        col1, col2 = st.columns([1, 1.5])
+        # Single employee: no band filter
+        col1, col2, col_sub, col_fy = st.columns([1, 1.5, 1, 1])
     else:
-        col1, col2, col3 = st.columns([1, 1.5, 2])
+        col1, col2, col_sub, col_fy, col3 = st.columns([1, 1.5, 1, 1, 2])
 
     with col1:
         selected_year = st.selectbox(
@@ -751,15 +757,40 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
     with col2:
         time_frame = st.selectbox(
             "Time Frame",
-            [
-                "Current Month",
-                "QTD (Company)", "QTD (Gov)",
-                "YTD (Company)", "YTD (Gov)",
-                "Q1 (Company)", "Q2 (Company)", "Q3 (Company)", "Q4 (Company)",
-                "Q1 (Gov)", "Q2 (Gov)", "Q3 (Gov)", "Q4 (Gov)",
-            ],
+            ["Monthly", "Quarterly", "QTD", "YTD"],
             key=f"{widget_prefix}_cutil_timeframe"
         )
+
+    selected_month = None
+    selected_quarter = None
+    fy_type = None
+
+    with col_sub:
+        if time_frame == "Monthly":
+            month_names = list(calendar.month_name)[1:]  # January through December
+            default_month_idx = datetime.now().month - 1 if selected_year == current_year else 0
+            selected_month = st.selectbox("Month", month_names, index=default_month_idx,
+                key=f"{widget_prefix}_cutil_month")
+        elif time_frame == "Quarterly":
+            quarters = ["Q1", "Q2", "Q3", "Q4"]
+            default_quarter_idx = (datetime.now().month - 1) // 3 if selected_year == current_year else 0
+            selected_quarter = st.selectbox("Quarter", quarters, index=default_quarter_idx,
+                key=f"{widget_prefix}_cutil_quarter")
+
+    with col_fy:
+        if time_frame in ("Quarterly", "QTD", "YTD"):
+            fy_type = st.radio("FY Type", ["Company", "Gov"], horizontal=True,
+                key=f"{widget_prefix}_cutil_fytype")
+
+    # Build effective_time_frame string for _get_period_date_range()
+    if time_frame == "Monthly":
+        effective_time_frame = selected_month  # e.g., "February"
+    elif time_frame == "Quarterly":
+        effective_time_frame = f"{selected_quarter} ({fy_type})"  # e.g., "Q2 (Company)"
+    elif time_frame == "QTD":
+        effective_time_frame = f"QTD ({fy_type})"  # e.g., "QTD (Gov)"
+    elif time_frame == "YTD":
+        effective_time_frame = f"YTD ({fy_type})"  # e.g., "YTD (Company)"
 
     if employee_id is not None:
         # Include all bands so employee always passes filtering
@@ -796,7 +827,7 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
         return False
 
     # Get date range
-    start_date, end_date = _get_period_date_range(time_frame, selected_year)
+    start_date, end_date = _get_period_date_range(effective_time_frame, selected_year)
     months_in_range = _get_months_in_range(start_date, end_date)
 
     # Show resolved date range for current selection
@@ -807,15 +838,12 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
     with st.expander("Time Frame Definitions"):
         st.markdown("""| Time Frame | Definition |
 |---|---|
-| **Current Month** | Current calendar month (or January for past years) |
-| **QTD (Company)** | Current calendar quarter start → today |
-| **QTD (Gov)** | Current gov fiscal quarter start → today |
-| **YTD (Company)** | Jan 1 → today (calendar year-to-date) |
-| **YTD (Gov)** | Oct 1 (prior year) → today (gov fiscal year-to-date) |
-| **Q1–Q4 (Company)** | Calendar year quarters: Q1=Jan-Mar, Q2=Apr-Jun, Q3=Jul-Sep, Q4=Oct-Dec |
-| **Q1–Q4 (Gov)** | Gov FY quarters: Q1=Oct-Dec, Q2=Jan-Mar, Q3=Apr-Jun, Q4=Jul-Sep |
+| **Monthly** | Any individual calendar month for the selected year |
+| **Quarterly** | Calendar or Gov FY quarter (select Q1-Q4 and Company/Gov) |
+| **QTD** | Current quarter start -> today (select Company or Gov FY) |
+| **YTD** | Year start -> today (Company: Jan 1, Gov: Oct 1 prior year) |
 
-**Gov FY convention:** FY2026 = Oct 1, 2025 → Sep 30, 2026""")
+**Gov FY convention:** FY2026 = Oct 1, 2025 -> Sep 30, 2026""")
 
     try:
         with st.spinner("Loading utilization data..."):
@@ -878,20 +906,9 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
         # ==============================
         # SECTION 1: Utilization Summary Cards
         # ==============================
-        if time_frame == "Current Month":
-            period_month = pd.to_datetime(start_date).strftime('%B')
-            period_label = f"{period_month} {selected_year}"
-        elif time_frame.startswith("YTD"):
-            period_label = f"{time_frame} {selected_year}"
-        else:
-            period_label = time_frame
-
         st.markdown("---")
 
-        if employee_id is not None:
-            st.markdown(f"### Utilization Summary - {time_frame} ({detail_period_label})")
-        else:
-            st.markdown(f"### Utilization Summary - {time_frame} ({detail_period_label})")
+        st.markdown(f"### Utilization Summary - {effective_time_frame} ({detail_period_label})")
 
         # Filter employee_utilizations by band
         filtered_utilizations = [eu for eu in employee_utilizations if eu['id'] in filtered_employee_ids]
@@ -1447,7 +1464,7 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
 
                         st.dataframe(ts_display, hide_index=True, use_container_width=True)
 
-                st.markdown(f"### Utilization Report - {time_frame} ({detail_period_label})")
+                st.markdown(f"### Utilization Report - {effective_time_frame} ({detail_period_label})")
 
                 # Prepare display DataFrame
                 display_df = util_df[[
@@ -1622,7 +1639,7 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
                 st.download_button(
                     label="Download Utilization Report",
                     data=csv,
-                    file_name=f"utilization_{selected_year}_{time_frame.replace(' ', '_').lower()}.csv",
+                    file_name=f"utilization_{selected_year}_{effective_time_frame.replace(' ', '_').lower()}.csv",
                     mime="text/csv",
                     key=f"{widget_prefix}_cutil_csv_download"
                 )
@@ -1631,7 +1648,7 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
         # SECTION 3: Utilization Timeline
         # ==============================
         st.markdown("---")
-        st.markdown(f"### Utilization Timeline - {time_frame} ({detail_period_label})")
+        st.markdown(f"### Utilization Timeline - {effective_time_frame} ({detail_period_label})")
 
         # Filter billable_df to only employees matching band filter
         filtered_billable_df = billable_df[billable_df['id'].isin(filtered_employee_ids)]
@@ -1769,7 +1786,7 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
         # ==============================
         if employee_id is not None and not util_df.empty:
             st.markdown("---")
-            st.markdown(f"### Project Breakdown - {time_frame} ({detail_period_label})")
+            st.markdown(f"### Project Breakdown - {effective_time_frame} ({detail_period_label})")
 
             breakdown_df = get_employee_project_breakdown(employee_id, time_entries_df)
 
