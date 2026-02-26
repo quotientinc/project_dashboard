@@ -13,9 +13,23 @@ logger = get_logger(__name__)
 db = st.session_state.db_manager
 processor = st.session_state.data_processor
 
+def _count_working_days(start_date, end_date):
+    """Count weekdays (Mon-Fri) between start_date and end_date inclusive."""
+    import numpy as np
+    if end_date < start_date:
+        return 0
+    count = np.busday_count(start_date, end_date)
+    if end_date.weekday() < 5:
+        count += 1
+    return int(count)
+
 # Helper function to calculate working days in a month range
 def get_working_days_in_range(start_date, end_date, months_df, year, month):
-    """Calculate working days between start and end date for a specific month"""
+    """Calculate working days between start and end date for a specific month.
+
+    Working days are adjusted for holidays (subtracted from the months table count)
+    to match the denominator used by _build_possible_data().
+    """
     import calendar
 
     # Get month info
@@ -28,6 +42,8 @@ def get_working_days_in_range(start_date, end_date, months_df, year, month):
         return 21  # Default fallback
 
     working_days_in_month = int(month_info['working_days'].iloc[0])
+    holidays_in_month = int(month_info['holidays'].iloc[0]) if 'holidays' in month_info.columns and pd.notna(month_info['holidays'].iloc[0]) else 0
+    working_days_in_month = max(working_days_in_month - holidays_in_month, 0)
 
     # Calculate the actual working days the employee was active
     month_start = datetime(year, month, 1).date()
@@ -36,6 +52,10 @@ def get_working_days_in_range(start_date, end_date, months_df, year, month):
     # Determine actual start and end dates for this employee in this month
     actual_start = max(start_date, month_start)
     actual_end = min(end_date, month_end)
+
+    # Guard: if end is before start, employee is not active in this month
+    if actual_end < actual_start:
+        return 0
 
     # If they worked the entire month, return full working days
     if actual_start == month_start and actual_end == month_end:
@@ -179,8 +199,8 @@ if not billable_employees_df.empty:
             total_possible_hours = sum(emp_data.get('hours', 0) for emp_data in possible_data.values())
 
         elif month_num == current_month:
-            # Use smart blending for current month
-            # Get month info for working days calculation
+            # Use gold standard formula for current month:
+            # For each employee, project missing hours from their last timesheet entry
             month_info = months_df[
                 (months_df['year'] == current_date.year) &
                 (months_df['month'] == current_month)
@@ -188,25 +208,64 @@ if not billable_employees_df.empty:
 
             if not month_info.empty:
                 working_days = int(month_info['working_days'].iloc[0])
-                days_so_far = current_date.day
-                days_remaining = working_days - days_so_far
+                month_holidays = int(month_info['holidays'].iloc[0]) if pd.notna(month_info['holidays'].iloc[0]) else 0
+                available_working_days = max(working_days - month_holidays, 1)
 
                 # Get actual and projected data for this month
                 actual_month_data = performance_data['actuals'].get(month_name, {})
                 projected_month_data = performance_data['projected'].get(month_name, {})
                 possible_month_data = performance_data['possible'].get(month_name, {})
 
-                # Calculate blended billable hours
+                # Calculate actual billable hours
                 actual_billable = sum(emp_data.get('billable_hours', 0) for emp_data in actual_month_data.values())
 
-                # For remaining days, estimate from projected
-                if working_days > 0 and days_remaining > 0:
-                    projected_total = sum(emp_data.get('hours', 0) for emp_data in projected_month_data.values())
-                    projected_remaining = (projected_total / working_days) * days_remaining
-                    total_billable_hours = actual_billable + projected_remaining
-                else:
-                    total_billable_hours = actual_billable
+                # Get time entries for this month to find per-employee last entry dates
+                month_start_str = f"{current_date.year}-{current_month:02d}-01"
+                month_end_day = calendar.monthrange(current_date.year, current_month)[1]
+                month_end_str = f"{current_date.year}-{current_month:02d}-{month_end_day}"
+                month_start_date = datetime(current_date.year, current_month, 1).date()
+                month_end_date = datetime(current_date.year, current_month, month_end_day).date()
 
+                month_time_entries = full_year_time_entries_all[
+                    (full_year_time_entries_all['date'] >= month_start_str) &
+                    (full_year_time_entries_all['date'] <= month_end_str)
+                ] if not full_year_time_entries_all.empty else pd.DataFrame()
+
+                last_entry_dates = {}
+                if not month_time_entries.empty:
+                    billable_te = month_time_entries[month_time_entries['billable'] == 1]
+                    if not billable_te.empty:
+                        last_entry_dates = billable_te.groupby('employee_id')['date'].max().to_dict()
+
+                # For each employee with projected data, calculate missing hours
+                total_projected_missing = 0
+                for emp_id_str, proj_data in projected_month_data.items():
+                    proj_hours = proj_data.get('hours', 0)
+                    if proj_hours <= 0:
+                        continue
+
+                    # Try to convert emp_id to int for matching with last_entry_dates
+                    try:
+                        emp_id_int = int(emp_id_str)
+                    except (ValueError, TypeError):
+                        emp_id_int = emp_id_str
+
+                    last_entry_str = last_entry_dates.get(emp_id_int)
+                    if last_entry_str:
+                        last_entry = pd.to_datetime(last_entry_str).date()
+                        missing_start = last_entry + timedelta(days=1)
+                    else:
+                        missing_start = month_start_date  # No entries yet, project entire month
+
+                    if missing_start <= month_end_date:
+                        missing_days = _count_working_days(missing_start, month_end_date)
+                    else:
+                        missing_days = 0
+
+                    if missing_days > 0 and available_working_days > 0:
+                        total_projected_missing += proj_hours * (missing_days / available_working_days)
+
+                total_billable_hours = actual_billable + total_projected_missing
                 total_possible_hours = sum(emp_data.get('hours', 0) for emp_data in possible_month_data.values())
 
                 # Determine type based on whether we have significant actuals
@@ -228,9 +287,8 @@ if not billable_employees_df.empty:
             total_billable_hours = sum(emp_data.get('hours', 0) for emp_data in month_data.values())
             total_possible_hours = sum(emp_data.get('hours', 0) for emp_data in possible_data.values())
 
-        # Get PTO and Holiday hours for this month from billable employees
+        # Get PTO hours for this month from billable employees
         total_pto_hours = 0
-        total_holiday_hours = 0
         if not full_year_time_entries_all.empty:
             # Calculate month date range
             month_start_str = f"{current_date.year}-{month_num:02d}-01"
@@ -252,12 +310,8 @@ if not billable_employees_df.empty:
                 pto_entries = billable_entries[billable_entries['project_id'] == 'FRINGE.PTO']
                 total_pto_hours = pto_entries['hours'].sum() if not pto_entries.empty else 0
 
-                # Get Holiday hours (FRINGE.HOL)
-                holiday_entries = billable_entries[billable_entries['project_id'] == 'FRINGE.HOL']
-                total_holiday_hours = holiday_entries['hours'].sum() if not holiday_entries.empty else 0
-
-        # Calculate available hours (exclude PTO and Holiday)
-        available_hours = max(total_possible_hours - total_pto_hours - total_holiday_hours, 0)
+        # Calculate available hours (exclude PTO; holidays already subtracted in _build_possible_data)
+        available_hours = max(total_possible_hours - total_pto_hours, 0)
 
         # Calculate utilization percentage using available hours
         if available_hours > 0:
@@ -278,11 +332,10 @@ else:
 
 # Calculate YTD average utilization using aggregate formula (total billable / total available)
 if not utilization_trend_df.empty:
-    # Sum up all billable, possible, PTO, and Holiday hours from actual months only
+    # Sum up all billable, possible, and PTO hours from actual months only
     ytd_total_billable = 0
     ytd_total_possible = 0
     ytd_total_pto = 0
-    ytd_total_holiday = 0
 
     for month_num in range(1, current_date.month + 1):
         month_name = f"{utilization_trend_df.iloc[month_num-1]['month_name']} {current_date.year}"
@@ -295,7 +348,7 @@ if not utilization_trend_df.empty:
         possible_month_data = performance_data['possible'].get(month_name, {})
         ytd_total_possible += sum(emp_data.get('hours', 0) for emp_data in possible_month_data.values())
 
-        # Get PTO and Holiday hours for this month
+        # Get PTO hours for this month
         if not full_year_time_entries_all.empty:
             month_start_str = f"{current_date.year}-{month_num:02d}-01"
             month_end_day = calendar.monthrange(current_date.year, month_num)[1]
@@ -313,11 +366,9 @@ if not utilization_trend_df.empty:
                 pto_entries = billable_entries[billable_entries['project_id'] == 'FRINGE.PTO']
                 ytd_total_pto += pto_entries['hours'].sum() if not pto_entries.empty else 0
 
-                holiday_entries = billable_entries[billable_entries['project_id'] == 'FRINGE.HOL']
-                ytd_total_holiday += holiday_entries['hours'].sum() if not holiday_entries.empty else 0
-
     # Calculate aggregate utilization percentage using available hours
-    ytd_available = max(ytd_total_possible - ytd_total_pto - ytd_total_holiday, 0)
+    # (holidays already subtracted in _build_possible_data)
+    ytd_available = max(ytd_total_possible - ytd_total_pto, 0)
     avg_employee_utilization = (ytd_total_billable / ytd_available * 100) if ytd_available > 0 else 0
 else:
     avg_employee_utilization = 0
@@ -360,7 +411,7 @@ that could be captured.
 
 **Utilization %** = (Actual Billable Hours / Allocated Hours) x 100
 
-- **Allocated Hours**: From FTE allocations -- `allocated_fte x working_days x 8 hrs/day` summed across all team members. For the current (partial) month, allocated hours are prorated to elapsed working days so utilization reflects actual billing pace.
+- **Allocated Hours**: From FTE allocations -- `allocated_fte x working_days x 8 hrs/day` summed across all team members. For the current (partial) month, allocated hours are prorated to elapsed working days.
 - **Actual Billable Hours**: From time entries marked as billable
 - **Revenue Gap**: Dollar value of unused capacity -- `(Allocated Hours - Actual Billable Hours) x avg bill rate`. The avg bill rate is the blended rate across all team members on the project, weighted by their allocated hours.
 
@@ -372,7 +423,7 @@ that could be captured.
 
 **N/A** means the project has no FTE allocations, so utilization cannot be calculated.
 
-*Based on YTD (Year-to-Date) data. Current month prorated to elapsed working days.*
+*Based on YTD (Year-to-Date) data.*
         """)
 
 with st.spinner("Checking project utilization..."):
@@ -517,22 +568,86 @@ with col1:
         # Calculate billable utilization for each employee using YTD data
         employee_util_data = []
 
+        # Pre-compute current month constants (invariant across employees)
+        cm_month_name = f"{month_names[current_date.month - 1]} {current_date.year}"
+        cm_month_info = months_df[
+            (months_df['year'] == current_date.year) &
+            (months_df['month'] == current_date.month)
+        ]
+        cm_start_str = f"{current_date.year}-{current_date.month:02d}-01"
+        cm_end_day = calendar.monthrange(current_date.year, current_date.month)[1]
+        cm_end_str = f"{current_date.year}-{current_date.month:02d}-{cm_end_day}"
+        cm_start_date = datetime(current_date.year, current_date.month, 1).date()
+        cm_end_date = datetime(current_date.year, current_date.month, cm_end_day).date()
+        if not cm_month_info.empty:
+            cm_working_days = int(cm_month_info['working_days'].iloc[0])
+            cm_holidays = int(cm_month_info['holidays'].iloc[0]) if pd.notna(cm_month_info['holidays'].iloc[0]) else 0
+            cm_available_working_days = max(cm_working_days - cm_holidays, 1)
+        else:
+            cm_available_working_days = 0
+
+        # Pre-filter current month billable time entries for last-entry lookup
+        if not full_year_time_entries_all.empty:
+            cm_billable_entries = full_year_time_entries_all[
+                (full_year_time_entries_all['date'] >= cm_start_str) &
+                (full_year_time_entries_all['date'] <= cm_end_str) &
+                (full_year_time_entries_all['billable'] == 1)
+            ]
+        else:
+            cm_billable_entries = pd.DataFrame()
+
+        # Current month projected data
+        cm_projected_data = performance_data['projected'].get(cm_month_name, {})
+
         for _, emp in billable_employees_df.iterrows():
             emp_id_str = str(emp['id'])
 
-            # Sum billable, possible, PTO, and Holiday hours across all YTD months
+            # Sum billable, possible, and PTO hours across all YTD months
             ytd_billable = 0
             ytd_possible = 0
             emp_ytd_pto = 0
-            emp_ytd_holiday = 0
 
             for month_num in range(1, current_date.month + 1):
-                month_name = f"{utilization_trend_df.iloc[month_num-1]['month_name']} {current_date.year}"
+                month_name = f"{month_names[month_num - 1]} {current_date.year}"
 
                 # Get actual billable hours from actuals
                 actual_month_data = performance_data['actuals'].get(month_name, {})
                 emp_actual = actual_month_data.get(emp_id_str, {})
-                ytd_billable += emp_actual.get('billable_hours', 0)
+                emp_actual_billable = emp_actual.get('billable_hours', 0)
+
+                # For current month, add projected missing hours (gold standard formula)
+                if month_num == current_date.month and cm_available_working_days > 0:
+                    emp_projected = cm_projected_data.get(emp_id_str, {})
+                    emp_proj_hours = emp_projected.get('hours', 0)
+
+                    if emp_proj_hours > 0:
+                        # Find this employee's last billable entry date
+                        if not cm_billable_entries.empty:
+                            emp_cm_entries = cm_billable_entries[
+                                cm_billable_entries['employee_id'] == emp['id']
+                            ]
+                            if not emp_cm_entries.empty:
+                                last_entry = pd.to_datetime(emp_cm_entries['date'].max()).date()
+                                missing_start = last_entry + timedelta(days=1)
+                            else:
+                                missing_start = cm_start_date
+                        else:
+                            missing_start = cm_start_date
+
+                        if missing_start <= cm_end_date:
+                            missing_days = _count_working_days(missing_start, cm_end_date)
+                        else:
+                            missing_days = 0
+
+                        if missing_days > 0:
+                            emp_projected_missing = emp_proj_hours * (missing_days / cm_available_working_days)
+                            ytd_billable += emp_actual_billable + emp_projected_missing
+                        else:
+                            ytd_billable += emp_actual_billable
+                    else:
+                        ytd_billable += emp_actual_billable
+                else:
+                    ytd_billable += emp_actual_billable
 
                 # Get possible hours and adjust for hire/term dates
                 possible_month_data = performance_data['possible'].get(month_name, {})
@@ -563,7 +678,7 @@ with col1:
 
                 ytd_possible += adjusted_possible
 
-                # Get PTO and Holiday hours for this employee for this month
+                # Get PTO hours for this employee for this month
                 if not full_year_time_entries_all.empty:
                     month_start_str = f"{current_date.year}-{month_num:02d}-01"
                     month_end_day = calendar.monthrange(current_date.year, month_num)[1]
@@ -580,11 +695,8 @@ with col1:
                         pto_entries = emp_entries[emp_entries['project_id'] == 'FRINGE.PTO']
                         emp_ytd_pto += pto_entries['hours'].sum() if not pto_entries.empty else 0
 
-                        holiday_entries = emp_entries[emp_entries['project_id'] == 'FRINGE.HOL']
-                        emp_ytd_holiday += holiday_entries['hours'].sum() if not holiday_entries.empty else 0
-
-            # Calculate available hours for this employee (exclude PTO and Holiday)
-            emp_available = max(ytd_possible - emp_ytd_pto - emp_ytd_holiday, 0)
+            # Calculate available hours for this employee (exclude PTO; holidays already subtracted in _build_possible_data)
+            emp_available = max(ytd_possible - emp_ytd_pto, 0)
 
             # Calculate utilization percentage using available hours
             utilization_pct = (ytd_billable / emp_available * 100) if emp_available > 0 else 0

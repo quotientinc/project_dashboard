@@ -256,7 +256,7 @@ tab1, tab2, tab3 = st.tabs(["📈 Actuals", "📊 Projected", "💡 Possible"])
 # Tab 1: Actuals
 with tab1:
     st.markdown("#### Actual Performance (from Time Entries)")
-    st.markdown("Based on actual time entries logged in the system (excludes FRINGE.HOL).")
+    st.markdown("Based on actual time entries logged in the system (excludes all FRINGE entries: HOL, PTO, SIC, BRV, etc.).")
 
     if actuals_df.empty:
         st.warning("No actual data available for the selected date range and filters.")
@@ -423,4 +423,4 @@ with tab3:
         )
 
 st.divider()
-st.markdown("**Note:** Actuals exclude time entries with project_id='FRINGE.HOL'. Revenue is calculated using bill rates from allocations.")
+st.markdown("**Note:** Actuals exclude all FRINGE.* time entries (HOL, PTO, SIC, BRV, etc.). Revenue is calculated using bill rates from allocations.")

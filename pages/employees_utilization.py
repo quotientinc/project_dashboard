@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime
+from datetime import datetime, timedelta
 import calendar
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode, ColumnsAutoSizeMode
 
@@ -214,6 +214,8 @@ def _get_working_days_in_range(emp_start_date, emp_end_date, months_df, year, mo
         return 21  # Default fallback
 
     working_days_in_month = int(month_info['working_days'].iloc[0])
+    holidays_in_month = int(month_info['holidays'].iloc[0]) if 'holidays' in month_info.columns and pd.notna(month_info['holidays'].iloc[0]) else 0
+    working_days_in_month = max(working_days_in_month - holidays_in_month, 0)
 
     # Calculate the actual working days the employee was active
     month_start = datetime(year, month, 1).date()
@@ -240,8 +242,19 @@ def _get_working_days_in_range(emp_start_date, emp_end_date, months_df, year, mo
     return int(working_days_in_month * proportion)
 
 
+def _count_working_days(start_date, end_date):
+    """Count weekdays (Mon-Fri) between start_date and end_date inclusive."""
+    if end_date < start_date:
+        return 0
+    count = np.busday_count(start_date, end_date)
+    # np.busday_count is start-inclusive, end-exclusive; add 1 if end_date is a weekday
+    if end_date.weekday() < 5:
+        count += 1
+    return int(count)
+
+
 def _calculate_monthly_utilization_data(db, processor, selected_year, selected_month,
-                                        employees_df=None, employee_id=None):
+                                        employees_df=None, employee_id=None, include_projected=True):
     """Calculate monthly utilization data for employees.
 
     This is a shared helper that extracts the data-calculation logic so it can
@@ -291,13 +304,12 @@ def _calculate_monthly_utilization_data(db, processor, selected_year, selected_m
     first_day_of_month = datetime(selected_year, selected_month, 1).date()
     last_day_of_month = datetime(selected_year, selected_month, last_day).date()
 
-    # For the current (partial) month, cap the effective end at today so that
-    # possible-hours denominators are prorated to elapsed working days.
+    # Determine if this is the current (incomplete) month for blending logic.
+    # We no longer prorate the denominator; instead we augment the numerator with
+    # projected remaining hours from allocations.
     today = datetime.now().date()
-    if selected_year == today.year and selected_month == today.month and today < last_day_of_month:
-        effective_month_end = today
-    else:
-        effective_month_end = last_day_of_month
+    is_current_month = (selected_year == today.year and selected_month == today.month
+                        and today < last_day_of_month)
 
     # Get months data for working days calculation
     months_df = db.get_months()
@@ -317,6 +329,13 @@ def _calculate_monthly_utilization_data(db, processor, selected_year, selected_m
         holiday_entries = time_entries_df[time_entries_df['project_id'] == 'FRINGE.HOL']
         if not holiday_entries.empty:
             holiday_by_employee = holiday_entries.groupby('employee_id')['hours'].sum().to_dict()
+
+    # Compute last billable timesheet entry date per employee
+    last_entry_dates = {}
+    if not time_entries_df.empty:
+        billable_entries = time_entries_df[time_entries_df['billable'] == 1]
+        if not billable_entries.empty:
+            last_entry_dates = billable_entries.groupby('employee_id')['date'].max().to_dict()
 
     # Get YTD time entries for PTO and Holiday calculation (fetched once, used per-employee in the loop below)
     ytd_time_entries_df = db.get_time_entries(start_date=ytd_start_date, end_date=end_date)
@@ -351,10 +370,10 @@ def _calculate_monthly_utilization_data(db, processor, selected_year, selected_m
             term_date = pd.to_datetime(emp['term_date']).date()
             if term_date < first_day_of_month:
                 continue  # Skip - terminated before this month
-            # Cap at effective month end for partial-month proration
-            term_date = min(term_date, effective_month_end)
+            # Cap at last day of month
+            term_date = min(term_date, last_day_of_month)
         else:
-            term_date = effective_month_end  # Prorate for partial current month
+            term_date = last_day_of_month
 
         # Skip if employee is not yet active within the effective date range
         # (e.g., hired Feb 25 but today is Feb 3 — not active yet)
@@ -392,21 +411,57 @@ def _calculate_monthly_utilization_data(db, processor, selected_year, selected_m
         projected_hours = projected['hours']
         actual_worked_days = actuals['worked_days']
 
+        # For the current (incomplete) month, augment actual billable hours with
+        # projected missing hours based on allocation data (gold standard formula).
+        projected_missing_hours = 0.0
+        effective_billable_hours = actual_billable_hours
+
+        if include_projected and is_current_month and projected_hours > 0:
+            month_info = months_df[
+                (months_df['year'] == selected_year) &
+                (months_df['month'] == selected_month)
+            ]
+            if not month_info.empty:
+                total_working_days = int(month_info['working_days'].iloc[0])
+                month_holidays = int(month_info['holidays'].iloc[0]) if pd.notna(month_info['holidays'].iloc[0]) else 0
+                available_working_days = max(total_working_days - month_holidays, 1)
+
+                # Find per-employee last billable timesheet entry
+                last_entry_str = last_entry_dates.get(emp['id'])
+                if last_entry_str:
+                    last_entry = pd.to_datetime(last_entry_str).date()
+                else:
+                    last_entry = first_day_of_month - timedelta(days=1)
+
+                # Count missing working days from (last_entry+1) to end of month
+                missing_start = last_entry + timedelta(days=1)
+                if missing_start <= last_day_of_month:
+                    missing_working_days = _count_working_days(missing_start, last_day_of_month)
+                else:
+                    missing_working_days = 0
+
+                if missing_working_days > 0 and available_working_days > 0:
+                    projected_missing_hours = projected_hours * (missing_working_days / available_working_days)
+                    effective_billable_hours = actual_billable_hours + projected_missing_hours
+        elif not include_projected or not is_current_month:
+            # Past months or toggle OFF: effective = actual
+            effective_billable_hours = actual_billable_hours
+
         # Get PTO hours for this employee
         pto_hours = pto_by_employee.get(emp['id'], 0)
 
         # Get Holiday hours for this employee
         holiday_hours = holiday_by_employee.get(emp['id'], 0)
 
-        # Calculate available hours (exclude PTO and Holiday from denominator)
-        available_hours = max(adjusted_possible_hours - pto_hours - holiday_hours, 0)
+        # Calculate available hours (exclude PTO only; holidays already subtracted in _build_possible_data)
+        available_hours = max(adjusted_possible_hours - pto_hours, 0)
 
-        # Calculate other non-billable hours (excluding PTO and Holiday)
+        # Calculate other non-billable hours (excluding PTO; all FRINGE entries excluded from actuals)
         total_nonbillable_hours = actual_hours - actual_billable_hours
-        other_nonbillable_hours = max(total_nonbillable_hours - pto_hours - holiday_hours, 0)
+        other_nonbillable_hours = max(total_nonbillable_hours - pto_hours, 0)
 
-        # Calculate utilization using available hours as denominator
-        utilization_pct = (actual_billable_hours / available_hours * 100) if available_hours > 0 else 0
+        # Calculate utilization using effective billable hours (actual + projected missing)
+        utilization_pct = (effective_billable_hours / available_hours * 100) if available_hours > 0 else 0
         variance = actual_hours - projected_hours
 
         # Calculate YTD metrics
@@ -438,7 +493,10 @@ def _calculate_monthly_utilization_data(db, processor, selected_year, selected_m
             ytd_possible_hours += ytd_adjusted_possible_hours
 
             ytd_actuals_emp = ytd_metrics['actuals'].get(ytd_month_key, {}).get(emp_id_str, {})
-            ytd_actual_billable_hours += ytd_actuals_emp.get('billable_hours', 0)
+            if month_num == selected_month and is_current_month and include_projected:
+                ytd_actual_billable_hours += effective_billable_hours
+            else:
+                ytd_actual_billable_hours += ytd_actuals_emp.get('billable_hours', 0)
 
             # Calculate PTO and Holiday hours for this month from YTD time entries
             if not ytd_time_entries_df.empty:
@@ -462,8 +520,8 @@ def _calculate_monthly_utilization_data(db, processor, selected_year, selected_m
                     month_holiday = month_entries[month_entries['project_id'] == 'FRINGE.HOL']['hours'].sum()
                     ytd_holiday_hours += month_holiday
 
-        # Calculate YTD available hours (exclude PTO and Holiday from denominator)
-        ytd_available_hours = max(ytd_possible_hours - ytd_pto_hours - ytd_holiday_hours, 0)
+        # Calculate YTD available hours (exclude PTO only; holidays already subtracted in _build_possible_data)
+        ytd_available_hours = max(ytd_possible_hours - ytd_pto_hours, 0)
 
         # Calculate YTD utilization percentage using available hours
         ytd_utilization_pct = (ytd_actual_billable_hours / ytd_available_hours * 100) if ytd_available_hours > 0 else 0
@@ -494,6 +552,8 @@ def _calculate_monthly_utilization_data(db, processor, selected_year, selected_m
             'pto_hours': pto_hours,
             'holiday_hours': holiday_hours,
             'other_nonbillable_hours': other_nonbillable_hours,
+            'projected_missing_hours': projected_missing_hours,
+            'effective_billable_hours': effective_billable_hours,
             'utilization_pct': utilization_pct,
             'variance': variance,
             'status': status,
@@ -511,7 +571,8 @@ def _calculate_monthly_utilization_data(db, processor, selected_year, selected_m
 
 
 def _calculate_period_utilization_data(db, processor, start_date, end_date,
-                                        employees_df=None, employee_id=None):
+                                        employees_df=None, employee_id=None,
+                                        include_projected=True):
     """Calculate utilization data aggregated across a date range.
 
     For single-month ranges, delegates to _calculate_monthly_utilization_data().
@@ -524,6 +585,7 @@ def _calculate_period_utilization_data(db, processor, start_date, end_date,
         end_date: End date string (YYYY-MM-DD)
         employees_df: Optional pre-loaded employees DataFrame
         employee_id: Optional single employee ID to filter to
+        include_projected: Whether to include projected remaining hours for current month
 
     Returns:
         tuple: (util_df, period_label, time_entries_df)
@@ -549,7 +611,8 @@ def _calculate_period_utilization_data(db, processor, start_date, end_date,
         year_num, month_num = _parse_month_key(month_keys[0])
         util_df, month_key, time_entries_df = _calculate_monthly_utilization_data(
             db, processor, year_num, month_num,
-            employees_df=employees_df, employee_id=employee_id
+            employees_df=employees_df, employee_id=employee_id,
+            include_projected=include_projected
         )
         return util_df, month_key, time_entries_df
 
@@ -561,7 +624,8 @@ def _calculate_period_utilization_data(db, processor, start_date, end_date,
         year_num, month_num = _parse_month_key(mk)
         util_df, _, te_df = _calculate_monthly_utilization_data(
             db, processor, year_num, month_num,
-            employees_df=employees_df, employee_id=employee_id
+            employees_df=employees_df, employee_id=employee_id,
+            include_projected=include_projected
         )
         if not util_df.empty:
             all_util_dfs.append(util_df)
@@ -580,7 +644,8 @@ def _calculate_period_utilization_data(db, processor, start_date, end_date,
     sum_cols = [
         'possible_hours', 'projected_hours', 'actual_hours',
         'actual_billable_hours', 'pto_hours', 'holiday_hours',
-        'other_nonbillable_hours', 'worked_days',
+        'other_nonbillable_hours', 'projected_missing_hours',
+        'effective_billable_hours', 'worked_days',
     ]
     last_cols = [
         'ytd_possible_hours', 'ytd_actual_billable_hours',
@@ -598,20 +663,20 @@ def _calculate_period_utilization_data(db, processor, start_date, end_date,
 
     agg_df = combined.groupby(['employee_id', 'name'], as_index=False).agg(agg_dict)
 
-    # Recalculate derived fields using available hours (excluding PTO and Holiday)
+    # Recalculate derived fields using available hours (excluding PTO only; holidays already subtracted)
     agg_df['available_hours'] = (
-        agg_df['possible_hours'] - agg_df['pto_hours'] - agg_df['holiday_hours']
+        agg_df['possible_hours'] - agg_df['pto_hours']
     ).clip(lower=0)
 
     agg_df['utilization_pct'] = (
-        agg_df['actual_billable_hours'] / agg_df['available_hours'] * 100
+        agg_df['effective_billable_hours'] / agg_df['available_hours'] * 100
     ).fillna(0)
     agg_df['utilization_pct'] = agg_df['utilization_pct'].where(
         agg_df['available_hours'] > 0, 0
     )
 
     agg_df['ytd_available_hours'] = (
-        agg_df['ytd_possible_hours'] - agg_df['ytd_pto_hours'] - agg_df['ytd_holiday_hours']
+        agg_df['ytd_possible_hours'] - agg_df['ytd_pto_hours']
     ).clip(lower=0)
     agg_df['ytd_utilization_pct'] = (
         agg_df['ytd_actual_billable_hours'] / agg_df['ytd_available_hours'] * 100
@@ -708,6 +773,14 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
                 key=f"{widget_prefix}_cutil_band"
             )
 
+    # Toggle for including projected hours in current month utilization
+    include_projected = st.checkbox(
+        "Include projected hours for current month",
+        value=True,
+        help="When enabled, missing billable hours are projected using allocation FTE data from the employee's last timesheet entry through end of month.",
+        key=f"{widget_prefix}_include_projected"
+    )
+
     # Helper function for band filtering
     def matches_band(pct, bands):
         if not bands:
@@ -769,7 +842,8 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
         # ==============================
         util_df, detail_period_label, time_entries_df = _calculate_period_utilization_data(
             db, processor, start_date, end_date,
-            employee_id=employee_id
+            employee_id=employee_id,
+            include_projected=include_projected
         )
 
         # ==============================
@@ -840,7 +914,7 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
             # Get detailed data from util_df (single row)
             if not util_df.empty:
                 row = util_df.iloc[0]
-                status_cols = st.columns([1.2, 1, 1, 1, 1, 1, 1, 1, 1, 1])
+                status_cols = st.columns([1.2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
                 with status_cols[0]:
                     st.markdown(f"""<div style="background:{bg_color}; border-left:4px solid {border_color};
                         padding:0.5rem 1rem; border-radius:0.3rem; text-align:center;">
@@ -855,16 +929,20 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
                 with status_cols[3]:
                     st.metric("Actual Billable Hrs", f"{row['actual_billable_hours']:,.1f}")
                 with status_cols[4]:
-                    st.metric("PTO Hrs", f"{row['pto_hours']:,.1f}")
+                    st.metric("Projected Missing Hrs", f"{row['projected_missing_hours']:,.1f}")
                 with status_cols[5]:
-                    st.metric("Holiday Hrs", f"{row['holiday_hours']:,.1f}")
+                    st.metric("Effective Billable Hrs", f"{row['effective_billable_hours']:,.1f}")
                 with status_cols[6]:
-                    st.metric("Other Non-bill", f"{row['other_nonbillable_hours']:,.1f}")
+                    st.metric("PTO Hrs", f"{row['pto_hours']:,.1f}")
                 with status_cols[7]:
-                    st.metric("YTD Possible Billable Hrs", f"{row['ytd_possible_hours']:,.1f}")
+                    st.metric("Holiday Hrs", f"{row['holiday_hours']:,.1f}")
                 with status_cols[8]:
-                    st.metric("YTD Actual Billable Hrs", f"{row['ytd_actual_billable_hours']:,.1f}")
+                    st.metric("Other Non-bill", f"{row['other_nonbillable_hours']:,.1f}")
                 with status_cols[9]:
+                    st.metric("YTD Possible Billable Hrs", f"{row['ytd_possible_hours']:,.1f}")
+                with status_cols[10]:
+                    st.metric("YTD Actual Billable Hrs", f"{row['ytd_actual_billable_hours']:,.1f}")
+                with status_cols[11]:
                     st.metric("YTD Billable Utilization %", f"{row['ytd_utilization_pct']:.1f}%")
             else:
                 st.info("No utilization data available for this employee in the selected period.")
@@ -929,7 +1007,7 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
 
             # Combined summary metrics
             if not util_df.empty:
-                summary_cols = st.columns(7)
+                summary_cols = st.columns(9)
                 with summary_cols[0]:
                     st.metric("Employees", len(util_df))
                 with summary_cols[1]:
@@ -939,10 +1017,14 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
                 with summary_cols[3]:
                     st.metric("Total Billable Hrs", f"{util_df['actual_billable_hours'].sum():,.0f}")
                 with summary_cols[4]:
-                    st.metric("Total PTO Hrs", f"{util_df['pto_hours'].sum():,.0f}")
+                    st.metric("Total Projected Missing Hrs", f"{util_df['projected_missing_hours'].sum():,.0f}")
                 with summary_cols[5]:
-                    st.metric("Total Holiday Hrs", f"{util_df['holiday_hours'].sum():,.0f}")
+                    st.metric("Total Effective Billable Hrs", f"{util_df['effective_billable_hours'].sum():,.0f}")
                 with summary_cols[6]:
+                    st.metric("Total PTO Hrs", f"{util_df['pto_hours'].sum():,.0f}")
+                with summary_cols[7]:
+                    st.metric("Total Holiday Hrs", f"{util_df['holiday_hours'].sum():,.0f}")
+                with summary_cols[8]:
                     avg_util = util_df['utilization_pct'].mean()
                     st.metric("Avg Utilization", f"{avg_util:.1f}%")
                 st.markdown("---")
@@ -1007,23 +1089,28 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
   | Column                           | Source                                                  | Calculation                                                                          |
   |----------------------------------|---------------------------------------------------------|--------------------------------------------------------------------------------------|
   | Employee                         | employees_df['name']                                    | Direct from employees table                                                          |
-  | Possible Billable Hrs            | metrics['possible'][month_key][emp_id]['hours']         | From employees table: (working_days) x (target_allocation - overhead_allocation) x 8 |
+  | Possible Billable Hrs            | metrics['possible'][month_key][emp_id]['hours']         | From employees table: (working_days - holidays) x (target_allocation - overhead_allocation) x 8 |
   | Actual Hrs                       | metrics['actuals'][month_key][emp_id]['hours']          | From time_entries table: sum of ALL hours logged (billable + non-billable)           |
   | Actual Billable Hrs              | metrics['actuals'][month_key][emp_id]['billable_hours'] | From time_entries table: sum of hours where billable=1                               |
+  | Projected Missing Hrs            | Calculated (current month only)                         | projected_hours x (missing_working_days / available_working_days), where missing_working_days = weekdays from employee's last timesheet entry to end of month |
+  | Effective Billable Hrs           | Calculated                                              | actual_billable_hours + projected_missing_hours                                      |
   | PTO Hrs                          | time_entries_df where project_id='FRINGE.PTO'           | Sum of hours from time_entries for PTO project                                       |
-  | Holiday Hrs                      | time_entries_df where project_id='FRINGE.HOL'           | Sum of hours from time_entries for Holiday project                                   |
-  | Other Non-billable Hrs           | Calculated                                              | (actual_hours - actual_billable_hours) - pto_hours - holiday_hours                   |
-  | Billable Utilization %           | Calculated                                              | (actual_billable_hours / (possible_hours - pto_hours - holiday_hours)) x 100         |
+  | Holiday Hrs                      | time_entries_df where project_id='FRINGE.HOL'           | Sum of hours from time_entries for Holiday project (for reference; not in denominator)|
+  | Other Non-billable Hrs           | Calculated                                              | (actual_hours - actual_billable_hours) - pto_hours                                   |
+  | Billable Utilization %           | Calculated                                              | (effective_billable_hours / (possible_hours - pto_hours)) x 100                      |
   | Status                           | Calculated                                              | Based on Billable Utilization %: >120%, 100-120%, 80-100%, <80%                      |
   | YTD Possible Billable Hrs        | ytd_metrics['possible']                                 | Sum of possible hours from Jan 1 to end of selected month                            |
   | YTD Actual Billable Hrs          | ytd_metrics['actuals']                                  | Sum of actual billable hours from Jan 1 to end of selected month                     |
-  | YTD Billable Utilization %       | Calculated                                              | (ytd_actual_billable_hours / (ytd_possible_hours - ytd_pto_hours - ytd_holiday_hours)) x 100 |
+  | YTD Billable Utilization %       | Calculated                                              | (ytd_actual_billable_hours / (ytd_possible_hours - ytd_pto_hours)) x 100             |
 
 **Notes:**
-- Possible hours are adjusted for employees hired or terminated mid-month, and for the current (partial) month where hours are prorated to elapsed working days so utilization reflects actual billing pace.
-- Actual Billable Hrs shows only time entries marked as billable=1 in the database.
-- Billable Utilization % uses available hours (possible - PTO - Holiday) as the denominator to reflect actual time available for billable work.
-- YTD columns show cumulative data from January 1st through the end of the selected month. Current month prorated to elapsed working days.
+- Possible hours use (working_days - holidays) from the months table as the authoritative holiday source.
+- For the current month, missing billable hours are projected using allocation FTE data from the employee's last timesheet entry through end of month.
+- Effective Billable Hrs = Actual Billable + Projected Missing.
+- Use the "Include projected hours" toggle to switch between projected and actual-only views.
+- Possible hours are adjusted for employees hired or terminated mid-month (employment proration).
+- Billable Utilization % uses available hours (possible - PTO) as the denominator.
+- YTD columns show cumulative data from January 1st through the end of the selected month.
 """)
 
             else:
@@ -1032,72 +1119,342 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
                     """Callback to clear grid selection when dialog is dismissed."""
                     st.session_state[grid_version_key] = st.session_state.get(grid_version_key, 0) + 1
 
-                @st.dialog("Employee Project Breakdown", width="large", on_dismiss=clear_combined_grid_selection)
+                @st.dialog("Employee Timesheet & Utilization Detail", width="large", on_dismiss=clear_combined_grid_selection)
                 def show_combined_project_breakdown(emp_id, emp_name, mk, te_df):
-                    """Display project-level breakdown for a selected employee in a modal dialog."""
+                    """Display utilization calculation breakdown and timesheet entries for a selected employee."""
                     st.markdown(f"### {emp_name}")
                     st.caption(f"{mk}")
 
-                    breakdown_df = get_employee_project_breakdown(emp_id, te_df)
+                    # ---- Section A: Billable Utilization Calculation Breakdown ----
+                    st.markdown("#### Billable Utilization Calculation")
 
-                    if not breakdown_df.empty:
-                        col1, col2 = st.columns([1, 1])
+                    # Look up employee row from util_df (closure)
+                    emp_util_rows = util_df[util_df['employee_id'] == emp_id]
+                    if emp_util_rows.empty:
+                        st.warning(f"No utilization data found for {emp_name} in this period.")
+                    else:
+                        emp_row = emp_util_rows.iloc[0]
 
-                        with col1:
-                            st.markdown("#### Hours by Project")
-                            breakdown_display = breakdown_df.copy()
-                            breakdown_display['Billable Hrs'] = breakdown_display['Billable Hrs'].round(1)
-                            breakdown_display['Non-billable Hrs'] = breakdown_display['Non-billable Hrs'].round(1)
-                            breakdown_display['Total Hrs'] = breakdown_display['Total Hrs'].round(1)
+                        # Fetch employee record for target_allocation, overhead_allocation, hire_date, term_date
+                        all_employees = db.get_employees()
+                        emp_record = all_employees[all_employees['id'] == emp_id]
 
-                            st.dataframe(
-                                breakdown_display,
-                                width='stretch',
-                                hide_index=True,
-                                height=400
+                        if not emp_record.empty:
+                            emp_rec = emp_record.iloc[0]
+                            target_alloc = float(emp_rec.get('target_allocation', 0) or 0)
+                            overhead_alloc = float(emp_rec.get('overhead_allocation', 0) or 0)
+                            fte_pct = target_alloc - overhead_alloc
+
+                            hire_date_val = emp_rec.get('hire_date')
+                            term_date_val = emp_rec.get('term_date')
+                        else:
+                            fte_pct = 1.0
+                            hire_date_val = None
+                            term_date_val = None
+
+                        # Get months data for working days and holidays
+                        months_df = db.get_months()
+                        months_in_period = _get_months_in_range(start_date, end_date)
+
+                        # Build month_name_to_num mapping
+                        month_name_to_num = {name: num for num, name in enumerate(calendar.month_name) if num}
+
+                        workdays_total = 0
+                        holidays_total = 0
+                        for mk_period in months_in_period:
+                            parts = mk_period.split()
+                            m_year = int(parts[1])
+                            m_num = month_name_to_num[parts[0]]
+                            month_info = months_df[
+                                (months_df['year'] == m_year) &
+                                (months_df['month'] == m_num)
+                            ]
+                            if not month_info.empty:
+                                workdays_total += int(month_info['working_days'].iloc[0])
+                                hol = month_info['holidays'].iloc[0]
+                                holidays_total += int(hol) if pd.notna(hol) else 0
+
+                        daily_scheduled_hours = 8.0
+
+                        # Calculate employment proration
+                        period_start_dt = pd.to_datetime(start_date).date()
+                        period_end_dt = pd.to_datetime(end_date).date()
+                        total_days_in_period = (period_end_dt - period_start_dt).days + 1
+
+                        emp_start = period_start_dt
+                        emp_end = period_end_dt
+
+                        if hire_date_val and pd.notna(hire_date_val):
+                            hd = pd.to_datetime(hire_date_val).date()
+                            if hd > period_start_dt:
+                                emp_start = hd
+
+                        if term_date_val and pd.notna(term_date_val):
+                            td = pd.to_datetime(term_date_val).date()
+                            if td < period_end_dt:
+                                emp_end = td
+
+                        if emp_start == period_start_dt and emp_end == period_end_dt:
+                            employment_proration = 1.0
+                        elif emp_end < emp_start:
+                            employment_proration = 0.0
+                        else:
+                            days_worked = (emp_end - emp_start).days + 1
+                            employment_proration = days_worked / total_days_in_period
+
+                        # Values from util_df row
+                        possible_hours = float(emp_row['possible_hours'])
+                        pto_hours = float(emp_row['pto_hours'])
+                        available_hours = max(possible_hours - pto_hours, 0)
+                        actual_billable_hours = float(emp_row['actual_billable_hours'])
+                        projected_missing_hours = float(emp_row['projected_missing_hours'])
+                        effective_billable_hours = float(emp_row['effective_billable_hours'])
+                        utilization_pct_val = float(emp_row['utilization_pct'])
+
+                        # Color map for variable badges and table rows
+                        var_colors = {
+                            'workdays': '#dbeafe',
+                            'holidays': '#dbeafe',
+                            'daily_hrs': '#dbeafe',
+                            'fte': '#dbeafe',
+                            'proration': '#dbeafe',
+                            'possible': '#e0e7ff',
+                            'pto': '#fef3c7',
+                            'available': '#d1fae5',
+                            'actual_billable': '#ede9fe',
+                            'projected': '#fce7f3',
+                            'effective': '#bae6fd',
+                            'utilization': '#fef9c3',
+                        }
+
+                        badge = (
+                            'display:inline-block;padding:2px 8px;border-radius:4px;'
+                            'margin:0 2px;font-size:14px;'
+                        )
+
+                        def _badge(color_key, label, bold=False):
+                            """Return an HTML span badge with the given color and label."""
+                            weight = 'font-weight:600;' if bold else ''
+                            return (
+                                f'<span style="{badge}background:{var_colors[color_key]};{weight}">'
+                                f'{label}</span>'
                             )
 
-                        with col2:
-                            st.markdown("#### Distribution")
-                            chart_data = []
-                            for _, proj_row in breakdown_df.iterrows():
-                                if proj_row['Billable Hrs'] > 0:
-                                    chart_data.append({
-                                        'Category': f"{proj_row['Project']} (Billable)",
-                                        'Hours': proj_row['Billable Hrs'],
-                                        'Type': 'Billable'
-                                    })
-                                if proj_row['Non-billable Hrs'] > 0:
-                                    chart_data.append({
-                                        'Category': f"{proj_row['Project']} (Non-billable)",
-                                        'Hours': proj_row['Non-billable Hrs'],
-                                        'Type': 'Non-billable'
-                                    })
+                        def _result_badge(color_key, label, larger=False):
+                            """Return a result badge (font-weight 700)."""
+                            size = 'font-size:16px;' if larger else ''
+                            return (
+                                f'<span style="{badge}background:{var_colors[color_key]};'
+                                f'font-weight:700;{size}">{label}</span>'
+                            )
 
-                            chart_df = pd.DataFrame(chart_data)
+                        def _step_card(accent_color, step_label, formula_html):
+                            """Return a styled step card div."""
+                            return (
+                                f'<div style="margin-bottom:10px;padding:10px 14px;background:#f8fafc;'
+                                f'border-radius:8px;border-left:3px solid {accent_color};">'
+                                f'<div style="font-size:12px;color:#64748b;margin-bottom:4px;">{step_label}</div>'
+                                f'<div style="line-height:1.8;">{formula_html}</div>'
+                                f'</div>'
+                            )
 
-                            if not chart_df.empty:
-                                fig = px.pie(
-                                    chart_df,
-                                    values='Hours',
-                                    names='Category',
-                                    color='Type',
-                                    color_discrete_map={
-                                        'Billable': '#2E7D32',
-                                        'Non-billable': '#FFA726'
-                                    }
+                        # Step 1: Possible Billable Hours
+                        step1_formula = (
+                            f'({_badge("workdays", "Workdays")} {_badge("workdays", f"{workdays_total}", bold=True)}'
+                            f' &minus; '
+                            f'{_badge("holidays", "Holidays")} {_badge("holidays", f"{holidays_total}", bold=True)})'
+                            f' &times; '
+                            f'{_badge("daily_hrs", "Daily Hrs")} {_badge("daily_hrs", "8.0", bold=True)}'
+                            f' &times; '
+                            f'{_badge("fte", "FTE%")} {_badge("fte", f"{fte_pct:.2f}", bold=True)}'
+                            f' &times; '
+                            f'{_badge("proration", "Proration")} {_badge("proration", f"{employment_proration:.2f}", bold=True)}'
+                            f' = '
+                            f'{_result_badge("possible", f"{possible_hours:.1f}")}'
+                        )
+                        step1 = _step_card(var_colors['possible'], 'Step 1: Possible Billable Hours', step1_formula)
+
+                        # Step 2: Available Work Hours
+                        step2_formula = (
+                            f'{_badge("possible", "Possible Billable Hrs")} {_badge("possible", f"{possible_hours:.1f}", bold=True)}'
+                            f' &minus; '
+                            f'{_badge("pto", "PTO Hours")} {_badge("pto", f"{pto_hours:.1f}", bold=True)}'
+                            f' = '
+                            f'{_result_badge("available", f"{available_hours:.1f}")}'
+                        )
+                        step2 = _step_card(var_colors['available'], 'Step 2: Available Work Hours', step2_formula)
+
+                        # Step 3: Effective Billable Hours
+                        step3_formula = (
+                            f'{_badge("actual_billable", "Actual Billable Hrs")} {_badge("actual_billable", f"{actual_billable_hours:.1f}", bold=True)}'
+                            f' + '
+                            f'{_badge("projected", "Projected Missing Hrs")} {_badge("projected", f"{projected_missing_hours:.1f}", bold=True)}'
+                            f' = '
+                            f'{_result_badge("effective", f"{effective_billable_hours:.1f}")}'
+                        )
+                        step3 = _step_card(var_colors['effective'], 'Step 3: Effective Billable Hours', step3_formula)
+
+                        # Step 4: Billable Utilization
+                        if available_hours > 0:
+                            step4_formula = (
+                                f'{_badge("effective", "Effective Billable Hrs")} {_badge("effective", f"{effective_billable_hours:.1f}", bold=True)}'
+                                f' &divide; '
+                                f'{_badge("available", "Available Work Hrs")} {_badge("available", f"{available_hours:.1f}", bold=True)}'
+                                f' &times; 100'
+                                f' = '
+                                f'{_result_badge("utilization", f"{utilization_pct_val:.1f}%", larger=True)}'
+                            )
+                        else:
+                            step4_formula = (
+                                f'{_badge("effective", "Effective Billable Hrs")} {_badge("effective", f"{effective_billable_hours:.1f}", bold=True)}'
+                                f' &divide; '
+                                f'{_badge("available", "Available Work Hrs")} {_badge("available", f"{available_hours:.1f}", bold=True)}'
+                                f' &times; 100'
+                                f' = '
+                                f'{_result_badge("utilization", "N/A")}'
+                            )
+                        step4 = _step_card(var_colors['utilization'], 'Step 4: Billable Utilization', step4_formula)
+
+                        st.markdown(step1 + step2 + step3 + step4, unsafe_allow_html=True)
+
+                        # Note about per-month calculation for multi-month periods
+                        if len(_get_months_in_range(start_date, end_date)) > 1:
+                            st.caption("Note: For multi-month periods, possible hours are calculated per-month with per-month proration, then summed. The single proration factor shown above is an approximate overall value.")
+
+                        # Variable reference table (styled HTML)
+                        ref_rows = [
+                            ('Workdays in Period', str(workdays_total), 'Total scheduled working days', 'months table', 'workdays'),
+                            ('Holiday Days', str(holidays_total), 'Company holidays in period', 'months table', 'holidays'),
+                            ('Daily Scheduled Hours', f'{daily_scheduled_hours:.1f}', 'Standard hours per day', 'Constant', 'daily_hrs'),
+                            ('FTE %', f'{fte_pct:.2f}', 'target_allocation - overhead_allocation', 'employees table', 'fte'),
+                            ('Employment Proration', f'{employment_proration:.2f}', 'Proportion of period employed', 'Calculated from hire/term dates', 'proration'),
+                            ('Possible Billable Hrs', f'{possible_hours:.1f}', '(Workdays-Holidays) x 8 x FTE% x Proration', 'Calculated', 'possible'),
+                            ('PTO Hours', f'{pto_hours:.1f}', 'Approved PTO time', 'time_entries (FRINGE.PTO)', 'pto'),
+                            ('Available Work Hours', f'{available_hours:.1f}', 'Possible Billable Hrs - PTO Hours', 'Calculated', 'available'),
+                            ('Actual Billable Hours', f'{actual_billable_hours:.1f}', 'Billable hours logged', 'time_entries (billable=1)', 'actual_billable'),
+                            ('Projected Missing Hrs', f'{projected_missing_hours:.1f}', 'Projected hours for missing days from last timesheet entry to end of month', 'projected_hours x (missing_days / available_days)', 'projected'),
+                            ('Effective Billable Hrs', f'{effective_billable_hours:.1f}', 'Actual Billable + Projected Missing', 'Calculated', 'effective'),
+                            ('Billable Utilization %', f'{utilization_pct_val:.1f}%', 'Effective Billable / Available x 100', 'Final Result', 'utilization'),
+                        ]
+
+                        th_style = 'background:#f1f5f9;padding:8px 12px;text-align:left;border-bottom:2px solid #e2e8f0;font-weight:600;'
+                        table_html = (
+                            '<table style="width:100%;border-collapse:collapse;font-size:14px;">'
+                            f'<tr><th style="{th_style}">Variable</th>'
+                            f'<th style="{th_style}">Value</th>'
+                            f'<th style="{th_style}">Definition</th>'
+                            f'<th style="{th_style}">Source</th></tr>'
+                        )
+
+                        for var_name, var_val, var_def, var_src, color_key in ref_rows:
+                            bg = var_colors[color_key]
+                            is_final = color_key == 'utilization'
+                            if is_final:
+                                row_style = f'background:{bg};font-weight:700;'
+                                table_html += (
+                                    f'<tr>'
+                                    f'<td style="padding:6px 12px;border-bottom:1px solid #e2e8f0;{row_style}">{var_name}</td>'
+                                    f'<td style="padding:6px 12px;border-bottom:1px solid #e2e8f0;{row_style}">{var_val}</td>'
+                                    f'<td style="padding:6px 12px;border-bottom:1px solid #e2e8f0;{row_style}">{var_def}</td>'
+                                    f'<td style="padding:6px 12px;border-bottom:1px solid #e2e8f0;{row_style}">{var_src}</td>'
+                                    f'</tr>'
                                 )
-                                fig.update_layout(height=400, showlegend=True)
-                                st.plotly_chart(fig, width='stretch')
-                    else:
+                            else:
+                                td_base = 'padding:6px 12px;border-bottom:1px solid #e2e8f0;'
+                                table_html += (
+                                    f'<tr>'
+                                    f'<td style="{td_base}background:{bg};">{var_name}</td>'
+                                    f'<td style="{td_base}background:{bg};font-weight:600;">{var_val}</td>'
+                                    f'<td style="{td_base}">{var_def}</td>'
+                                    f'<td style="{td_base}">{var_src}</td>'
+                                    f'</tr>'
+                                )
+
+                        table_html += '</table>'
+                        st.markdown(table_html, unsafe_allow_html=True)
+
+                    # ---- Section B: Hours by Project & Timesheet Entries ----
+                    st.markdown("---")
+
+                    emp_te = te_df[te_df['employee_id'] == emp_id].copy() if not te_df.empty else pd.DataFrame()
+
+                    if emp_te.empty:
                         st.info(f"No time entries found for {emp_name} in {mk}")
+                    else:
+                        # Compute rate column for reuse
+                        emp_te['_rate'] = emp_te['hourly_rate'].fillna(0) if 'hourly_rate' in emp_te.columns else 0.0
+                        emp_te['_amount'] = emp_te['hours'] * emp_te['_rate']
+
+                        # ---- Hours by Project summary ----
+                        st.markdown("#### Hours by Project")
+
+                        # Group by project
+                        billable_hrs = emp_te[emp_te['billable'].fillna(0) == 1].groupby(['project_id', 'project_name'])['hours'].sum()
+                        nonbillable_hrs = emp_te[emp_te['billable'].fillna(0) != 1].groupby(['project_id', 'project_name'])['hours'].sum()
+                        total_hrs = emp_te.groupby(['project_id', 'project_name'])['hours'].sum()
+                        total_amount = emp_te.groupby(['project_id', 'project_name'])['_amount'].sum()
+
+                        proj_summary = pd.DataFrame({
+                            'Billable Hrs': billable_hrs,
+                            'Non-billable Hrs': nonbillable_hrs,
+                            'Total Hrs': total_hrs,
+                            'Amount': total_amount,
+                        }).fillna(0).reset_index()
+
+                        proj_summary = proj_summary.rename(columns={
+                            'project_id': 'Project Code',
+                            'project_name': 'Project',
+                        })
+
+                        grand_total = proj_summary['Total Hrs'].sum()
+                        proj_summary['% of Total'] = (
+                            (proj_summary['Total Hrs'] / grand_total * 100).round(1) if grand_total > 0 else 0.0
+                        )
+
+                        proj_summary['Billable Hrs'] = proj_summary['Billable Hrs'].round(1)
+                        proj_summary['Non-billable Hrs'] = proj_summary['Non-billable Hrs'].round(1)
+                        proj_summary['Total Hrs'] = proj_summary['Total Hrs'].round(1)
+                        proj_summary['Amount'] = proj_summary['Amount'].round(2)
+
+                        proj_summary = proj_summary.sort_values('Total Hrs', ascending=False)
+
+                        st.dataframe(
+                            proj_summary[['Project Code', 'Project', 'Billable Hrs', 'Non-billable Hrs', 'Total Hrs', 'Amount', '% of Total']],
+                            hide_index=True,
+                            use_container_width=True,
+                            column_config={
+                                'Amount': st.column_config.NumberColumn(format='$%.2f'),
+                                '% of Total': st.column_config.NumberColumn(format='%.1f%%'),
+                            }
+                        )
+
+                        # ---- Timesheet Entries (raw) ----
+                        st.markdown("#### Timesheet Entries")
+
+                        # Sort by date ascending
+                        emp_te = emp_te.sort_values('date', ascending=True)
+
+                        # Build display columns
+                        ts_display = pd.DataFrame()
+                        ts_display['Date'] = emp_te['date'].values
+                        ts_display['Project Code'] = emp_te['project_id'].values
+                        ts_display['Project'] = emp_te['project_name'].values if 'project_name' in emp_te.columns else emp_te['project_id'].values
+                        ts_display['Hours'] = emp_te['hours'].round(2).values
+                        ts_display['Billable'] = emp_te['billable'].map({1: 'Yes', 0: 'No'}).values
+                        ts_display['Bill Rate'] = emp_te['_rate'].values
+                        ts_display['Amount'] = emp_te['_amount'].round(2).values
+                        ts_display['Description'] = emp_te['description'].values if 'description' in emp_te.columns else ''
+
+                        st.dataframe(ts_display, hide_index=True, use_container_width=True)
 
                 st.markdown(f"### Utilization Report - {time_frame} ({detail_period_label})")
 
                 # Prepare display DataFrame
                 display_df = util_df[[
                     'employee_id', 'name', 'possible_hours',
-                    'actual_hours', 'actual_billable_hours', 'pto_hours', 'holiday_hours',
+                    'actual_hours', 'actual_billable_hours',
+                    'projected_missing_hours', 'effective_billable_hours',
+                    'pto_hours', 'holiday_hours',
                     'other_nonbillable_hours', 'utilization_pct', 'status',
                     'ytd_possible_hours', 'ytd_actual_billable_hours', 'ytd_utilization_pct'
                 ]].copy()
@@ -1107,6 +1464,8 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
                     'possible_hours': 'Possible Billable Hrs',
                     'actual_hours': 'Actual Hrs',
                     'actual_billable_hours': 'Actual Billable Hrs',
+                    'projected_missing_hours': 'Projected Missing Hrs',
+                    'effective_billable_hours': 'Effective Billable Hrs',
                     'pto_hours': 'PTO Hrs',
                     'holiday_hours': 'Holiday Hrs',
                     'other_nonbillable_hours': 'Other Non-billable Hrs',
@@ -1160,24 +1519,29 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
   | Column                           | Source                                                  | Calculation                                                                          |
   |----------------------------------|---------------------------------------------------------|--------------------------------------------------------------------------------------|
   | Employee                         | employees_df['name']                                    | Direct from employees table                                                          |
-  | Possible Billable Hrs            | metrics['possible'][month_key][emp_id]['hours']         | From employees table: (working_days) x (target_allocation - overhead_allocation) x 8 |
+  | Possible Billable Hrs            | metrics['possible'][month_key][emp_id]['hours']         | From employees table: (working_days - holidays) x (target_allocation - overhead_allocation) x 8 |
   | Actual Hrs                       | metrics['actuals'][month_key][emp_id]['hours']          | From time_entries table: sum of ALL hours logged (billable + non-billable)           |
   | Actual Billable Hrs              | metrics['actuals'][month_key][emp_id]['billable_hours'] | From time_entries table: sum of hours where billable=1                               |
+  | Projected Missing Hrs            | Calculated (current month only)                         | projected_hours x (missing_working_days / available_working_days), where missing_working_days = weekdays from employee's last timesheet entry to end of month |
+  | Effective Billable Hrs           | Calculated                                              | actual_billable_hours + projected_missing_hours                                      |
   | PTO Hrs                          | time_entries_df where project_id='FRINGE.PTO'           | Sum of hours from time_entries for PTO project                                       |
-  | Holiday Hrs                      | time_entries_df where project_id='FRINGE.HOL'           | Sum of hours from time_entries for Holiday project                                   |
-  | Other Non-billable Hrs           | Calculated                                              | (actual_hours - actual_billable_hours) - pto_hours - holiday_hours                   |
-  | Billable Utilization %           | Calculated                                              | (actual_billable_hours / (possible_hours - pto_hours - holiday_hours)) x 100         |
+  | Holiday Hrs                      | time_entries_df where project_id='FRINGE.HOL'           | Sum of hours from time_entries for Holiday project (for reference; not in denominator)|
+  | Other Non-billable Hrs           | Calculated                                              | (actual_hours - actual_billable_hours) - pto_hours                                   |
+  | Billable Utilization %           | Calculated                                              | (effective_billable_hours / (possible_hours - pto_hours)) x 100                      |
   | Status                           | Calculated                                              | Based on Billable Utilization %: >120%, 100-120%, 80-100%, <80%                      |
   | YTD Possible Billable Hrs        | ytd_metrics['possible']                                 | Sum of possible hours from Jan 1 to end of selected month                            |
   | YTD Actual Billable Hrs          | ytd_metrics['actuals']                                  | Sum of actual billable hours from Jan 1 to end of selected month                     |
-  | YTD Billable Utilization %       | Calculated                                              | (ytd_actual_billable_hours / (ytd_possible_hours - ytd_pto_hours - ytd_holiday_hours)) x 100 |
+  | YTD Billable Utilization %       | Calculated                                              | (ytd_actual_billable_hours / (ytd_possible_hours - ytd_pto_hours)) x 100             |
 
 **Notes:**
-- Possible hours are adjusted for employees hired or terminated mid-month, and for the current (partial) month where hours are prorated to elapsed working days so utilization reflects actual billing pace.
-- Actual Billable Hrs shows only time entries marked as billable=1 in the database.
-- Billable Utilization % uses available hours (possible - PTO - Holiday) as the denominator to reflect actual time available for billable work.
+- Possible hours use (working_days - holidays) from the months table as the authoritative holiday source.
+- For the current month, missing billable hours are projected using allocation FTE data from the employee's last timesheet entry through end of month.
+- Effective Billable Hrs = Actual Billable + Projected Missing.
+- Use the "Include projected hours" toggle to switch between projected and actual-only views.
+- Possible hours are adjusted for employees hired or terminated mid-month (employment proration).
+- Billable Utilization % uses available hours (possible - PTO) as the denominator.
 - Click on any row to view project-level breakdown.
-- YTD columns show cumulative data from January 1st through the end of the selected month. Current month prorated to elapsed working days.
+- YTD columns show cumulative data from January 1st through the end of the selected month.
 """)
 
                 with col2:
@@ -1200,6 +1564,8 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
                     'Possible Billable Hrs',
                     'Actual Hrs',
                     'Actual Billable Hrs',
+                    'Projected Missing Hrs',
+                    'Effective Billable Hrs',
                     'PTO Hrs',
                     'Holiday Hrs',
                     'Other Non-billable Hrs'

@@ -82,6 +82,8 @@ def render_allocation_tab(db, processor, employee_id=None):
                 return 21  # Default fallback
 
             working_days_in_month = int(month_info['working_days'].iloc[0])
+            holidays_in_month = int(month_info['holidays'].iloc[0]) if 'holidays' in month_info.columns and pd.notna(month_info['holidays'].iloc[0]) else 0
+            working_days_in_month = max(working_days_in_month - holidays_in_month, 0)
 
             # Calculate the actual working days the employee was active
             month_start = datetime(year, month, 1).date()

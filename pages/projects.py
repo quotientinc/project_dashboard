@@ -278,7 +278,7 @@ with st.popover("How is utilization calculated?"):
     st.markdown("""
 **Utilization %** = (Actual Billable Hours / Allocated Hours) x 100
 
-- **Allocated Hours**: From FTE allocations -- `allocated_fte x working_days x 8 hrs/day` summed across all team members. For the current (partial) month, allocated hours are prorated to elapsed working days so utilization reflects actual billing pace.
+- **Allocated Hours**: From FTE allocations -- `allocated_fte x working_days x 8 hrs/day` summed across all team members. For the current (partial) month, allocated hours are prorated to elapsed working days.
 - **Actual Billable Hours**: From time entries marked as billable
 - **Revenue Gap**: Dollar value of unused capacity -- `(Allocated Hours - Actual Billable Hours) x avg bill rate`. The avg bill rate is the blended rate across all team members on the project, weighted by their allocated hours.
 
@@ -290,7 +290,7 @@ with st.popover("How is utilization calculated?"):
 
 **N/A** means the project has no FTE allocations, so utilization cannot be calculated.
 
-*Based on YTD (Year-to-Date) data. Current month prorated to elapsed working days.*
+*Based on YTD (Year-to-Date) data.*
     """)
 
 st.info("Click on any project row to view details")

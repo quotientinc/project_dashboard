@@ -11,7 +11,18 @@ logger = get_logger(__name__)
 
 class DataProcessor:
     """Process and analyze project management data"""
-    
+
+    @staticmethod
+    def count_working_days(start_date, end_date):
+        """Count weekdays (Mon-Fri) between start_date and end_date inclusive."""
+        if end_date < start_date:
+            return 0
+        count = np.busday_count(start_date, end_date)
+        # np.busday_count is start-inclusive, end-exclusive; add 1 if end_date is a weekday
+        if end_date.weekday() < 5:
+            count += 1
+        return int(count)
+
     @staticmethod
     @st.cache_data(ttl=300, show_spinner=False)
     def calculate_burn_rate(expenses_df: pd.DataFrame, time_period: str = 'monthly') -> pd.DataFrame:
@@ -79,296 +90,6 @@ class DataProcessor:
         ).round(1)
         
         return health_metrics
-    
-    @staticmethod
-    @st.cache_data(ttl=60, show_spinner=False)
-    def calculate_employee_utilization(
-        employees_df: pd.DataFrame,
-        allocations_df: pd.DataFrame,
-        time_entries_df: pd.DataFrame,
-        current_month_working_days: int = 21,
-        target_year: int = None,
-        target_month: int = None
-    ) -> pd.DataFrame:
-        """
-        Calculate employee utilization metrics using improved methodology.
-
-        Improved calculation uses:
-        - Target FTE allocation as baseline (not fixed 160 hours)
-        - Actual working days in the month
-        - PTO and holiday adjustments
-        - Separate tracking of billable vs total utilization
-        - ONLY time entries from the specified month
-
-        Formula:
-        Expected Hours = Target FTE × Working Days × 8 hours/day × (1 - Overhead Allocation)
-        Utilization Rate = (Total Hours Worked / Expected Hours) × 100%
-        Billable Utilization = (Billable Hours Worked / Expected Hours) × 100%
-
-        Args:
-            employees_df: DataFrame with employee data including target_allocation, overhead_allocation
-            allocations_df: DataFrame with project allocations
-            time_entries_df: DataFrame with time entries (will be filtered to target month)
-            current_month_working_days: Number of working days in the current month (default 21)
-            target_year: Year to filter time entries (defaults to current year)
-            target_month: Month to filter time entries (defaults to current month)
-        """
-        from datetime import datetime
-
-        if employees_df.empty:
-            return pd.DataFrame()
-
-        # Default to current year/month if not specified
-        if target_year is None:
-            target_year = datetime.now().year
-        if target_month is None:
-            target_month = datetime.now().month
-
-        # Filter out terminated employees who left before the reporting period
-        # If terminated during the month, include them (they worked part of the month)
-        # If terminated before the month started, exclude them
-        utilization = employees_df.copy()
-
-        # Convert term_date to datetime if it exists
-        if 'term_date' in utilization.columns:
-            utilization['term_date_dt'] = pd.to_datetime(utilization['term_date'], errors='coerce')
-
-            # First day of the target month
-            target_month_start = datetime(target_year, target_month, 1)
-
-            # Filter: keep employees who either:
-            # 1. Have no term date (still active), OR
-            # 2. Were terminated during or after the target month
-            utilization = utilization[
-                (utilization['term_date_dt'].isna()) |
-                (utilization['term_date_dt'] >= target_month_start)
-            ].copy()
-
-            # Drop the temporary datetime column
-            utilization = utilization.drop(columns=['term_date_dt'])
-
-        if utilization.empty:
-            return pd.DataFrame()
-
-        # Calculate allocated FTE and get rates from allocations
-        if not allocations_df.empty:
-            allocated = allocations_df.groupby('employee_id').agg({
-                'bill_rate': 'mean',  # Average rate across allocations
-                'allocated_fte': 'sum'    # Sum FTE across all allocations
-            }).reset_index()
-
-            utilization = utilization.merge(allocated, left_on='id', right_on='employee_id', how='left')
-            utilization['bill_rate'] = utilization['bill_rate'].fillna(0)
-            utilization['allocated_fte'] = utilization['allocated_fte'].fillna(0)
-        else:
-            utilization['bill_rate'] = 0
-            utilization['allocated_fte'] = 0
-
-        # FILTER time entries to only the target month
-        if not time_entries_df.empty:
-            # Ensure date column is datetime
-            time_entries_df['date'] = pd.to_datetime(time_entries_df['date'])
-
-            # Filter to target year and month
-            month_entries = time_entries_df[
-                (time_entries_df['date'].dt.year == target_year) &
-                (time_entries_df['date'].dt.month == target_month)
-            ].copy()
-
-            if not month_entries.empty:
-                # Calculate billable vs non-billable hours for THIS MONTH ONLY
-                billable = month_entries.groupby(['employee_id', 'billable'])['hours'].sum().unstack(fill_value=0)
-                if 1 in billable.columns:
-                    billable_hours = billable[1].reset_index()
-                    billable_hours.columns = ['employee_id', 'billable_hours']
-                    utilization = utilization.merge(billable_hours, left_on='id', right_on='employee_id', how='left')
-                    utilization['billable_hours'] = utilization['billable_hours'].fillna(0)
-                else:
-                    utilization['billable_hours'] = 0
-
-                total_hours = month_entries.groupby('employee_id')['hours'].sum().reset_index()
-                total_hours.columns = ['employee_id', 'total_hours']
-                utilization = utilization.merge(total_hours, left_on='id', right_on='employee_id', how='left')
-                utilization['total_hours'] = utilization['total_hours'].fillna(0)
-            else:
-                # No time entries for this month
-                utilization['billable_hours'] = 0
-                utilization['total_hours'] = 0
-        else:
-            utilization['billable_hours'] = 0
-            utilization['total_hours'] = 0
-
-        # IMPROVED CALCULATION: Use target allocation and actual working days
-        # Ensure target_allocation and overhead_allocation exist
-        if 'target_allocation' not in utilization.columns:
-            utilization['target_allocation'] = 1.0  # Default to full-time
-        if 'overhead_allocation' not in utilization.columns:
-            utilization['overhead_allocation'] = 0.0  # Default to no overhead
-
-        # Fill NaN values
-        utilization['target_allocation'] = utilization['target_allocation'].fillna(1.0)
-        utilization['overhead_allocation'] = utilization['overhead_allocation'].fillna(0.0)
-
-        # Calculate expected hours based on target FTE and working days
-        # Expected Hours = Target FTE × Working Days × 8 hours/day × (1 - Overhead %)
-        hours_per_day = 8
-        utilization['expected_hours'] = (
-            utilization['target_allocation'] *
-            current_month_working_days *
-            hours_per_day *
-            (1 - utilization['overhead_allocation'])
-        )
-
-        # Calculate utilization rates
-        # Total utilization (includes both billable and non-billable work)
-        utilization['utilization_rate'] = np.where(
-            utilization['expected_hours'] > 0,
-            (utilization['total_hours'] / utilization['expected_hours'] * 100).clip(0, 200),  # Allow up to 200% for overtime
-            0
-        )
-
-        # Billable utilization (only billable hours against expected)
-        utilization['billable_utilization'] = np.where(
-            utilization['expected_hours'] > 0,
-            (utilization['billable_hours'] / utilization['expected_hours'] * 100).clip(0, 200),
-            0
-        )
-
-        # Billable rate (percentage of worked hours that are billable)
-        utilization['billable_rate'] = np.where(
-            utilization['total_hours'] > 0,
-            utilization['billable_hours'] / utilization['total_hours'] * 100,
-            0
-        )
-
-        # Revenue calculations - use actual time entry data when available
-        if not time_entries_df.empty and not month_entries.empty:
-            # Check if amount column exists in time_entries
-            if 'amount' in month_entries.columns:
-                # Calculate actual revenue from time entries (use amount when available)
-                def calculate_row_revenue(row):
-                    if pd.notna(row.get('amount')) and row['amount'] != 0:
-                        return row['amount']
-                    elif pd.notna(row.get('bill_rate')):
-                        return row['hours'] * row['bill_rate']
-                    else:
-                        return 0
-
-                month_entries['revenue'] = month_entries.apply(calculate_row_revenue, axis=1)
-                actual_revenue = month_entries.groupby('employee_id')['revenue'].sum().reset_index()
-                actual_revenue.columns = ['employee_id', 'actual_revenue']
-                utilization = utilization.merge(actual_revenue, left_on='id', right_on='employee_id', how='left')
-                utilization['revenue_generated'] = utilization['actual_revenue'].fillna(0)
-            else:
-                # Fallback to calculated revenue using bill_rate from allocations
-                if 'cost_rate' in utilization.columns:
-                    effective_rate = utilization['cost_rate'].fillna(utilization['bill_rate'])
-                else:
-                    effective_rate = utilization['bill_rate']
-                utilization['revenue_generated'] = utilization['billable_hours'] * effective_rate
-        else:
-            # No time entries - use calculated revenue
-            if 'cost_rate' in utilization.columns:
-                effective_rate = utilization['cost_rate'].fillna(utilization['bill_rate'])
-            else:
-                effective_rate = utilization['bill_rate']
-            utilization['revenue_generated'] = utilization['billable_hours'] * effective_rate
-
-        # Cost calculations (keep as-is for expected costs)
-        # Use cost_rate from employee record (falls back to bill_rate from allocations)
-        if 'cost_rate' in utilization.columns:
-            effective_rate = utilization['cost_rate'].fillna(utilization['bill_rate'])
-        else:
-            effective_rate = utilization['bill_rate']
-
-        utilization['monthly_cost'] = effective_rate * utilization['expected_hours']
-
-        return utilization
-
-    @staticmethod
-    def calculate_monthly_utilization_trend(
-        employees_df: pd.DataFrame,
-        allocations_df: pd.DataFrame,
-        time_entries_df: pd.DataFrame,
-        months_df: pd.DataFrame
-    ) -> pd.DataFrame:
-        """
-        Calculate monthly average utilization showing YTD actual (from time entries)
-        and projected (from allocations) for the remainder of the year.
-
-        Returns DataFrame with columns: month, month_name, avg_utilization, type
-        """
-        from datetime import datetime
-
-        if employees_df.empty:
-            return pd.DataFrame()
-
-        current_year = datetime.now().year
-        current_month = datetime.now().month
-
-        # Get months for current year
-        current_year_months = months_df[months_df['year'] == current_year].copy()
-        if current_year_months.empty:
-            # Fallback: generate basic month structure
-            current_year_months = pd.DataFrame({
-                'month': range(1, 13),
-                'month_name': ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                              'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
-                'working_days': [21] * 12  # Default approximation
-            })
-
-        total_employees = len(employees_df)
-        standard_monthly_hours = 160
-
-        result = []
-
-        for _, month_row in current_year_months.iterrows():
-            month_num = month_row['month']
-            month_name = month_row['month_name']
-
-            if month_num <= current_month:
-                # YTD Actual: Calculate from time entries
-                if not time_entries_df.empty:
-                    # Filter time entries for this month
-                    time_entries_df['date'] = pd.to_datetime(time_entries_df['date'])
-                    month_entries = time_entries_df[
-                        (time_entries_df['date'].dt.year == current_year) &
-                        (time_entries_df['date'].dt.month == month_num)
-                    ]
-
-                    if not month_entries.empty:
-                        total_hours = month_entries['hours'].sum()
-                        # Average utilization = total hours / (employees × standard hours) × 100
-                        avg_utilization = (total_hours / (total_employees * standard_monthly_hours)) * 100
-                    else:
-                        avg_utilization = 0
-                else:
-                    avg_utilization = 0
-
-                result.append({
-                    'month': month_num,
-                    'month_name': month_name,
-                    'avg_utilization': min(avg_utilization, 100),  # Cap at 100%
-                    'type': 'Actual'
-                })
-            else:
-                # Future months: Projected from allocations
-                if not allocations_df.empty:
-                    # Calculate average FTE allocation
-                    # Note: This is simplified - assumes allocations are for the entire year
-                    total_fte = allocations_df['allocated_fte'].sum()
-                    avg_utilization = (total_fte / total_employees) * 100
-                else:
-                    avg_utilization = 0
-
-                result.append({
-                    'month': month_num,
-                    'month_name': month_name,
-                    'avg_utilization': min(avg_utilization, 100),  # Cap at 100%
-                    'type': 'Projected'
-                })
-
-        return pd.DataFrame(result)
 
     @staticmethod
     def calculate_project_costs(
@@ -858,7 +579,7 @@ class DataProcessor:
         Returns three groups of data: actuals (from time_entries), projected
         (from allocations), and possible (from employees).
 
-        All data excludes time_entries with project_id='FRINGE.HOL'.
+        All FRINGE.* time entries are excluded (HOL, PTO, SIC, BRV, etc.).
 
         Args:
             start_date: Start date in 'YYYY-MM-DD' format
@@ -949,6 +670,8 @@ class DataProcessor:
 
         Actuals = what actually happened, purely from time_entries.
         No JOIN with allocations - that's for projected data.
+        All FRINGE.* entries (HOL, PTO, SIC, BRV, etc.) are excluded -
+        they represent non-work time tracked separately.
         """
 
         # Query time_entries directly - no JOIN needed
@@ -964,7 +687,7 @@ class DataProcessor:
             FROM time_entries t
             WHERE t.date >= ?
                 AND t.date <= ?
-                AND t.project_id != 'FRINGE.HOL'
+                AND t.project_id NOT LIKE 'FRINGE.%'
         """
         params = [start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')]
 
@@ -1044,6 +767,8 @@ class DataProcessor:
         """Build projected data from allocations table"""
 
         # Build query to get allocations
+        # Compare at YYYY-MM level using SUBSTR to handle both YYYY-MM and
+        # YYYY-MM-DD storage formats in the allocation_date column.
         query = """
             SELECT
                 a.employee_id,
@@ -1052,10 +777,10 @@ class DataProcessor:
                 a.allocated_fte,
                 a.bill_rate
             FROM allocations a
-            WHERE a.allocation_date >= ?
-                AND a.allocation_date <= ?
+            WHERE SUBSTR(a.allocation_date, 1, 7) >= ?
+                AND SUBSTR(a.allocation_date, 1, 7) <= ?
         """
-        params = [start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')]
+        params = [start.strftime('%Y-%m'), end.strftime('%Y-%m')]
 
         # Add constraint filter
         if filter_type == 'project' and filter_value:
@@ -1261,10 +986,15 @@ class DataProcessor:
 
         cross_join['proration_factor'] = cross_join.apply(calculate_proration_factor, axis=1)
 
+        # Subtract holidays from working_days to get available working days
+        # months.holidays is the authoritative source for company holidays
+        cross_join['holidays'] = cross_join['holidays'].fillna(0)
+        cross_join['available_working_days'] = (cross_join['working_days'] - cross_join['holidays']).clip(lower=0)
+
         # Calculate possible hours with proration
-        # Formula: (working_days) × (target_allocation - overhead_allocation) × 8 × proration_factor
+        # Formula: (working_days - holidays) × (target_allocation - overhead_allocation) × 8 × proration_factor
         cross_join['hours'] = (
-            (cross_join['working_days']) *
+            cross_join['available_working_days'] *
             (cross_join['target_allocation'] - cross_join['overhead_allocation']) *
             8 *
             cross_join['proration_factor']
@@ -1274,9 +1004,10 @@ class DataProcessor:
         cross_join['revenue'] = 0
 
         # Group by month and employee (only employee grouping for possible data)
-        grouped = cross_join.groupby(['month_name_full', 'employee_id', 'working_days']).agg({
+        grouped = cross_join.groupby(['month_name_full', 'employee_id']).agg({
             'hours': 'sum',
-            'revenue': 'sum'
+            'revenue': 'sum',
+            'available_working_days': 'first'
         }).reset_index()
 
         # Build nested dictionary structure
@@ -1291,7 +1022,7 @@ class DataProcessor:
             possible[month][key] = {
                 'hours': float(row['hours']),
                 'revenue': float(row['revenue']),
-                'worked_days': int(row['working_days'])
+                'worked_days': int(row['available_working_days'])
             }
 
         return possible
