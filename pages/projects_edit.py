@@ -406,6 +406,10 @@ def render_project_edit_tab(db, processor, project_id=None):
                                     'bill_rate': float(change['new_rate']),
                                     'role': change['role']
                                 })
+                                # Clean up any duplicate allocation rows (issue #35)
+                                if len(existing) > 1:
+                                    for dup_id in existing.iloc[1:]['id']:
+                                        db.delete_allocation(int(dup_id))
                             else:
                                 # Create new record (employee exists but no allocation for this month)
                                 db.add_allocation({

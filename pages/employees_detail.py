@@ -348,6 +348,10 @@ Tips:
                                 'bill_rate': float(change['new_rate']),
                                 'role': change['role']
                             })
+                            # Clean up any duplicate allocation rows (issue #35)
+                            if len(existing) > 1:
+                                for dup_id in existing.iloc[1:]['id']:
+                                    db.delete_allocation(int(dup_id))
                         else:
                             # Create new record (project exists but no allocation for this month)
                             if change['new_fte'] != 0.0 or change['new_rate'] != 0.0:

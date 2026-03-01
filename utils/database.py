@@ -21,6 +21,7 @@ class DatabaseManager:
         self.migrate_projects_schema_cleanup()
         self.migrate_contract_value_split()
         self.migrate_remove_deprecated_allocation_columns()
+        self.migrate_add_allocation_unique_constraint()
         self.create_indexes()
         self.migrate_add_project_phases_table()
 
@@ -89,7 +90,8 @@ class DatabaseManager:
                 created_at TEXT,
                 updated_at TEXT,
                 FOREIGN KEY (project_id) REFERENCES projects (id),
-                FOREIGN KEY (employee_id) REFERENCES employees (id)
+                FOREIGN KEY (employee_id) REFERENCES employees (id),
+                UNIQUE (employee_id, project_id, allocation_date)
             )
         ''')
 
@@ -615,6 +617,94 @@ class DatabaseManager:
         print("   - Removed: start_date, end_date, working_days, remaining_days")
         print("   - Kept: allocation_date (source of truth)")
 
+    def migrate_add_allocation_unique_constraint(self):
+        """
+        Add UNIQUE constraint on (employee_id, project_id, allocation_date) to the allocations table.
+        This prevents duplicate allocation entries when data is re-imported.
+        Also normalizes allocation_date values from YYYY-MM-DD to YYYY-MM format
+        and deduplicates existing rows (keeping the highest id for each unique combo).
+        This migration is safe to run multiple times.
+        """
+        cursor = self.conn.cursor()
+
+        # Idempotency check: see if the CREATE TABLE DDL already has a UNIQUE constraint
+        cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='allocations'")
+        result = cursor.fetchone()
+        if result is None:
+            # Table doesn't exist yet; create_tables() will handle it
+            return
+        create_sql = result[0]
+        if 'UNIQUE' in create_sql.upper():
+            print("Allocation unique constraint already present")
+            return
+
+        print("Starting allocation unique constraint migration...")
+
+        # Step 1: Read all existing data and column info
+        cursor.execute("PRAGMA table_info(allocations)")
+        columns = cursor.fetchall()
+        col_names = [col[1] for col in columns]
+
+        cursor.execute("SELECT * FROM allocations")
+        all_rows = cursor.fetchall()
+
+        # Step 2: Normalize allocation_date — truncate any YYYY-MM-DD values to YYYY-MM
+        allocation_date_idx = col_names.index('allocation_date')
+        normalized_rows = []
+        for row in all_rows:
+            row_list = list(row)
+            raw_date = row_list[allocation_date_idx]
+            if raw_date and len(str(raw_date)) > 7:
+                row_list[allocation_date_idx] = str(raw_date)[:7]
+            normalized_rows.append(row_list)
+
+        # Step 3: Deduplicate — group by (employee_id, project_id, allocation_date), keep highest id
+        id_idx = col_names.index('id')
+        emp_idx = col_names.index('employee_id')
+        proj_idx = col_names.index('project_id')
+
+        seen = {}
+        for row in normalized_rows:
+            key = (row[emp_idx], row[proj_idx], row[allocation_date_idx])
+            if key not in seen or row[id_idx] > seen[key][id_idx]:
+                seen[key] = row
+
+        deduped_rows = list(seen.values())
+        duplicates_removed = len(normalized_rows) - len(deduped_rows)
+        print(f"  - Found {len(normalized_rows)} rows, removing {duplicates_removed} duplicate(s)")
+
+        # Step 4: Drop old table, recreate with UNIQUE constraint
+        cursor.execute("DROP TABLE allocations")
+        cursor.execute('''
+            CREATE TABLE allocations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT,
+                employee_id INTEGER,
+                allocated_fte REAL,
+                allocation_date TEXT,
+                role TEXT,
+                bill_rate REAL,
+                created_at TEXT,
+                updated_at TEXT,
+                FOREIGN KEY (project_id) REFERENCES projects (id),
+                FOREIGN KEY (employee_id) REFERENCES employees (id),
+                UNIQUE (employee_id, project_id, allocation_date)
+            )
+        ''')
+
+        # Step 5: Restore deduplicated data
+        if deduped_rows:
+            placeholders = ','.join('?' * len(col_names))
+            query = f"INSERT INTO allocations ({','.join(col_names)}) VALUES ({placeholders})"
+            cursor.executemany(query, [tuple(r) for r in deduped_rows])
+            print(f"  - Migrated {len(deduped_rows)} allocation records")
+
+        self.conn.commit()
+        print("Allocation unique constraint migration complete")
+        print("   - Added: UNIQUE(employee_id, project_id, allocation_date)")
+        print(f"   - Removed {duplicates_removed} duplicate(s) from {len(normalized_rows)} rows")
+        logger.info(f"Allocation unique constraint migration complete. Removed {duplicates_removed} duplicate(s) from {len(normalized_rows)} rows.")
+
     def create_indexes(self):
         """
         Create performance indexes on frequently queried columns.
@@ -652,10 +742,6 @@ class DatabaseManager:
              'CREATE INDEX idx_allocations_project_id ON allocations(project_id)'),
             ('idx_allocations_allocation_date',
              'CREATE INDEX idx_allocations_allocation_date ON allocations(allocation_date)'),
-            ('idx_allocations_project_date',
-             'CREATE INDEX idx_allocations_project_date ON allocations(project_id, allocation_date)'),
-            ('idx_allocations_employee_date',
-             'CREATE INDEX idx_allocations_employee_date ON allocations(employee_id, allocation_date)'),
 
             # Optional indexes for filtering
             ('idx_employees_billable',
@@ -1010,7 +1096,12 @@ class DatabaseManager:
 
         columns = list(allocation_data.keys())
         placeholders = ','.join('?' * len(columns))
-        query = f"INSERT INTO allocations ({','.join(columns)}) VALUES ({placeholders})"
+        query = f"""INSERT INTO allocations ({','.join(columns)}) VALUES ({placeholders})
+            ON CONFLICT(employee_id, project_id, allocation_date) DO UPDATE SET
+                allocated_fte=excluded.allocated_fte,
+                bill_rate=excluded.bill_rate,
+                role=excluded.role,
+                updated_at=excluded.updated_at"""
 
         cursor = self.conn.cursor()
         cursor.execute(query, list(allocation_data.values()))
@@ -1113,7 +1204,7 @@ class DatabaseManager:
     def bulk_insert_allocations(self, allocations_data):
         """
         Bulk insert allocations from list of dicts.
-        Uses INSERT OR REPLACE to handle duplicates (replaces existing with new data).
+        Uses ON CONFLICT upsert to handle duplicates - updates existing rows while preserving id and created_at.
         """
         if not allocations_data:
             return
@@ -1124,8 +1215,13 @@ class DatabaseManager:
         columns = list(allocations_data[0].keys())
         placeholders = ','.join('?' * len(columns))
 
-        # Use INSERT OR REPLACE to handle duplicates
-        query = f"INSERT OR REPLACE INTO allocations ({','.join(columns)}) VALUES ({placeholders})"
+        # Use ON CONFLICT upsert to handle duplicates
+        query = f"""INSERT INTO allocations ({','.join(columns)}) VALUES ({placeholders})
+            ON CONFLICT(employee_id, project_id, allocation_date) DO UPDATE SET
+                allocated_fte=excluded.allocated_fte,
+                bill_rate=excluded.bill_rate,
+                role=excluded.role,
+                updated_at=excluded.updated_at"""
 
         # Convert data to list of tuples
         values = []
