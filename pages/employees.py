@@ -10,6 +10,41 @@ from pages.employees_utilization import render_combined_utilization_view
 
 logger = get_logger(__name__)
 
+
+def _format_date_for_export(date_str):
+    """Convert YYYY-MM-DD to M/D/YY for CSV export."""
+    if not date_str or pd.isna(date_str):
+        return ''
+    try:
+        dt = pd.to_datetime(date_str)
+        return f"{dt.month}/{dt.day}/{dt.strftime('%y')}"
+    except Exception:
+        return ''
+
+
+def _build_export_df(filtered_df):
+    """Build a CSV-export DataFrame matching the Employee Reference CSV import format."""
+    export = pd.DataFrame()
+    export['Employee Id'] = filtered_df['id']
+    export['Last Name'] = filtered_df['name'].apply(lambda n: n.strip().split()[-1] if n and n.strip() else '')
+    export['Preferred/First Name'] = filtered_df['name'].apply(
+        lambda n: ' '.join(n.strip().split()[:-1]) if n and n.strip() and len(n.strip().split()) > 1 else ''
+    )
+    export['Billable'] = filtered_df['billable'].apply(lambda x: 'YES' if x == 1 else 'NO')
+    export['Hire Date'] = filtered_df['hire_date'].apply(_format_date_for_export)
+    export['Term Date'] = filtered_df['term_date'].apply(_format_date_for_export)
+    export['Job Title'] = filtered_df['role']
+    export['Pay Type Code'] = filtered_df['pay_type'].apply(
+        lambda x: 'S' if x == 'Salary' else ('H' if x == 'Hourly' else '')
+    )
+    export['Base Rate'] = filtered_df['cost_rate']
+    export['Annual Salary'] = filtered_df['annual_salary']
+    export['PTO Accrual'] = filtered_df['pto_accrual'].apply(
+        lambda x: x / 8 if pd.notna(x) and x else ''
+    )
+    export['Holidays'] = filtered_df['holidays']
+    return export
+
 db = st.session_state.db_manager
 processor = st.session_state.data_processor
 
@@ -197,6 +232,16 @@ with tab_list:
 
         # Navigate to employee view
         st.switch_page("pages/employee_view.py")
+
+    # --- CSV Export ---
+    export_df = _build_export_df(filtered_df)
+    csv_data = export_df.to_csv(index=False)
+    st.download_button(
+        label="📥 Download Employee CSV",
+        data=csv_data,
+        file_name="employees.csv",
+        mime="text/csv",
+    )
 
 with tab_alloc:
     try:
