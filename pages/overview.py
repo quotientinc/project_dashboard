@@ -510,15 +510,17 @@ with col1:
             line=dict(color="red", dash="dash", width=2),
         )
 
-        # Add colored zones
-        fig.add_hrect(y0=80, y1=100, fillcolor="green", opacity=0.1, line_width=0)
-        fig.add_hrect(y0=60, y1=80, fillcolor="yellow", opacity=0.1, line_width=0)
-        fig.add_hrect(y0=0, y1=60, fillcolor="red", opacity=0.1, line_width=0)
+        # Add colored zones (5-tier utilization thresholds)
+        fig.add_hrect(y0=111, y1=200, fillcolor="fuchsia", opacity=0.1, line_width=0)
+        fig.add_hrect(y0=97, y1=111, fillcolor="green", opacity=0.1, line_width=0)
+        fig.add_hrect(y0=80, y1=97, fillcolor="yellow", opacity=0.1, line_width=0)
+        fig.add_hrect(y0=51, y1=80, fillcolor="orange", opacity=0.1, line_width=0)
+        fig.add_hrect(y0=0, y1=51, fillcolor="red", opacity=0.1, line_width=0)
 
         fig.update_layout(
             height=400,
             yaxis_title="Average Utilization %",
-            yaxis=dict(range=[0, 100]),
+            yaxis=dict(range=[0, 150]),
             showlegend=True,
             legend=dict(x=0.02, y=0.98),
             hovermode='x unified'
@@ -711,9 +713,9 @@ with col1:
         # Sort by utilization rate descending
         utilization_df = utilization_df.sort_values('utilization_rate', ascending=False)
 
-        # Assign colors based on utilization rate (matching employees.py thresholds)
+        # Assign colors based on utilization rate (5-tier thresholds per issue #37)
         colors = utilization_df['utilization_rate'].apply(
-            lambda x: '#ffcccc' if x > 120 else ('#fff9cc' if x >= 100 else ('#2E7D32' if x >= 80 else '#cce5ff'))
+            lambda x: '#e91e63' if x >= 111 else ('#28a745' if x >= 97 else ('#ffc107' if x >= 80 else ('#fd7e14' if x >= 51 else '#dc3545')))
         )
 
         fig = go.Figure()

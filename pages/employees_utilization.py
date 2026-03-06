@@ -533,17 +533,20 @@ def _calculate_monthly_utilization_data(db, processor, selected_year, selected_m
         ytd_utilization_pct = (ytd_actual_billable_hours / ytd_available_hours * 100) if ytd_available_hours > 0 else 0
 
         # Determine status
-        if utilization_pct > 120:
-            status = "🔴 Over"
-            status_num = 4
-        elif utilization_pct >= 100:
-            status = "🟡 High"
-            status_num = 3
-        elif utilization_pct >= 80:
+        if utilization_pct >= 111:
+            status = "🟣 Over"
+            status_num = 5
+        elif utilization_pct >= 97:
             status = "🟢 Good"
+            status_num = 4
+        elif utilization_pct >= 80:
+            status = "🟡 Fair"
+            status_num = 3
+        elif utilization_pct >= 51:
+            status = "🟠 Low"
             status_num = 2
         else:
-            status = "🔵 Under"
+            status = "🔴 Under"
             status_num = 1
 
         util_data.append({
@@ -695,14 +698,15 @@ def _calculate_period_utilization_data(db, processor, start_date, end_date,
 
     # Assign status based on utilization_pct
     conditions = [
-        agg_df['utilization_pct'] > 120,
-        agg_df['utilization_pct'] >= 100,
+        agg_df['utilization_pct'] >= 111,
+        agg_df['utilization_pct'] >= 97,
         agg_df['utilization_pct'] >= 80,
+        agg_df['utilization_pct'] >= 51,
     ]
-    status_choices = ["\U0001f534 Over", "\U0001f7e1 High", "\U0001f7e2 Good"]
-    status_num_choices = [4, 3, 2]
+    status_choices = ["\U0001f7e3 Over", "\U0001f7e2 Good", "\U0001f7e1 Fair", "\U0001f7e0 Low"]
+    status_num_choices = [5, 4, 3, 2]
 
-    agg_df['status'] = np.select(conditions, status_choices, default="\U0001f535 Under")
+    agg_df['status'] = np.select(conditions, status_choices, default="\U0001f534 Under")
     agg_df['status_num'] = np.select(conditions, status_num_choices, default=1)
 
     # Drop the temporary available_hours column
@@ -835,6 +839,11 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
     _end_dt = pd.to_datetime(end_date)
     st.caption(f"Period: {_start_dt.strftime('%b %d, %Y')} - {_end_dt.strftime('%b %d, %Y')}")
 
+    # Get last updated date from time_entries
+    last_entry = db.conn.execute("SELECT MAX(date) FROM time_entries").fetchone()
+    if last_entry and last_entry[0]:
+        st.caption(f"Data last updated: {last_entry[0]}")
+
     with st.expander("Time Frame Definitions"):
         st.markdown("""| Time Frame | Definition |
 |---|---|
@@ -919,14 +928,16 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
             pct = emp_util['utilization_pct']
 
             # Determine status category
-            if pct >= 100:
-                status_icon, status_label, bg_color, border_color = '\U0001f7e2', '100%+', '#e8f5e9', '#28a745'
-            elif pct >= 90:
-                status_icon, status_label, bg_color, border_color = '\U0001f7e1', '90-99%', '#fff8e1', '#ffc107'
-            elif pct >= 75:
-                status_icon, status_label, bg_color, border_color = '\U0001f7e0', '75-89%', '#fff3e0', '#fd7e14'
+            if pct >= 111:
+                status_icon, status_label, bg_color, border_color = '\U0001f7e3', '111%+', '#fce4ec', '#e91e63'
+            elif pct >= 97:
+                status_icon, status_label, bg_color, border_color = '\U0001f7e2', '97-110%', '#e8f5e9', '#28a745'
+            elif pct >= 80:
+                status_icon, status_label, bg_color, border_color = '\U0001f7e1', '80-96%', '#fff8e1', '#ffc107'
+            elif pct >= 51:
+                status_icon, status_label, bg_color, border_color = '\U0001f7e0', '51-79%', '#fff3e0', '#fd7e14'
             else:
-                status_icon, status_label, bg_color, border_color = '\U0001f534', '<75%', '#ffebee', '#dc3545'
+                status_icon, status_label, bg_color, border_color = '\U0001f534', '≤50%', '#ffebee', '#dc3545'
 
             # Get detailed data from util_df (single row)
             if not util_df.empty:
@@ -964,39 +975,46 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
             else:
                 st.info("No utilization data available for this employee in the selected period.")
         else:
-            # --- All Employees: existing 4 category cards ---
+            # --- All Employees: 5 category cards ---
             categories = [
                 {
-                    'label': '100%+',
+                    'label': '111%+',
+                    'icon': '\U0001f7e3',
+                    'bg_color': '#fce4ec',
+                    'border_color': '#e91e63',
+                    'filter': lambda pct: pct >= 111,
+                },
+                {
+                    'label': '97% - 110%',
                     'icon': '\U0001f7e2',
                     'bg_color': '#e8f5e9',
                     'border_color': '#28a745',
-                    'filter': lambda pct: pct >= 100,
+                    'filter': lambda pct: 97 <= pct < 111,
                 },
                 {
-                    'label': '90% - 99%',
+                    'label': '80% - 96%',
                     'icon': '\U0001f7e1',
                     'bg_color': '#fff8e1',
                     'border_color': '#ffc107',
-                    'filter': lambda pct: 90 <= pct < 100,
+                    'filter': lambda pct: 80 <= pct < 97,
                 },
                 {
-                    'label': '75% - 89%',
+                    'label': '51% - 79%',
                     'icon': '\U0001f7e0',
                     'bg_color': '#fff3e0',
                     'border_color': '#fd7e14',
-                    'filter': lambda pct: 75 <= pct < 90,
+                    'filter': lambda pct: 51 <= pct < 80,
                 },
                 {
-                    'label': '< 75%',
+                    'label': '≤ 50%',
                     'icon': '\U0001f534',
                     'bg_color': '#ffebee',
                     'border_color': '#dc3545',
-                    'filter': lambda pct: pct < 75,
+                    'filter': lambda pct: pct < 51,
                 },
             ]
 
-            cols = st.columns(4)
+            cols = st.columns(5)
             for idx, cat in enumerate(categories):
                 matching = [e for e in filtered_utilizations if cat['filter'](e['utilization_pct'])]
                 count = len(matching)
@@ -1115,7 +1133,7 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
   | Holiday Hrs                      | time_entries_df where project_id='FRINGE.HOL'           | Sum of hours from time_entries for Holiday project (for reference; not in denominator)|
   | Other Non-billable Hrs           | Calculated                                              | (actual_hours - actual_billable_hours) - pto_hours                                   |
   | Billable Utilization %           | Calculated                                              | (effective_billable_hours / (possible_hours - pto_hours)) x 100                      |
-  | Status                           | Calculated                                              | Based on Billable Utilization %: >120%, 100-120%, 80-100%, <80%                      |
+  | Status                           | Calculated                                              | Based on Billable Utilization %: >=111% Over, 97-110% Good, 80-96% Fair, 51-79% Low, <=50% Under |
   | YTD Possible Billable Hrs        | ytd_metrics['possible']                                 | Sum of possible hours from Jan 1 to end of selected month                            |
   | YTD Actual Billable Hrs          | ytd_metrics['actuals']                                  | Sum of actual billable hours from Jan 1 to end of selected month                     |
   | YTD Billable Utilization %       | Calculated                                              | (ytd_actual_billable_hours / (ytd_possible_hours - ytd_pto_hours)) x 100             |
@@ -1496,14 +1514,16 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
                 # JsCode for conditional cell styling on Billable Utilization % column
                 utilization_cell_style = JsCode("""
                 function(params) {
-                    if (params.value > 120) {
-                        return {'backgroundColor': '#ffcccc'};
-                    } else if (params.value >= 100) {
-                        return {'backgroundColor': '#fff9cc'};
-                    } else if (params.value >= 80) {
+                    if (params.value >= 111) {
+                        return {'backgroundColor': '#f8bbd0'};
+                    } else if (params.value >= 97) {
                         return {'backgroundColor': '#ccffcc'};
+                    } else if (params.value >= 80) {
+                        return {'backgroundColor': '#fff9cc'};
+                    } else if (params.value >= 51) {
+                        return {'backgroundColor': '#ffe0b2'};
                     } else {
-                        return {'backgroundColor': '#cce5ff'};
+                        return {'backgroundColor': '#ffcccc'};
                     }
                 }
                 """)
@@ -1545,7 +1565,7 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
   | Holiday Hrs                      | time_entries_df where project_id='FRINGE.HOL'           | Sum of hours from time_entries for Holiday project (for reference; not in denominator)|
   | Other Non-billable Hrs           | Calculated                                              | (actual_hours - actual_billable_hours) - pto_hours                                   |
   | Billable Utilization %           | Calculated                                              | (effective_billable_hours / (possible_hours - pto_hours)) x 100                      |
-  | Status                           | Calculated                                              | Based on Billable Utilization %: >120%, 100-120%, 80-100%, <80%                      |
+  | Status                           | Calculated                                              | Based on Billable Utilization %: >=111% Over, 97-110% Good, 80-96% Fair, 51-79% Low, <=50% Under |
   | YTD Possible Billable Hrs        | ytd_metrics['possible']                                 | Sum of possible hours from Jan 1 to end of selected month                            |
   | YTD Actual Billable Hrs          | ytd_metrics['actuals']                                  | Sum of actual billable hours from Jan 1 to end of selected month                     |
   | YTD Billable Utilization %       | Calculated                                              | (ytd_actual_billable_hours / (ytd_possible_hours - ytd_pto_hours)) x 100             |
