@@ -17,10 +17,10 @@ COPY \
   --exclude=__pycache__ \
   . .
 
-VOLUME /apps/data
+VOLUME /app/data
 
 EXPOSE 8501/tcp
 
-HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/healt
+HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health
 
 CMD [ "streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0", "--browser.gatherUsageStats=false" ]

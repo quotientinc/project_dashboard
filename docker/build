@@ -14,3 +14,4 @@ if [[ -n "${hash}" ]]; then
 fi
 
 docker build -f ./docker/Dockerfile -t "${TARGET_IMAGE}:${TAG}" "${args[@]}" .
+docker tag "${TARGET_IMAGE}:${TAG}" "${TARGET_IMAGE}:latest"

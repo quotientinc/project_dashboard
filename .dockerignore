@@ -1,0 +1,40 @@
+# Version control
+.git
+.github
+
+# Python artifacts
+__pycache__
+*.pyc
+.venv
+venv
+
+# IDE and editor
+.idea
+.vscode
+
+# AI tooling
+.claude
+.full-review/
+
+# Runtime data
+data/
+logs/
+*.db
+*.sqlite
+*.sqlite3
+
+# Documentation and samples
+docs/
+sample-data/
+
+# Environment and secrets
+.env
+.env.*
+
+# Docker and deploy scripts
+.dockerignore
+docker/
+
+# Temporary files
+*.tmp
+*.bak

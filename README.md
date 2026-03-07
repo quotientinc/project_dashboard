@@ -36,8 +36,8 @@ cd project_dashboard
 
 Optional venv
 ```bash
-python -m vene myenv
-source myenve/bin/activate
+python -m venv .venv
+source .venv/bin/activate
 ```
 
 2. **Install required packages**
@@ -52,6 +52,82 @@ streamlit run app.py
 
 4. **Access the dashboard**
 Open your browser and navigate to `http://localhost:8501`
+
+## Docker 🐳
+
+### Development
+
+Quick start with Docker for local development:
+
+```bash
+cd docker
+docker compose up --build
+```
+
+Access the dashboard at http://localhost:8501. Data is persisted in the `data/` directory.
+
+To build the image separately:
+
+```bash
+./docker/build
+```
+
+### Deployment (Production Server)
+
+#### Option 1: Deploy Script (Build on Server)
+
+For deploying to a server where you build the image locally. The `docker/deploy.sh` script automates: git pull, docker build, restart, healthcheck, and rollback on failure.
+
+**First-time setup on the server:**
+
+1. Clone the repo on the server
+2. Run the deploy script:
+
+```bash
+./docker/deploy.sh master
+```
+
+The script:
+- Pulls the latest code from the specified branch
+- Builds and tags the image with the git commit hash
+- Restarts the container with the new image
+- Waits for the healthcheck to pass
+- Rolls back automatically if deployment fails
+- Prunes old images (keeps last 5)
+
+Configuration via environment variables:
+- `QPD_REPO_DIR` -- path to the git repo (default: auto-detected from script location)
+- `QPD_DEPLOY_DIR` -- deployment data directory (default: `/var/www/vhosts/project-dashboard`)
+
+#### Option 2: CI/CD with GitHub Container Registry
+
+For automated builds via GitHub Actions with server-side pull deployment.
+
+GitHub Actions (`.github/workflows/build-push.yml`) automatically builds and pushes the Docker image to GHCR on every push to `master`. It can also be triggered manually via `workflow_dispatch`.
+
+**Server-side deployment:**
+
+One-time setup:
+```bash
+docker login ghcr.io
+# Use a GitHub personal access token with read:packages scope
+```
+
+Deploy:
+```bash
+QPD_IMAGE=your-org/project_dashboard ./docker/pull-deploy.sh
+# Or pull a specific version:
+QPD_IMAGE=your-org/project_dashboard ./docker/pull-deploy.sh abc1234
+```
+
+Configuration via environment variables:
+- `QPD_IMAGE` -- **required**, the GHCR image name (e.g., `your-org/project_dashboard`)
+- `QPD_REGISTRY` -- container registry (default: `ghcr.io`)
+- `QPD_DEPLOY_DIR` -- deployment data directory (default: `/var/www/vhosts/project-dashboard`)
+
+### Data Persistence
+
+The SQLite database is stored in the `data/` directory, which is mounted as a Docker volume. This directory is preserved across container restarts and redeployments. Both deployment scripts ensure the data directory exists before starting.
 
 ## Usage Guide 📖
 
