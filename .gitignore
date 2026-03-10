@@ -51,8 +51,8 @@ logs/
 .settings/
 
 # Streamlit
-.streamlit/secrets.toml
-.streamlit/config.toml
+streamlit-app/.streamlit/secrets.toml
+streamlit-app/.streamlit/config.toml
 
 # OS
 .DS_Store

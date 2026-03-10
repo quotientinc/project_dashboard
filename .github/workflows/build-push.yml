@@ -4,6 +4,16 @@ on:
   push:
     branches: [master]
   workflow_dispatch:
+    inputs:
+      app_type:
+        description: "Which app variant to build"
+        required: true
+        default: "both"
+        type: choice
+        options:
+          - both
+          - fastapi
+          - streamlit
 
 env:
   REGISTRY: ghcr.io
@@ -15,6 +25,24 @@ jobs:
     permissions:
       contents: read
       packages: write
+
+    strategy:
+      matrix:
+        app_type: [fastapi, streamlit]
+        include:
+          - app_type: fastapi
+            dockerfile: docker/Dockerfile.fastapi
+            image_suffix: "-fastapi"
+          - app_type: streamlit
+            dockerfile: docker/Dockerfile.streamlit
+            image_suffix: "-streamlit"
+
+    # On workflow_dispatch, skip matrix entries that don't match the selected input.
+    # On push events, inputs.app_type is empty so the condition always passes (builds both).
+    if: >-
+      github.event_name == 'push'
+      || inputs.app_type == 'both'
+      || inputs.app_type == matrix.app_type
 
     steps:
       - name: Checkout code
@@ -31,7 +59,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.image_suffix }}
           tags: |
             type=sha,prefix=
             type=raw,value=latest
@@ -40,7 +68,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: docker/Dockerfile
+          file: ${{ matrix.dockerfile }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

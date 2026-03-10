@@ -1,14 +1,42 @@
 services:
-  qpd:
-    image: qpd:${QPD_TAG:-latest}
+  # ==========================================================================
+  # FastAPI + Vue 3 dashboard (current)
+  # ==========================================================================
+  qpd-fastapi:
+    image: qpd-fastapi:${QPD_TAG:-latest}
     build:
       context: ..
-      dockerfile: docker/Dockerfile
+      dockerfile: docker/Dockerfile.fastapi
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ${QPD_DATA_DIR:-./data}:/app/data
+      - ${QPD_LOG_DIR:-./logs}:/app/logs
+    environment:
+      - DATABASE_PATH=/app/data/project_dashboard.db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "--silent", "--fail", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ==========================================================================
+  # Legacy Streamlit dashboard
+  # Run independently with: docker compose up qpd-streamlit
+  # ==========================================================================
+  qpd-streamlit:
+    image: qpd-streamlit:${QPD_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.streamlit
     ports:
       - "127.0.0.1:8501:8501"
     volumes:
       - ${QPD_DATA_DIR:-./data}:/app/data
-    restart: always
+      - ${QPD_LOG_DIR:-./logs}:/app/logs
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8501/_stcore/health"]
       interval: 30s

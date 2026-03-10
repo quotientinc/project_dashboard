@@ -27,7 +27,7 @@ def setup_logging(log_level=logging.INFO):
         logging.Logger: Configured root logger
     """
     # Create logs directory if it doesn't exist
-    log_dir = Path("logs")
+    log_dir = Path(__file__).resolve().parent.parent.parent / "logs"
     log_dir.mkdir(exist_ok=True)
 
     # Create log filename with timestamp

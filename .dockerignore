@@ -8,15 +8,18 @@ __pycache__
 .venv
 venv
 
+# Node artifacts (frontend deps rebuilt inside container)
+node_modules
+frontend/node_modules
+
 # IDE and editor
 .idea
 .vscode
 
 # AI tooling
 .claude
-.full-review/
 
-# Runtime data
+# Runtime data (mounted as volumes, not baked in)
 data/
 logs/
 *.db
@@ -31,9 +34,8 @@ sample-data/
 .env
 .env.*
 
-# Docker and deploy scripts
+# Docker context (avoid recursive copy)
 .dockerignore
-docker/
 
 # Temporary files
 *.tmp

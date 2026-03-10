@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Deploys the Quotient Project Dashboard
-# Usage: deploy.sh [branch]
+# Usage: deploy.sh [branch] [fastapi|streamlit]
 #
 # Environment variables:
 #   QPD_REPO_DIR    - Path to the git repository (default: parent of this script's directory)
@@ -8,13 +8,34 @@
 set -euo pipefail
 
 readonly BRANCH="${1:-master}"
+readonly APP_TYPE="${2:-fastapi}"
 readonly SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 readonly REPO_DIR="${QPD_REPO_DIR:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 readonly DEPLOY_DIR="${QPD_DEPLOY_DIR:-/var/www/vhosts/project-dashboard}"
 readonly COMPOSE_FILE="${REPO_DIR}/docker/docker-compose.yml"
-readonly TARGET_IMAGE="qpd"
 readonly MAX_HEALTH_WAIT=60
 readonly HEALTH_INTERVAL=2
+
+case "${APP_TYPE}" in
+    fastapi)
+        readonly TARGET_IMAGE="qpd-fastapi"
+        readonly COMPOSE_SERVICE="qpd-fastapi"
+        readonly DOCKERFILE="${REPO_DIR}/docker/Dockerfile.fastapi"
+        readonly HEALTH_URL="http://localhost:8000/api/health"
+        ;;
+    streamlit)
+        readonly TARGET_IMAGE="qpd-streamlit"
+        readonly COMPOSE_SERVICE="qpd-streamlit"
+        readonly DOCKERFILE="${REPO_DIR}/docker/Dockerfile.streamlit"
+        readonly HEALTH_URL="http://localhost:8501/_stcore/health"
+        ;;
+    *)
+        echo "Usage: $0 [branch] [fastapi|streamlit]" >&2
+        echo "  branch:   Git branch to deploy (default: master)" >&2
+        echo "  App type: fastapi (default), streamlit" >&2
+        exit 1
+        ;;
+esac
 
 PREVIOUS_TAG=""
 
@@ -26,8 +47,8 @@ rollback() {
     log "ERROR: Deployment failed!"
     if [[ -n "${PREVIOUS_TAG}" ]]; then
         log "Attempting rollback to previous image: ${TARGET_IMAGE}:${PREVIOUS_TAG}"
-        QPD_TAG="${PREVIOUS_TAG}" QPD_DATA_DIR="${DEPLOY_DIR}/data" \
-            docker compose -f "${COMPOSE_FILE}" up -d
+        QPD_TAG="${PREVIOUS_TAG}" QPD_DATA_DIR="${DEPLOY_DIR}/data" QPD_LOG_DIR="${DEPLOY_DIR}/logs" \
+            docker compose -f "${COMPOSE_FILE}" up -d "${COMPOSE_SERVICE}"
         log "Rollback complete. Previous version restored."
     else
         log "No previous image tag recorded. Manual intervention required."
@@ -49,7 +70,7 @@ readonly GIT_HASH="$(git rev-parse --short HEAD)"
 log "Git hash: ${GIT_HASH}"
 
 # --- 3. Record current running container's image tag for rollback ---
-PREVIOUS_TAG=$(docker compose -f "${COMPOSE_FILE}" images --format '{{.Tag}}' 2>/dev/null | head -1) || true
+PREVIOUS_TAG=$(docker compose -f "${COMPOSE_FILE}" images "${COMPOSE_SERVICE}" --format '{{.Tag}}' 2>/dev/null | head -1) || true
 if [[ -n "${PREVIOUS_TAG}" ]]; then
     log "Previous image tag: ${TARGET_IMAGE}:${PREVIOUS_TAG}"
 else
@@ -59,7 +80,7 @@ fi
 # --- 4. Build image with hash tag and latest tag ---
 log "Building image ${TARGET_IMAGE}:${GIT_HASH}"
 docker build \
-    -f "${REPO_DIR}/docker/Dockerfile" \
+    -f "${DOCKERFILE}" \
     -t "${TARGET_IMAGE}:${GIT_HASH}" \
     --label "git.head=${GIT_HASH}" \
     "${REPO_DIR}"
@@ -67,25 +88,25 @@ docker build \
 docker tag "${TARGET_IMAGE}:${GIT_HASH}" "${TARGET_IMAGE}:latest"
 log "Tagged ${TARGET_IMAGE}:latest"
 
-# --- 5. Ensure deploy data directory exists ---
-mkdir -p "${DEPLOY_DIR}/data"
-log "Deploy data directory ready: ${DEPLOY_DIR}/data"
+# --- 5. Ensure deploy directories exist ---
+mkdir -p "${DEPLOY_DIR}/data" "${DEPLOY_DIR}/logs"
+log "Deploy directories ready: ${DEPLOY_DIR}/{data,logs}"
 
-# --- 6. Stop current containers ---
-log "Stopping current containers"
-QPD_TAG="${GIT_HASH}" QPD_DATA_DIR="${DEPLOY_DIR}/data" \
-    docker compose -f "${COMPOSE_FILE}" down
+# --- 6. Stop current container ---
+log "Stopping current ${COMPOSE_SERVICE} container"
+QPD_TAG="${GIT_HASH}" QPD_DATA_DIR="${DEPLOY_DIR}/data" QPD_LOG_DIR="${DEPLOY_DIR}/logs" \
+    docker compose -f "${COMPOSE_FILE}" down "${COMPOSE_SERVICE}"
 
-# --- 7. Start new containers ---
-log "Starting containers with image ${TARGET_IMAGE}:${GIT_HASH}"
-QPD_TAG="${GIT_HASH}" QPD_DATA_DIR="${DEPLOY_DIR}/data" \
-    docker compose -f "${COMPOSE_FILE}" up -d
+# --- 7. Start new container ---
+log "Starting ${COMPOSE_SERVICE} with image ${TARGET_IMAGE}:${GIT_HASH}"
+QPD_TAG="${GIT_HASH}" QPD_DATA_DIR="${DEPLOY_DIR}/data" QPD_LOG_DIR="${DEPLOY_DIR}/logs" \
+    docker compose -f "${COMPOSE_FILE}" up -d "${COMPOSE_SERVICE}"
 
 # --- 8. Health check loop ---
-log "Waiting for health check (up to ${MAX_HEALTH_WAIT}s)..."
+log "Waiting for health check at ${HEALTH_URL} (up to ${MAX_HEALTH_WAIT}s)..."
 elapsed=0
 while (( elapsed < MAX_HEALTH_WAIT )); do
-    if curl --silent --fail http://localhost:8501/_stcore/health > /dev/null 2>&1; then
+    if curl --silent --fail "${HEALTH_URL}" > /dev/null 2>&1; then
         log "Health check passed after ${elapsed}s"
         break
     fi

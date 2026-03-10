@@ -3,10 +3,9 @@ import pandas as pd
 from pathlib import Path
 import json
 from datetime import datetime
-import streamlit as st
-from utils.logger import get_logger
+import logging
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 class DatabaseManager:
     def __init__(self, db_path='data/project_dashboard.db'):
@@ -260,7 +259,7 @@ class DatabaseManager:
             print(f"Copied employee_rate to bill_rate for {rows_updated} allocations")
 
             self.conn.commit()
-            print("✅ Migration complete: employee_rate -> bill_rate")
+            print("Migration complete: employee_rate -> bill_rate")
 
             # Note: We don't drop the old columns yet for safety
             # They can be dropped in a future cleanup migration
@@ -331,7 +330,7 @@ class DatabaseManager:
                 )
                 print(f"Restored {len(data)} time entries")
 
-            print("✅ Removed 'is_projected' column from time_entries table")
+            print("Removed 'is_projected' column from time_entries table")
 
         self.conn.commit()
 
@@ -434,7 +433,7 @@ class DatabaseManager:
             print(f"Migrated {len(transformed_data)} projects to new schema")
 
         self.conn.commit()
-        print("✅ Projects schema cleanup complete:")
+        print("Projects schema cleanup complete:")
         print("   - Renamed: budget_allocated -> contract_value")
         print("   - Removed: budget_used, revenue_projected, revenue_actual")
 
@@ -532,7 +531,7 @@ class DatabaseManager:
             print(f"  - Both quoted_value and awarded_value set to original contract_value")
 
         self.conn.commit()
-        print("✅ Contract value split migration complete")
+        print("Contract value split migration complete")
         print("   - Added: quoted_value (original bid/quote)")
         print("   - Added: awarded_value (actual funding)")
         print("   - Removed: contract_value")
@@ -621,7 +620,7 @@ class DatabaseManager:
             print(f"  - Migrated {len(new_data)} allocation records")
 
         self.conn.commit()
-        print("✅ Allocation table cleanup complete")
+        print("Allocation table cleanup complete")
         print("   - Removed: start_date, end_date, working_days, remaining_days")
         print("   - Kept: allocation_date (source of truth)")
 
@@ -656,7 +655,7 @@ class DatabaseManager:
         cursor.execute("SELECT * FROM allocations")
         all_rows = cursor.fetchall()
 
-        # Step 2: Normalize allocation_date — truncate any YYYY-MM-DD values to YYYY-MM
+        # Step 2: Normalize allocation_date -- truncate any YYYY-MM-DD values to YYYY-MM
         allocation_date_idx = col_names.index('allocation_date')
         normalized_rows = []
         for row in all_rows:
@@ -666,7 +665,7 @@ class DatabaseManager:
                 row_list[allocation_date_idx] = str(raw_date)[:7]
             normalized_rows.append(row_list)
 
-        # Step 3: Deduplicate — group by (employee_id, project_id, allocation_date), keep highest id
+        # Step 3: Deduplicate -- group by (employee_id, project_id, allocation_date), keep highest id
         id_idx = col_names.index('id')
         emp_idx = col_names.index('employee_id')
         proj_idx = col_names.index('project_id')
@@ -768,8 +767,8 @@ class DatabaseManager:
                 try:
                     cursor.execute(create_sql)
                     created_count += 1
-                except Exception as e:
-                    logger.warning(f"Failed to create index {index_name}: {str(e)}")
+                except Exception:
+                    logger.exception("Failed to create index %s", index_name)
 
         if created_count > 0:
             self.conn.commit()
@@ -817,8 +816,7 @@ class DatabaseManager:
         return project_count == 0 and employee_count == 0
 
     # Project methods
-    @st.cache_data(ttl=60, show_spinner=False)
-    def get_projects(_self, filters=None):
+    def get_projects(self, filters=None):
         """Get all projects or filtered projects"""
         query = "SELECT * FROM projects"
         params = []
@@ -839,12 +837,12 @@ class DatabaseManager:
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
 
-        df = pd.read_sql_query(query, _self.conn, params=params)
+        df = pd.read_sql_query(query, self.conn, params=params)
 
         # Calculate budget_used from time_entries for all projects in bulk (avoid N+1 query)
         if not df.empty:
             # Get all time entries once
-            all_time_entries = _self.get_time_entries()
+            all_time_entries = self.get_time_entries()
 
             if not all_time_entries.empty:
                 # Calculate cost for each entry
@@ -917,8 +915,7 @@ class DatabaseManager:
         return rows_affected
 
     # Project Phase methods
-    @st.cache_data(ttl=60, show_spinner=False)
-    def get_project_phases(_self, project_id=None):
+    def get_project_phases(self, project_id=None):
         """Get all project phases or filtered by project_id, ordered by start_date"""
         query = "SELECT * FROM project_phases"
         params = []
@@ -929,7 +926,7 @@ class DatabaseManager:
             params.append(str(project_id) if hasattr(project_id, 'item') else project_id)
 
         query += " ORDER BY start_date"
-        return pd.read_sql_query(query, _self.conn, params=params)
+        return pd.read_sql_query(query, self.conn, params=params)
 
     def add_project_phase(self, phase_data):
         """Add a new project phase"""
@@ -1026,8 +1023,7 @@ class DatabaseManager:
             raise
 
     # Employee methods
-    @st.cache_data(ttl=300, show_spinner=False)
-    def get_employees(_self, filters=None):
+    def get_employees(self, filters=None):
         """Get all employees or filtered employees"""
         query = "SELECT * FROM employees"
         params = []
@@ -1035,7 +1031,7 @@ class DatabaseManager:
         # Note: department filter removed as department column no longer exists
         # filters parameter kept for future extensibility
 
-        return pd.read_sql_query(query, _self.conn, params=params)
+        return pd.read_sql_query(query, self.conn, params=params)
 
     def add_employee(self, employee_data):
         """Add a new employee"""
@@ -1065,8 +1061,7 @@ class DatabaseManager:
         self.conn.commit()
 
     # Allocation methods
-    @st.cache_data(ttl=300, show_spinner=False)
-    def get_allocations(_self, project_id=None, employee_id=None):
+    def get_allocations(self, project_id=None, employee_id=None):
         """Get allocations filtered by project or employee"""
         query = """
             SELECT a.*, p.name as project_name, e.name as employee_name,
@@ -1090,7 +1085,7 @@ class DatabaseManager:
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
 
-        return pd.read_sql_query(query, _self.conn, params=params)
+        return pd.read_sql_query(query, self.conn, params=params)
 
     def add_allocation(self, allocation_data):
         """Add a new allocation"""
@@ -1273,8 +1268,7 @@ class DatabaseManager:
         return (len(errors) == 0, errors)
 
     # Time tracking methods
-    @st.cache_data(ttl=30, show_spinner=False)
-    def get_time_entries(_self, start_date=None, end_date=None, employee_id=None, project_id=None):
+    def get_time_entries(self, start_date=None, end_date=None, employee_id=None, project_id=None):
         """Get time entries with filters"""
         query = """
             SELECT t.*, e.name as employee_name, p.name as project_name,
@@ -1308,7 +1302,7 @@ class DatabaseManager:
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
 
-        return pd.read_sql_query(query, _self.conn, params=params)
+        return pd.read_sql_query(query, self.conn, params=params)
 
     def get_existing_time_entries_date_range(self):
         """
@@ -1348,7 +1342,7 @@ class DatabaseManager:
     def calculate_budget_used(self, project_id: str) -> float:
         """
         Calculate total budget used from time_entries for a project.
-        Returns sum of (hours × bill_rate) or amount for all time entries.
+        Returns sum of (hours x bill_rate) or amount for all time entries.
         Returns 0.0 if no time entries exist.
         """
         time_entries = self.get_time_entries(project_id=project_id)
@@ -1633,8 +1627,7 @@ class DatabaseManager:
         return df
 
     # Months methods
-    @st.cache_data(ttl=3600, show_spinner=False)
-    def get_months(_self, year=None):
+    def get_months(self, year=None):
         """Get all months or filtered by year, sorted by year DESC, month ASC"""
         query = "SELECT * FROM months"
         params = []
@@ -1644,7 +1637,7 @@ class DatabaseManager:
             params.append(year)
 
         query += " ORDER BY year DESC, month ASC"
-        return pd.read_sql_query(query, _self.conn, params=params)
+        return pd.read_sql_query(query, self.conn, params=params)
 
     def add_month(self, month_data):
         """Add a new month record"""

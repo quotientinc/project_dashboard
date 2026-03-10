@@ -1,0 +1,68 @@
+# syntax=docker/dockerfile:1
+# =============================================================================
+# Multi-stage Dockerfile for Project Dashboard (FastAPI + Vue 3)
+#
+# Stage 1: Build the Vue 3 frontend with Node 22
+# Stage 2: Production image with Python 3.12-slim serving both API and SPA
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Stage 1 -- Build frontend
+# ---------------------------------------------------------------------------
+FROM node:22-alpine AS frontend-build
+
+WORKDIR /build
+
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm ci --ignore-scripts=false
+
+COPY frontend/ ./
+RUN npm run build
+
+# ---------------------------------------------------------------------------
+# Stage 2 -- Production
+# ---------------------------------------------------------------------------
+FROM python:3.12-slim AS production
+
+LABEL maintainer="jbirkhimer" \
+      description="Project Dashboard -- FastAPI + Vue 3" \
+      org.opencontainers.image.source="https://github.com/jbirkhimer/project_dashboard"
+
+# Prevent Python from writing .pyc files and enable unbuffered output
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Install curl for health-check probes
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies (cached layer -- changes rarely)
+COPY backend/requirements.txt ./backend/
+RUN pip install --no-cache-dir -r backend/requirements.txt
+
+# Copy application code
+COPY backend/ ./backend/
+
+# Copy built frontend assets from stage 1
+COPY --from=frontend-build /build/dist ./frontend/dist
+
+# Create runtime directories (volumes will overlay these at runtime)
+RUN mkdir -p data logs
+
+# Non-root user for security
+RUN groupadd --gid 1000 appuser && \
+    useradd --uid 1000 --gid appuser --shell /bin/bash appuser && \
+    chown -R appuser:appuser /app
+USER appuser
+
+VOLUME /app/data
+
+EXPOSE 8000/tcp
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl --silent --fail http://localhost:8000/api/health || exit 1
+
+CMD ["python", "backend/run.py", "--host", "0.0.0.0", "--port", "8000"]

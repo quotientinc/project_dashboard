@@ -1,9 +1,29 @@
 #!/usr/bin/env bash
 # Builds the Quotient Project Dashboard
+# Usage: build [fastapi|streamlit] [tag]
+#   app type: fastapi (default) or streamlit
+#   tag:      Docker image tag (default: latest)
 set -e
 
-readonly TARGET_IMAGE='qpd'
-readonly TAG="${1:-latest}"
+readonly APP_TYPE="${1:-fastapi}"
+readonly TAG="${2:-latest}"
+
+case "${APP_TYPE}" in
+    fastapi)
+        readonly TARGET_IMAGE='qpd-fastapi'
+        readonly DOCKERFILE='Dockerfile.fastapi'
+        ;;
+    streamlit)
+        readonly TARGET_IMAGE='qpd-streamlit'
+        readonly DOCKERFILE='Dockerfile.streamlit'
+        ;;
+    *)
+        echo "Usage: $0 [fastapi|streamlit] [tag]" >&2
+        echo "  App types: fastapi (default), streamlit" >&2
+        echo "  Tag:       Docker image tag (default: latest)" >&2
+        exit 1
+        ;;
+esac
 
 cd "$(dirname "$0")/.."
 
@@ -13,5 +33,7 @@ if [[ -n "${hash}" ]]; then
   args+=(--label "git.head=${hash}")
 fi
 
-docker build -f ./docker/Dockerfile -t "${TARGET_IMAGE}:${TAG}" "${args[@]}" .
+docker build -f "./docker/${DOCKERFILE}" -t "${TARGET_IMAGE}:${TAG}" "${args[@]}" .
 docker tag "${TARGET_IMAGE}:${TAG}" "${TARGET_IMAGE}:latest"
+
+echo "Built ${TARGET_IMAGE}:${TAG} (git: ${hash})"

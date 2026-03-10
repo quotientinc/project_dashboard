@@ -1,7 +1,10 @@
 import pandas as pd
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Load the CSV file
-df = pd.read_csv('sample-data/TimesheetData.csv')
+df = pd.read_csv(PROJECT_ROOT / 'sample-data' / 'TimesheetData.csv')
 
 # Filter to only include Project IDs that start with a number
 df = df[df['Project ID'].astype(str).str[0].str.isdigit()]
@@ -52,6 +55,6 @@ print(f"\nCombinations with employee_rate: {len(combos_with_rate)}")
 print(combos_with_rate.head(10))
 
 # Write the dataframe to CSV
-unique_combos.to_csv('sample-data/AllocationData.csv', index=False)
+unique_combos.to_csv(PROJECT_ROOT / 'sample-data' / 'AllocationData.csv', index=False)
 print(f"\n✅ Written {len(unique_combos)} rows to sample-data/AllocationData.csv")
 

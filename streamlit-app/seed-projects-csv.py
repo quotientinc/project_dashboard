@@ -1,7 +1,10 @@
 import pandas as pd
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Load the CSV file
-df = pd.read_csv('sample-data/TimesheetData.csv')
+df = pd.read_csv(PROJECT_ROOT / 'sample-data' / 'TimesheetData.csv')
 
 # Filter to only include Project IDs that start with a number
 df = df[df['Project ID'].astype(str).str[0].str.isdigit()]
@@ -43,5 +46,5 @@ print("\nFirst 10 projects:")
 print(project_data.head(10))
 
 # Write the dataframe to CSV
-project_data.to_csv('sample-data/ProjectData.csv', index=False)
+project_data.to_csv(PROJECT_ROOT / 'sample-data' / 'ProjectData.csv', index=False)
 print(f"\n✅ Written {len(project_data)} rows to sample-data/ProjectData.csv")
