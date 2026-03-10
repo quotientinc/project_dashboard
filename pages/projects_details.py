@@ -447,6 +447,9 @@ def render_project_details_tab(db, processor, project_id=None, default_subtab=No
                     monthly_hours = emp_time.groupby('month')['hours'].sum().to_dict()
                     actual_hours_by_employee[emp_id] = monthly_hours
 
+            # Pre-fetch months data once to avoid N+1 queries in per-allocation loops
+            months_df = db.get_months()
+
             # Group by employee
             for employee_name in allocations_df['employee_name'].unique():
                 emp_allocs = allocations_df[allocations_df['employee_name'] == employee_name]
@@ -469,9 +472,8 @@ def render_project_details_tab(db, processor, project_id=None, default_subtab=No
                             month = pd.to_datetime(alloc['allocation_date']).strftime('%Y-%m')
                             fte = alloc.get('allocated_fte', 0)
 
-                            # Get working days from months table
+                            # Get working days from months table (uses pre-fetched data)
                             alloc_date = pd.to_datetime(alloc['allocation_date'])
-                            months_df = db.get_months()
                             month_info = months_df[
                                 (months_df['year'] == alloc_date.year) &
                                 (months_df['month'] == alloc_date.month)
@@ -520,8 +522,7 @@ def render_project_details_tab(db, processor, project_id=None, default_subtab=No
                 chart_df = allocations_df.copy()
                 chart_df['month'] = pd.to_datetime(chart_df['allocation_date']).dt.strftime('%Y-%m')
 
-                # Calculate allocated hours for each row
-                months_df = db.get_months()
+                # Calculate allocated hours for each row (reuses pre-fetched months_df)
                 allocated_hours_list = []
 
                 for _, row in chart_df.iterrows():

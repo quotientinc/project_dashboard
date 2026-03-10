@@ -29,9 +29,9 @@ class DataProcessor:
         """Calculate burn rate over time"""
         if expenses_df.empty:
             return pd.DataFrame()
-        
+
         expenses_df['date'] = pd.to_datetime(expenses_df['date'])
-        
+
         if time_period == 'daily':
             grouped = expenses_df.groupby(expenses_df['date'].dt.date)
         elif time_period == 'weekly':
@@ -40,7 +40,7 @@ class DataProcessor:
             grouped = expenses_df.groupby(expenses_df['date'].dt.to_period('M'))
         else:
             grouped = expenses_df.groupby(expenses_df['date'].dt.to_period('Y'))
-        
+
         burn_rate = grouped['amount'].sum().reset_index()
         burn_rate.columns = ['period', 'burn_rate']
 
@@ -52,22 +52,22 @@ class DataProcessor:
         burn_rate['cumulative_burn'] = burn_rate['burn_rate'].cumsum()
 
         return burn_rate
-    
+
     @staticmethod
     @st.cache_data(ttl=300, show_spinner=False)
     def calculate_project_health(project_df: pd.DataFrame, allocations_df: pd.DataFrame) -> pd.DataFrame:
         """Calculate project health metrics"""
         if project_df.empty:
             return pd.DataFrame()
-        
+
         health_metrics = project_df.copy()
-        
+
         # Budget health - use quoted_value as the budget baseline
         health_metrics['budget_health'] = (
             (health_metrics['quoted_value'] - health_metrics['budget_used']) /
             health_metrics['quoted_value'] * 100
         ).fillna(0)
-        
+
         # Schedule health (days remaining vs total days)
         health_metrics['start_date'] = pd.to_datetime(health_metrics['start_date'])
         health_metrics['end_date'] = pd.to_datetime(health_metrics['end_date'])
@@ -88,7 +88,7 @@ class DataProcessor:
             health_metrics['budget_health'].clip(0, 100) * 0.5 +
             (100 - abs(health_metrics['schedule_progress'] - 50)) * 0.5
         ).round(1)
-        
+
         return health_metrics
 
     @staticmethod
@@ -105,7 +105,7 @@ class DataProcessor:
             'total_cost': 0,
             'cost_breakdown': {}
         }
-        
+
         # Labor costs
         if not allocations_df.empty and not time_entries_df.empty:
             project_time = time_entries_df[time_entries_df['project_id'] == project_id]
@@ -138,22 +138,22 @@ class DataProcessor:
                 if 'employee_name' in project_time_copy.columns:
                     employee_costs = project_time_copy.groupby('employee_name')['cost'].sum().to_dict()
                     costs['cost_breakdown']['by_employee'] = employee_costs
-        
+
         # Expense costs
         if not expenses_df.empty:
             project_expenses = expenses_df[expenses_df['project_id'] == project_id]
             if not project_expenses.empty:
                 expense_cost = project_expenses['amount'].sum()
                 costs['expense_cost'] = expense_cost
-                
+
                 # Breakdown by category
                 category_costs = project_expenses.groupby('category')['amount'].sum().to_dict()
                 costs['cost_breakdown']['by_category'] = category_costs
-        
+
         costs['total_cost'] = costs['labor_cost'] + costs['expense_cost']
-        
+
         return costs
-    
+
     @staticmethod
     def forecast_project_completion(
         project_df: pd.DataFrame,
@@ -163,13 +163,13 @@ class DataProcessor:
         """Forecast project completion based on current burn rate"""
         if project_df.empty or time_entries_df.empty:
             return pd.DataFrame()
-        
+
         forecasts = []
-        
+
         for _, project in project_df.iterrows():
             if project['status'] != 'Active':
                 continue
-            
+
             # Get recent time entries
             project_time = time_entries_df[time_entries_df['project_id'] == project['id']].copy()
             if project_time.empty:
@@ -179,19 +179,19 @@ class DataProcessor:
             recent_time = project_time[
                 project_time['date'] >= (pd.Timestamp.now() - timedelta(days=lookback_days))
             ]
-            
+
             if recent_time.empty:
                 continue
-            
+
             # Calculate average daily burn
             daily_hours = recent_time.groupby('date')['hours'].sum()
             avg_daily_hours = daily_hours.mean()
-            
+
             # Calculate remaining work (simplified)
             total_budget_hours = project['quoted_value'] / 150 if project['quoted_value'] else 0
             hours_used = project_time['hours'].sum()
             remaining_hours = max(0, total_budget_hours - hours_used)
-            
+
             # Forecast completion
             if avg_daily_hours > 0:
                 days_to_complete = remaining_hours / avg_daily_hours
@@ -200,7 +200,7 @@ class DataProcessor:
                     on_track = 1
                 else:
                     on_track = forecast_date <= pd.to_datetime(project['end_date'])
-                
+
                 forecasts.append({
                     'project_name': project['name'],
                     'current_progress': (hours_used / total_budget_hours * 100) if total_budget_hours > 0 else 0,
@@ -211,9 +211,9 @@ class DataProcessor:
                     'scheduled_end': pd.to_datetime(project['end_date']),
                     'on_track': on_track
                 })
-        
+
         return pd.DataFrame(forecasts)
-    
+
     @staticmethod
     def what_if_analysis(
         base_data: Dict,
@@ -222,18 +222,18 @@ class DataProcessor:
     ) -> pd.DataFrame:
         """Perform what-if scenario analysis"""
         results = []
-        
+
         # Base scenario
         base_result = {
             'scenario': 'Current',
             metric: base_data.get(metric, 0)
         }
         results.append(base_result)
-        
+
         # Apply scenarios
         for scenario in scenarios:
             scenario_data = base_data.copy()
-            
+
             # Apply changes
             for change in scenario.get('changes', []):
                 if change['type'] == 'multiply':
@@ -242,7 +242,7 @@ class DataProcessor:
                     scenario_data[change['field']] += change['value']
                 elif change['type'] == 'set':
                     scenario_data[change['field']] = change['value']
-            
+
             # Recalculate metric
             if metric == 'total_cost':
                 result_value = scenario_data.get('labor_cost', 0) + scenario_data.get('expense_cost', 0)
@@ -252,18 +252,17 @@ class DataProcessor:
                 result_value = scenario_data.get('utilization_rate', 0)
             else:
                 result_value = scenario_data.get(metric, 0)
-            
+
             results.append({
                 'scenario': scenario['name'],
                 metric: result_value,
                 'change_from_base': result_value - base_result[metric],
-                'percent_change': ((result_value - base_result[metric]) / base_result[metric] * 100) 
+                'percent_change': ((result_value - base_result[metric]) / base_result[metric] * 100)
                                   if base_result[metric] != 0 else 0
             })
-        
+
         return pd.DataFrame(results)
-    
-    @staticmethod
+
     @staticmethod
     def calculate_working_days(year: int, month: int, project_working_days: Dict = None) -> Dict:
         """Calculate working days for a given month

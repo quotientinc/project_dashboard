@@ -111,7 +111,7 @@ def get_funding_health_status(funding_pct):
         return ("Risk", "#dc3545", "\U0001f534")
 
 
-def calculate_current_month_potential(project_id, db):
+def calculate_current_month_potential(project_id, db, allocations_df=None, months_df=None):
     """
     Calculate the potential invoice for the current month based on allocations.
 
@@ -125,6 +125,11 @@ def calculate_current_month_potential(project_id, db):
     Args:
         project_id: The project identifier (TEXT).
         db: DatabaseManager instance with get_allocations() and get_months() methods.
+        allocations_df: Optional pre-fetched allocations DataFrame. If provided,
+            it will be filtered to the given project_id in-memory instead of
+            querying the database. Useful for avoiding N+1 queries in loops.
+        months_df: Optional pre-fetched months DataFrame. If provided, used
+            instead of calling db.get_months(). Useful for avoiding N+1 queries.
 
     Returns:
         float: Total potential invoice amount for the current month across
@@ -137,24 +142,30 @@ def calculate_current_month_potential(project_id, db):
     # First day of the current month in YYYY-MM-DD format (matches allocation_date storage)
     current_month_start = datetime(current_year, current_month, 1).strftime('%Y-%m-%d')
 
-    # Retrieve all allocations for this project
-    try:
-        allocations_df = db.get_allocations(project_id=str(project_id))
-    except Exception as e:
-        logger.error(f"Failed to get allocations for project {project_id}: {e}")
-        return 0.0
+    # Retrieve allocations: use pre-fetched data if provided, otherwise query
+    if allocations_df is not None:
+        # Filter the pre-fetched allocations to this project in-memory
+        project_allocations_df = allocations_df[
+            allocations_df['project_id'].astype(str) == str(project_id)
+        ].copy()
+    else:
+        try:
+            project_allocations_df = db.get_allocations(project_id=str(project_id))
+        except Exception as e:
+            logger.error(f"Failed to get allocations for project {project_id}: {e}")
+            return 0.0
 
-    if allocations_df.empty:
+    if project_allocations_df.empty:
         return 0.0
 
     # Filter to current month allocations
     # allocation_date is stored as TEXT in YYYY-MM-DD format (first of month)
-    allocations_df['allocation_date_parsed'] = pd.to_datetime(
-        allocations_df['allocation_date'], errors='coerce'
+    project_allocations_df['allocation_date_parsed'] = pd.to_datetime(
+        project_allocations_df['allocation_date'], errors='coerce'
     )
-    current_month_allocs = allocations_df[
-        (allocations_df['allocation_date_parsed'].dt.year == current_year) &
-        (allocations_df['allocation_date_parsed'].dt.month == current_month)
+    current_month_allocs = project_allocations_df[
+        (project_allocations_df['allocation_date_parsed'].dt.year == current_year) &
+        (project_allocations_df['allocation_date_parsed'].dt.month == current_month)
     ]
 
     if current_month_allocs.empty:
@@ -163,7 +174,8 @@ def calculate_current_month_potential(project_id, db):
     # Determine working days for the current month from the months table
     working_days = 21  # default fallback
     try:
-        months_df = db.get_months()
+        if months_df is None:
+            months_df = db.get_months()
         if not months_df.empty:
             current_month_row = months_df[
                 (months_df['year'] == current_year) &

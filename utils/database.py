@@ -14,6 +14,14 @@ class DatabaseManager:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False, isolation_level=None)
+
+        # Performance PRAGMAs
+        self.conn.execute("PRAGMA journal_mode = WAL;")
+        self.conn.execute("PRAGMA synchronous = NORMAL;")
+        self.conn.execute("PRAGMA cache_size = -64000;")
+        self.conn.execute("PRAGMA temp_store = MEMORY;")
+        self.conn.execute("PRAGMA mmap_size = 268435456;")
+
         self.create_tables()
         self.migrate_employee_allocation_fields()
         self.migrate_allocation_bill_rate()

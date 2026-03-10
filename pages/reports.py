@@ -1498,6 +1498,9 @@ def render_financial_analysis_report():
                         # Get projected data from allocations
                         projected_monthly = {}
 
+                        # Pre-fetch months data once to avoid N+1 queries in the loop
+                        months_df = db.get_months()
+
                         for month_num in range(current_month + 1, 13):
                             month_str = f"{selected_year}-{month_num:02d}"
                             month_allocs = allocations_df[
@@ -1507,7 +1510,6 @@ def render_financial_analysis_report():
                             if not month_allocs.empty:
                                 # Calculate projected revenue from allocations
                                 # allocated_fte × bill_rate × working_days × 8 hours/day
-                                months_df = db.get_months()
                                 month_info = months_df[
                                     (months_df['year'] == selected_year) &
                                     (months_df['month'] == month_num)
