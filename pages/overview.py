@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from utils.logger import get_logger
 from utils.funding_helpers import calculate_all_projects_utilization
 from utils.project_helpers import safe_currency_display
+from pages.employees_utilization import _calculate_period_utilization_data
 
 logger = get_logger(__name__)
 
@@ -158,10 +159,6 @@ billable_employees_df = employees_df[
 # Get performance metrics for full year (for trend chart with projections)
 full_year_start = datetime(current_date.year, 1, 1).strftime('%Y-%m-%d')
 full_year_end = datetime(current_date.year, 12, 31).strftime('%Y-%m-%d')
-
-# Get performance metrics for YTD only (for KPI calculations)
-ytd_start = datetime(current_date.year, 1, 1).strftime('%Y-%m-%d')
-ytd_end = current_date.strftime('%Y-%m-%d')
 
 # Get full year time entries for PTO/Holiday calculations (optimization: fetch once)
 full_year_time_entries_all = db.get_time_entries(
@@ -330,47 +327,19 @@ if not billable_employees_df.empty:
 else:
     utilization_trend_df = pd.DataFrame()
 
-# Calculate YTD average utilization using aggregate formula (total billable / total available)
-if not utilization_trend_df.empty:
-    # Sum up all billable, possible, and PTO hours from actual months only
-    ytd_total_billable = 0
-    ytd_total_possible = 0
-    ytd_total_pto = 0
-
-    for month_num in range(1, current_date.month + 1):
-        month_name = f"{utilization_trend_df.iloc[month_num-1]['month_name']} {current_date.year}"
-
-        # Get actual billable hours from actuals
-        actual_month_data = performance_data['actuals'].get(month_name, {})
-        ytd_total_billable += sum(emp_data.get('billable_hours', 0) for emp_data in actual_month_data.values())
-
-        # Get possible hours
-        possible_month_data = performance_data['possible'].get(month_name, {})
-        ytd_total_possible += sum(emp_data.get('hours', 0) for emp_data in possible_month_data.values())
-
-        # Get PTO hours for this month
-        if not full_year_time_entries_all.empty:
-            month_start_str = f"{current_date.year}-{month_num:02d}-01"
-            month_end_day = calendar.monthrange(current_date.year, month_num)[1]
-            month_end_str = f"{current_date.year}-{month_num:02d}-{month_end_day}"
-
-            month_entries = full_year_time_entries_all[
-                (full_year_time_entries_all['date'] >= month_start_str) &
-                (full_year_time_entries_all['date'] <= month_end_str)
-            ]
-
-            if not month_entries.empty:
-                billable_emp_ids = billable_employees_df['id'].tolist()
-                billable_entries = month_entries[month_entries['employee_id'].isin(billable_emp_ids)]
-
-                pto_entries = billable_entries[billable_entries['project_id'] == 'FRINGE.PTO']
-                ytd_total_pto += pto_entries['hours'].sum() if not pto_entries.empty else 0
-
-    # Calculate aggregate utilization percentage using available hours
-    # (holidays already subtracted in _build_possible_data)
-    ytd_available = max(ytd_total_possible - ytd_total_pto, 0)
-    avg_employee_utilization = (ytd_total_billable / ytd_available * 100) if ytd_available > 0 else 0
-else:
+# Calculate avg utilization using same logic as Employee Utilization Overview
+try:
+    filter_start = start_date.strftime('%Y-%m-%d') if start_date else full_year_start
+    filter_end = end_date.strftime('%Y-%m-%d') if end_date else full_year_end
+    util_df_kpi, _, _ = _calculate_period_utilization_data(
+        db, processor, filter_start, filter_end, include_projected=True
+    )
+    if not util_df_kpi.empty:
+        avg_employee_utilization = util_df_kpi['utilization_pct'].mean()
+    else:
+        avg_employee_utilization = 0
+except Exception as e:
+    logger.error(f"Failed to calculate utilization: {e}")
     avg_employee_utilization = 0
 
 # Key Metrics Row
@@ -385,7 +354,19 @@ with col2:
     st.metric("Total Quoted Value", f"${total_quoted_value:,.0f}")
 
 with col3:
-    total_accrued = projects_df['budget_used'].sum() if not projects_df.empty else 0
+    # Calculate Total Accrued from filtered time entries (respects time range)
+    # Compute cost same way as get_projects(): use amount if available, else hours * bill_rate
+    if not time_entries_df.empty:
+        def _calc_cost(row):
+            if pd.notna(row.get('amount')) and row['amount'] != 0:
+                return row['amount']
+            elif pd.notna(row.get('bill_rate')) and pd.notna(row.get('hours')):
+                return row['hours'] * row['bill_rate']
+            else:
+                return 0.0
+        total_accrued = time_entries_df.apply(_calc_cost, axis=1).sum()
+    else:
+        total_accrued = 0
     st.metric("Total Accrued", f"${total_accrued:,.0f}")
 
 with col4:
@@ -428,7 +409,9 @@ that could be captured.
 
 with st.spinner("Checking project utilization..."):
     try:
-        util_df = calculate_all_projects_utilization(db, processor, ytd_start, ytd_end)
+        filter_start_str = start_date.strftime('%Y-%m-%d') if start_date else full_year_start
+        filter_end_str = end_date.strftime('%Y-%m-%d') if end_date else full_year_end
+        util_df = calculate_all_projects_utilization(db, processor, filter_start_str, filter_end_str)
     except Exception as e:
         logger.error(f"Failed to calculate project utilization: {e}")
         util_df = pd.DataFrame()
