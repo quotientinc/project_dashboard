@@ -451,7 +451,7 @@ if not util_df.empty:
             f"is not being captured (YTD)."
         )
 
-        # Show compact table
+        # Show compact table with watermark overlay
         alert_display = underutilized[['project_name', 'utilization_pct', 'revenue_gap', 'health_icon']].copy()
         alert_display.columns = ['Project', 'Utilization %', 'Revenue Gap', '_icon']
         alert_display['Utilization %'] = alert_display.apply(
@@ -459,7 +459,51 @@ if not util_df.empty:
         )
         alert_display['Revenue Gap'] = alert_display['Revenue Gap'].apply(lambda x: f"${x:,.0f}")
         alert_display = alert_display.drop(columns=['_icon'])
+
         st.dataframe(alert_display, hide_index=True, use_container_width=True)
+
+        # Inject watermark overlay onto the dataframe above using an iframe with JS.
+        # The script finds the nearest preceding dataframe container and adds a
+        # positioned overlay with the watermark text using safe DOM methods.
+        import streamlit.components.v1 as components
+        components.html("""
+        <script>
+        (function() {
+            var iframes = window.parent.document.querySelectorAll('iframe');
+            var thisIframe = null;
+            for (var i = 0; i < iframes.length; i++) {
+                try {
+                    if (iframes[i].contentWindow === window) { thisIframe = iframes[i]; break; }
+                } catch(e) {}
+            }
+            if (!thisIframe) return;
+
+            var container = thisIframe.closest('[data-testid="stElementContainer"]');
+            if (!container) return;
+
+            // Find the previous sibling that contains a dataframe
+            var prev = container.previousElementSibling;
+            while (prev && !prev.querySelector('[data-testid="stDataFrame"]')) {
+                prev = prev.previousElementSibling;
+            }
+            if (!prev) return;
+
+            // Make the df container relative-positioned
+            prev.style.position = 'relative';
+
+            // Create overlay using safe DOM methods
+            var overlay = window.parent.document.createElement('div');
+            overlay.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.55);pointer-events:none;z-index:10;';
+
+            var text = window.parent.document.createElement('div');
+            text.style.cssText = 'transform:rotate(-25deg);font-size:2.5rem;font-weight:800;color:rgba(180,83,9,0.35);white-space:nowrap;text-shadow:0 2px 4px rgba(0,0,0,0.05);letter-spacing:2px;';
+            text.textContent = String.fromCodePoint(0x1F6A7) + ' UNDER CONSTRUCTION ' + String.fromCodePoint(0x1F6A7);
+
+            overlay.appendChild(text);
+            prev.appendChild(overlay);
+        })();
+        </script>
+        """, height=0)
     else:
         st.success("All billable projects are well-utilized (>=70% of allocated capacity).")
 else:
