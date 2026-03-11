@@ -2,10 +2,13 @@
 CSV Timesheet Importer
 Parses timesheet CSV files in the format from TimesheetData.csv
 """
+import logging
 
 import pandas as pd
 from datetime import datetime
 import re
+
+logger = logging.getLogger(__name__)
 
 
 class TimesheetCSVImporter:
@@ -79,7 +82,7 @@ class TimesheetCSVImporter:
                 continue
 
         # If no format worked, log error and return None
-        print(f"Error parsing date '{date_str}': No matching format found")
+        logger.info(f"Error parsing date '{date_str}': No matching format found")
         return None
 
     def _parse_employee_name(self, name_str):
@@ -378,7 +381,7 @@ class EmployeeReferenceCSVImporter:
             dt = datetime.strptime(str(date_str).strip(), '%m/%d/%y')
             return dt.strftime('%Y-%m-%d')
         except Exception as e:
-            print(f"Error parsing date '{date_str}': {e}")
+            logger.info(f"Error parsing date '{date_str}': {e}")
             return None
 
     def _parse_billable(self, billable_str):
@@ -523,7 +526,7 @@ class ProjectReferenceCSVImporter:
             dt = datetime.strptime(cleaned, '%m/%d/%Y')
             return dt.strftime('%Y-%m-%d')
         except Exception as e:
-            print(f"Error parsing date '{date_str}': {e}")
+            logger.info(f"Error parsing date '{date_str}': {e}")
             return None
 
     def _parse_currency(self, currency_str):
@@ -536,7 +539,7 @@ class ProjectReferenceCSVImporter:
             value = float(cleaned)
             return value if value > 0 else None
         except Exception as e:
-            print(f"Error parsing currency '{currency_str}': {e}")
+            logger.info(f"Error parsing currency '{currency_str}': {e}")
             return None
 
     def _split_project_column(self, project_str):
@@ -741,7 +744,7 @@ class AllocationCSVImporter:
             return dt.strftime('%Y-%m')
 
         except Exception as e:
-            print(f"Error parsing allocation_date '{date_str}': {e}")
+            logger.info(f"Error parsing allocation_date '{date_str}': {e}")
             return None
 
     def extract_allocations(self):

@@ -6,6 +6,7 @@ the Vue frontend's built static files at the root path.
 """
 import logging
 import traceback
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -25,12 +26,27 @@ from app.api.routes import (
     projects,
     time_entries,
 )
+from app.core.database import get_db, close_db
 
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
-setup_logging(log_level=logging.DEBUG if settings.debug else logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Lifespan
+# ---------------------------------------------------------------------------
+@asynccontextmanager
+async def lifespan(_app):
+    """Application startup/shutdown lifecycle."""
+    setup_logging(log_level=settings.log_level)
+    logger.info("Application starting up")
+    get_db()  # eagerly initialize DB singleton
+    yield
+    logger.info("Application shutting down")
+    close_db()
+
 
 # ---------------------------------------------------------------------------
 # Application
@@ -41,6 +57,7 @@ app = FastAPI(
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
+    lifespan=lifespan,
 )
 
 # ---------------------------------------------------------------------------

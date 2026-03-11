@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     # --- Application ---
     app_name: str = "Project Dashboard API"
     debug: bool = False
+    log_level: str = "INFO"
 
     # --- Database ---
     # Path to the SQLite database file (relative to project root or absolute)

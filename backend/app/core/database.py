@@ -22,6 +22,13 @@ def get_db() -> DatabaseManager:
     return _get_db_manager()
 
 
+def close_db():
+    """Close the database connection and clear the singleton cache."""
+    db = _get_db_manager()
+    db.close()
+    _get_db_manager.cache_clear()
+
+
 def get_data_processor() -> type:
     """FastAPI dependency that provides the DataProcessor class (static methods)."""
     return DataProcessor

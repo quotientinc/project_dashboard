@@ -1,9 +1,9 @@
-import sqlite3
-import pandas as pd
-from pathlib import Path
-import json
-from datetime import datetime
 import logging
+import sqlite3
+from datetime import datetime
+from pathlib import Path
+
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,12 @@ class DatabaseManager:
         self.migrate_add_allocation_unique_constraint()
         self.create_indexes()
         self.migrate_add_project_phases_table()
+
+    def close(self):
+        """Close the database connection."""
+        if self.conn:
+            self.conn.close()
+            self.conn = None
 
     def create_tables(self):
         """Create all necessary tables"""
@@ -172,10 +178,10 @@ class DatabaseManager:
         project_id_type = [col for col in columns if col[1] == 'id'][0][2]  # Get type of id column
 
         if project_id_type == 'TEXT':
-            print("Schema already migrated for CSV import")
+            logger.info("Schema already migrated for CSV import")
             return
 
-        print("Starting schema migration for CSV import...")
+        logger.info("Starting schema migration for CSV import...")
 
         # Step 1: Save allocations data
         cursor.execute("SELECT * FROM allocations")
@@ -195,14 +201,14 @@ class DatabaseManager:
 
         # Step 4: Restore allocations (may have orphaned references until CSV import)
         if allocations_backup:
-            print(f"Restoring {len(allocations_backup)} allocations (note: references may be orphaned until CSV import)")
+            logger.info(f"Restoring {len(allocations_backup)} allocations (note: references may be orphaned until CSV import)")
             placeholders = ','.join('?' * len(allocations_columns))
             query = f"INSERT INTO allocations ({','.join(allocations_columns)}) VALUES ({placeholders})"
             cursor.executemany(query, allocations_backup)
 
         self.conn.commit()
-        print("Schema migration complete. Allocations preserved, all other data cleared.")
-        print("Note: Allocation foreign keys may be orphaned until CSV data is imported.")
+        logger.info("Schema migration complete. Allocations preserved, all other data cleared.")
+        logger.info("Note: Allocation foreign keys may be orphaned until CSV data is imported.")
 
     def migrate_employee_allocation_fields(self):
         """
@@ -218,17 +224,17 @@ class DatabaseManager:
         # Add billable column
         if 'billable' not in columns:
             cursor.execute('ALTER TABLE employees ADD COLUMN billable INTEGER DEFAULT 0')
-            print("Added 'billable' column to employees table")
+            logger.info("Added 'billable' column to employees table")
 
         # Add overhead_allocation column
         if 'overhead_allocation' not in columns:
             cursor.execute('ALTER TABLE employees ADD COLUMN overhead_allocation REAL DEFAULT 0')
-            print("Added 'overhead_allocation' column to employees table")
+            logger.info("Added 'overhead_allocation' column to employees table")
 
         # Add target_allocation column
         if 'target_allocation' not in columns:
             cursor.execute('ALTER TABLE employees ADD COLUMN target_allocation REAL DEFAULT 0.3')
-            print("Added 'target_allocation' column to employees table")
+            logger.info("Added 'target_allocation' column to employees table")
 
         self.conn.commit()
 
@@ -247,19 +253,19 @@ class DatabaseManager:
 
         # If employee_rate exists and bill_rate doesn't, this is an old database
         if 'employee_rate' in columns and 'bill_rate' not in columns:
-            print("Migrating allocations: employee_rate -> bill_rate...")
+            logger.info("Migrating allocations: employee_rate -> bill_rate...")
 
             # Add bill_rate column
             cursor.execute('ALTER TABLE allocations ADD COLUMN bill_rate REAL')
-            print("Added 'bill_rate' column to allocations table")
+            logger.info("Added 'bill_rate' column to allocations table")
 
             # Copy data from employee_rate to bill_rate
             cursor.execute('UPDATE allocations SET bill_rate = employee_rate')
             rows_updated = cursor.rowcount
-            print(f"Copied employee_rate to bill_rate for {rows_updated} allocations")
+            logger.info(f"Copied employee_rate to bill_rate for {rows_updated} allocations")
 
             self.conn.commit()
-            print("Migration complete: employee_rate -> bill_rate")
+            logger.info("Migration complete: employee_rate -> bill_rate")
 
             # Note: We don't drop the old columns yet for safety
             # They can be dropped in a future cleanup migration
@@ -287,17 +293,17 @@ class DatabaseManager:
         # Add bill_rate column
         if 'bill_rate' not in columns:
             cursor.execute('ALTER TABLE time_entries ADD COLUMN bill_rate REAL')
-            print("Added 'bill_rate' column to time_entries table")
+            logger.info("Added 'bill_rate' column to time_entries table")
 
         # Add amount column
         if 'amount' not in columns:
             cursor.execute('ALTER TABLE time_entries ADD COLUMN amount REAL')
-            print("Added 'amount' column to time_entries table")
+            logger.info("Added 'amount' column to time_entries table")
 
         # Remove is_projected column if it exists
         # SQLite doesn't support DROP COLUMN directly, so we need to recreate the table
         if 'is_projected' in columns:
-            print("Removing 'is_projected' column from time_entries table...")
+            logger.info("Removing 'is_projected' column from time_entries table...")
 
             # Get all data
             cursor.execute("SELECT id, employee_id, project_id, date, hours, description, billable, bill_rate, amount, created_at FROM time_entries")
@@ -328,9 +334,9 @@ class DatabaseManager:
                     "INSERT INTO time_entries (id, employee_id, project_id, date, hours, description, billable, bill_rate, amount, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     data
                 )
-                print(f"Restored {len(data)} time entries")
+                logger.info(f"Restored {len(data)} time entries")
 
-            print("Removed 'is_projected' column from time_entries table")
+            logger.info("Removed 'is_projected' column from time_entries table")
 
         self.conn.commit()
 
@@ -351,7 +357,7 @@ class DatabaseManager:
 
         # Check if migration already completed
         if 'contract_value' in columns and 'budget_allocated' not in columns:
-            print("Projects schema already cleaned up")
+            logger.info("Projects schema already cleaned up")
             return
 
         # Check if migration is needed
@@ -366,10 +372,10 @@ class DatabaseManager:
             needs_migration = True
 
         if not needs_migration:
-            print("Projects schema does not need cleanup migration")
+            logger.info("Projects schema does not need cleanup migration")
             return
 
-        print("Starting projects schema cleanup migration...")
+        logger.info("Starting projects schema cleanup migration...")
 
         # SQLite doesn't support ALTER TABLE DROP COLUMN or RENAME COLUMN easily
         # We need to recreate the table
@@ -430,12 +436,12 @@ class DatabaseManager:
             placeholders = ','.join('?' * len(new_column_names))
             query = f"INSERT INTO projects ({','.join(new_column_names)}) VALUES ({placeholders})"
             cursor.executemany(query, transformed_data)
-            print(f"Migrated {len(transformed_data)} projects to new schema")
+            logger.info(f"Migrated {len(transformed_data)} projects to new schema")
 
         self.conn.commit()
-        print("Projects schema cleanup complete:")
-        print("   - Renamed: budget_allocated -> contract_value")
-        print("   - Removed: budget_used, revenue_projected, revenue_actual")
+        logger.info("Projects schema cleanup complete:")
+        logger.info("   - Renamed: budget_allocated -> contract_value")
+        logger.info("   - Removed: budget_used, revenue_projected, revenue_actual")
 
     def migrate_contract_value_split(self):
         """
@@ -453,16 +459,16 @@ class DatabaseManager:
 
         # Check if migration already completed
         if 'quoted_value' in columns and 'awarded_value' in columns and 'contract_value' not in columns:
-            print("Contract value split migration already completed")
+            logger.info("Contract value split migration already completed")
             return
 
         # Check if we need to migrate from contract_value
         if 'contract_value' not in columns:
-            print("Contract value split migration not needed (new database)")
+            logger.info("Contract value split migration not needed (new database)")
             return
 
-        print("Starting contract value split migration...")
-        print("  - Splitting contract_value into quoted_value and awarded_value")
+        logger.info("Starting contract value split migration...")
+        logger.info("  - Splitting contract_value into quoted_value and awarded_value")
 
         # Step 1: Get all current data
         cursor.execute("SELECT * FROM projects")
@@ -527,14 +533,14 @@ class DatabaseManager:
             placeholders = ','.join('?' * len(new_column_names))
             query = f"INSERT INTO projects ({','.join(new_column_names)}) VALUES ({placeholders})"
             cursor.executemany(query, transformed_data)
-            print(f"  - Migrated {len(transformed_data)} projects to new schema")
-            print(f"  - Both quoted_value and awarded_value set to original contract_value")
+            logger.info(f"  - Migrated {len(transformed_data)} projects to new schema")
+            logger.info(f"  - Both quoted_value and awarded_value set to original contract_value")
 
         self.conn.commit()
-        print("Contract value split migration complete")
-        print("   - Added: quoted_value (original bid/quote)")
-        print("   - Added: awarded_value (actual funding)")
-        print("   - Removed: contract_value")
+        logger.info("Contract value split migration complete")
+        logger.info("   - Added: quoted_value (original bid/quote)")
+        logger.info("   - Added: awarded_value (actual funding)")
+        logger.info("   - Removed: contract_value")
 
     def migrate_remove_deprecated_allocation_columns(self):
         """
@@ -555,11 +561,11 @@ class DatabaseManager:
 
         # Check if migration already completed
         if 'start_date' not in columns and 'end_date' not in columns:
-            print("Deprecated allocation columns already removed")
+            logger.info("Deprecated allocation columns already removed")
             return
 
-        print("Starting allocation table cleanup migration...")
-        print("  - Removing: start_date, end_date, working_days, remaining_days")
+        logger.info("Starting allocation table cleanup migration...")
+        logger.info("  - Removing: start_date, end_date, working_days, remaining_days")
 
         # Step 1: Get all current data
         cursor.execute("SELECT * FROM allocations")
@@ -617,12 +623,12 @@ class DatabaseManager:
             placeholders = ','.join('?' * len(new_columns))
             query = f"INSERT INTO allocations ({','.join(new_columns)}) VALUES ({placeholders})"
             cursor.executemany(query, new_data)
-            print(f"  - Migrated {len(new_data)} allocation records")
+            logger.info(f"  - Migrated {len(new_data)} allocation records")
 
         self.conn.commit()
-        print("Allocation table cleanup complete")
-        print("   - Removed: start_date, end_date, working_days, remaining_days")
-        print("   - Kept: allocation_date (source of truth)")
+        logger.info("Allocation table cleanup complete")
+        logger.info("   - Removed: start_date, end_date, working_days, remaining_days")
+        logger.info("   - Kept: allocation_date (source of truth)")
 
     def migrate_add_allocation_unique_constraint(self):
         """
@@ -642,10 +648,10 @@ class DatabaseManager:
             return
         create_sql = result[0]
         if 'UNIQUE' in create_sql.upper():
-            print("Allocation unique constraint already present")
+            logger.info("Allocation unique constraint already present")
             return
 
-        print("Starting allocation unique constraint migration...")
+        logger.info("Starting allocation unique constraint migration...")
 
         # Step 1: Read all existing data and column info
         cursor.execute("PRAGMA table_info(allocations)")
@@ -678,7 +684,7 @@ class DatabaseManager:
 
         deduped_rows = list(seen.values())
         duplicates_removed = len(normalized_rows) - len(deduped_rows)
-        print(f"  - Found {len(normalized_rows)} rows, removing {duplicates_removed} duplicate(s)")
+        logger.info(f"  - Found {len(normalized_rows)} rows, removing {duplicates_removed} duplicate(s)")
 
         # Step 4: Drop old table, recreate with UNIQUE constraint
         cursor.execute("DROP TABLE allocations")
@@ -704,12 +710,12 @@ class DatabaseManager:
             placeholders = ','.join('?' * len(col_names))
             query = f"INSERT INTO allocations ({','.join(col_names)}) VALUES ({placeholders})"
             cursor.executemany(query, [tuple(r) for r in deduped_rows])
-            print(f"  - Migrated {len(deduped_rows)} allocation records")
+            logger.info(f"  - Migrated {len(deduped_rows)} allocation records")
 
         self.conn.commit()
-        print("Allocation unique constraint migration complete")
-        print("   - Added: UNIQUE(employee_id, project_id, allocation_date)")
-        print(f"   - Removed {duplicates_removed} duplicate(s) from {len(normalized_rows)} rows")
+        logger.info("Allocation unique constraint migration complete")
+        logger.info("   - Added: UNIQUE(employee_id, project_id, allocation_date)")
+        logger.info(f"   - Removed {duplicates_removed} duplicate(s) from {len(normalized_rows)} rows")
         logger.info(f"Allocation unique constraint migration complete. Removed {duplicates_removed} duplicate(s) from {len(normalized_rows)} rows.")
 
     def create_indexes(self):
