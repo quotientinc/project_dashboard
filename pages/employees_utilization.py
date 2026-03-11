@@ -532,17 +532,18 @@ def _calculate_monthly_utilization_data(db, processor, selected_year, selected_m
         # Calculate YTD utilization percentage using available hours
         ytd_utilization_pct = (ytd_actual_billable_hours / ytd_available_hours * 100) if ytd_available_hours > 0 else 0
 
-        # Determine status
-        if utilization_pct >= 111:
+        # Determine status (round to match displayed value)
+        utilization_pct_r = round(utilization_pct)
+        if utilization_pct_r >= 111:
             status = "🟣 Over"
             status_num = 5
-        elif utilization_pct >= 97:
+        elif utilization_pct_r >= 97:
             status = "🟢 Good"
             status_num = 4
-        elif utilization_pct >= 80:
+        elif utilization_pct_r >= 80:
             status = "🟡 Fair"
             status_num = 3
-        elif utilization_pct >= 51:
+        elif utilization_pct_r >= 51:
             status = "🟠 Low"
             status_num = 2
         else:
@@ -696,12 +697,13 @@ def _calculate_period_utilization_data(db, processor, start_date, end_date,
 
     agg_df['variance'] = agg_df['actual_hours'] - agg_df['projected_hours']
 
-    # Assign status based on utilization_pct
+    # Assign status based on utilization_pct (round to match displayed value)
+    _pct_r = agg_df['utilization_pct'].round(0)
     conditions = [
-        agg_df['utilization_pct'] >= 111,
-        agg_df['utilization_pct'] >= 97,
-        agg_df['utilization_pct'] >= 80,
-        agg_df['utilization_pct'] >= 51,
+        _pct_r >= 111,
+        _pct_r >= 97,
+        _pct_r >= 80,
+        _pct_r >= 51,
     ]
     status_choices = ["\U0001f7e3 Over", "\U0001f7e2 Good", "\U0001f7e1 Fair", "\U0001f7e0 Low"]
     status_num_choices = [5, 4, 3, 2]
@@ -898,10 +900,10 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
                     'possible_hours': row['possible_hours'],
                 })
 
-        # Apply band filter to get filtered employee IDs
+        # Apply band filter to get filtered employee IDs (round to match displayed value)
         filtered_employee_ids = set()
         for eu in employee_utilizations:
-            if matches_band(eu['utilization_pct'], band_filter):
+            if matches_band(round(eu['utilization_pct']), band_filter):
                 filtered_employee_ids.add(eu['id'])
 
         if not filtered_employee_ids:
@@ -1016,7 +1018,7 @@ def render_combined_utilization_view(db, processor, employee_id=None, widget_pre
 
             cols = st.columns(5)
             for idx, cat in enumerate(categories):
-                matching = [e for e in filtered_utilizations if cat['filter'](e['utilization_pct'])]
+                matching = [e for e in filtered_utilizations if cat['filter'](round(e['utilization_pct']))]
                 count = len(matching)
 
                 if matching:
