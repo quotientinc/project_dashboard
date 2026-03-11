@@ -1,12 +1,20 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import { useTheme } from 'vuetify'
 import { useApi } from '@/composables/useApi'
 
 const drawer = ref(true)
 const rail = ref(false)
 const route = useRoute()
 const { get } = useApi()
+
+const theme = useTheme()
+const isDark = computed(() => theme.global.current.value.dark)
+
+function toggleTheme() {
+  theme.global.name.value = isDark.value ? 'light' : 'dark'
+}
 
 interface NavItem {
   title: string
@@ -66,7 +74,13 @@ async function fetchQuickStats() {
   }
 }
 
-onMounted(fetchQuickStats)
+onMounted(() => {
+  fetchQuickStats()
+  // Set initial theme based on system preference
+  if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    theme.global.name.value = 'dark'
+  }
+})
 
 function formatCurrency(value: number): string {
   if (value >= 1_000_000) {
@@ -95,10 +109,10 @@ function formatCurrency(value: number): string {
       </v-app-bar-title>
       <v-spacer />
       <v-btn
-        icon="mdi-refresh"
+        :icon="isDark ? 'mdi-weather-sunny' : 'mdi-weather-night'"
         variant="text"
-        aria-label="Refresh data"
-        @click="fetchQuickStats"
+        aria-label="Toggle theme"
+        @click="toggleTheme"
       />
     </v-app-bar>
 

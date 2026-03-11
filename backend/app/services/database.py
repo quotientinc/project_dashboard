@@ -926,7 +926,7 @@ class DatabaseManager:
             params.append(str(project_id) if hasattr(project_id, 'item') else project_id)
 
         query += " ORDER BY start_date"
-        return pd.read_sql_query(query, self.conn, params=params)
+        return pd.read_sql_query(query, self.conn, params=params if params else None)
 
     def add_project_phase(self, phase_data):
         """Add a new project phase"""
@@ -1031,7 +1031,7 @@ class DatabaseManager:
         # Note: department filter removed as department column no longer exists
         # filters parameter kept for future extensibility
 
-        return pd.read_sql_query(query, self.conn, params=params)
+        return pd.read_sql_query(query, self.conn, params=params if params else None)
 
     def add_employee(self, employee_data):
         """Add a new employee"""
@@ -1085,7 +1085,7 @@ class DatabaseManager:
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
 
-        return pd.read_sql_query(query, self.conn, params=params)
+        return pd.read_sql_query(query, self.conn, params=params if params else None)
 
     def add_allocation(self, allocation_data):
         """Add a new allocation"""
@@ -1302,7 +1302,7 @@ class DatabaseManager:
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
 
-        return pd.read_sql_query(query, self.conn, params=params)
+        return pd.read_sql_query(query, self.conn, params=params if params else None)
 
     def get_existing_time_entries_date_range(self):
         """
@@ -1401,7 +1401,7 @@ class DatabaseManager:
 
         query += " GROUP BY t.employee_id, e.name, e.role, month ORDER BY e.name, month"
 
-        return pd.read_sql_query(query, self.conn, params=params)
+        return pd.read_sql_query(query, self.conn, params=params if params else None)
 
     # Expense methods
     def get_expenses(self, project_id=None):
@@ -1418,7 +1418,7 @@ class DatabaseManager:
             # Convert numpy types to Python types (project_id is TEXT)
             params.append(str(project_id) if hasattr(project_id, 'item') else project_id)
 
-        return pd.read_sql_query(query, self.conn, params=params)
+        return pd.read_sql_query(query, self.conn, params=params if params else None)
 
     def add_expense(self, expense_data):
         """Add an expense"""
@@ -1637,7 +1637,7 @@ class DatabaseManager:
             params.append(year)
 
         query += " ORDER BY year DESC, month ASC"
-        return pd.read_sql_query(query, self.conn, params=params)
+        return pd.read_sql_query(query, self.conn, params=params if params else None)
 
     def add_month(self, month_data):
         """Add a new month record"""

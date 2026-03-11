@@ -36,38 +36,12 @@ onMounted(fetchEmployees)
 // =====================================================================
 
 // Filters
-const selectedDepartments = ref<string[]>([])
-const selectedRoles = ref<string[]>([])
 const selectedBillableStatus = ref('All')
 const selectedPayType = ref('All')
 const searchTerm = ref('')
 
-const departmentOptions = computed(() => {
-  const depts = new Set<string>()
-  for (const e of employees.value) {
-    if (e.department) depts.add(e.department)
-  }
-  return Array.from(depts).sort()
-})
-
-const roleOptions = computed(() => {
-  const roles = new Set<string>()
-  for (const e of employees.value) {
-    if (e.role) roles.add(e.role)
-  }
-  return Array.from(roles).sort()
-})
-
 const filteredEmployees = computed(() => {
   let result = employees.value
-
-  if (selectedDepartments.value.length > 0) {
-    result = result.filter((e) => selectedDepartments.value.includes(e.department ?? ''))
-  }
-
-  if (selectedRoles.value.length > 0) {
-    result = result.filter((e) => selectedRoles.value.includes(e.role ?? ''))
-  }
 
   if (selectedBillableStatus.value === 'Billable') {
     result = result.filter((e) => e.billable === 1)
@@ -85,9 +59,7 @@ const filteredEmployees = computed(() => {
     const term = searchTerm.value.toLowerCase()
     result = result.filter(
       (e) =>
-        (e.name ?? '').toLowerCase().includes(term) ||
-        (e.email ?? '').toLowerCase().includes(term) ||
-        (e.skills ?? '').toLowerCase().includes(term)
+        (e.name ?? '').toLowerCase().includes(term)
     )
   }
 
@@ -126,17 +98,15 @@ function formatCurrencyLocal(value: number | null | undefined): string {
 
 // v-data-table headers for Employee List
 const listHeaders = [
-  { title: 'ID', key: 'id', width: '80px' },
   { title: 'Name', key: 'name', minWidth: '160px' },
-  { title: 'Email', key: 'email', minWidth: '200px' },
-  { title: 'Department', key: 'department', minWidth: '130px' },
   { title: 'Role', key: 'role', minWidth: '140px' },
   { title: 'Pay Type', key: 'pay_type', minWidth: '100px' },
   { title: 'Billable', key: 'billable', minWidth: '90px' },
   { title: 'Cost Rate', key: 'cost_rate', minWidth: '120px', align: 'end' as const },
   { title: 'FTE', key: 'fte', minWidth: '80px', align: 'end' as const },
   { title: 'Target Alloc', key: 'target_allocation', minWidth: '110px', align: 'end' as const },
-  { title: 'Skills', key: 'skills', minWidth: '150px' },
+  { title: 'Hire Date', key: 'hire_date', minWidth: '120px' },
+  { title: 'Term Date', key: 'term_date', minWidth: '120px' },
 ]
 
 function onListRowClicked(item: Employee) {
@@ -670,38 +640,14 @@ function utilPctColor(v: number | null | undefined): string {
       <v-tab :value="2">Utilization Overview</v-tab>
     </v-tabs>
 
-    <v-window v-model="activeTab">
+    <v-window v-model="activeTab" class="pt-2">
       <!-- ============================================================= -->
       <!-- TAB 1: Employee List -->
       <!-- ============================================================= -->
       <v-window-item :value="0">
         <!-- Filters Row -->
         <v-row class="mb-2">
-          <v-col cols="12" sm="6" md="2">
-            <v-select
-              v-model="selectedDepartments"
-              label="Department"
-              :items="departmentOptions"
-              multiple
-              chips
-              closable-chips
-              clearable
-              density="compact"
-            />
-          </v-col>
-          <v-col cols="12" sm="6" md="2">
-            <v-select
-              v-model="selectedRoles"
-              label="Role"
-              :items="roleOptions"
-              multiple
-              chips
-              closable-chips
-              clearable
-              density="compact"
-            />
-          </v-col>
-          <v-col cols="12" sm="6" md="2">
+          <v-col cols="12" sm="6" md="3">
             <v-select
               v-model="selectedBillableStatus"
               label="Billable Status"
@@ -709,7 +655,7 @@ function utilPctColor(v: number | null | undefined): string {
               density="compact"
             />
           </v-col>
-          <v-col cols="12" sm="6" md="2">
+          <v-col cols="12" sm="6" md="3">
             <v-select
               v-model="selectedPayType"
               label="Pay Type"
@@ -717,11 +663,11 @@ function utilPctColor(v: number | null | undefined): string {
               density="compact"
             />
           </v-col>
-          <v-col cols="12" sm="12" md="4">
+          <v-col cols="12" sm="12" md="6">
             <v-text-field
               v-model="searchTerm"
               prepend-inner-icon="mdi-magnify"
-              label="Search by name, email, or skills..."
+              label="Search by name..."
               clearable
               density="compact"
               @click:clear="searchTerm = ''"
@@ -815,13 +761,11 @@ function utilPctColor(v: number | null | undefined): string {
               <template #item.target_allocation="{ value }">
                 {{ value != null ? (value * 100).toFixed(0) + '%' : '-' }}
               </template>
-              <template #item.skills="{ value }">
-                <v-tooltip v-if="value && value.length > 30" :text="value" location="top">
-                  <template #activator="{ props }">
-                    <span v-bind="props">{{ value.substring(0, 30) }}...</span>
-                  </template>
-                </v-tooltip>
-                <span v-else>{{ value || '-' }}</span>
+              <template #item.hire_date="{ value }">
+                {{ value || '-' }}
+              </template>
+              <template #item.term_date="{ value }">
+                {{ value || '-' }}
               </template>
             </v-data-table>
           </v-card-text>
