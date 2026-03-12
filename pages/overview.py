@@ -452,38 +452,57 @@ if not util_df.empty:
         components.html("""
         <script>
         (function() {
-            var iframes = window.parent.document.querySelectorAll('iframe');
-            var thisIframe = null;
-            for (var i = 0; i < iframes.length; i++) {
-                try {
-                    if (iframes[i].contentWindow === window) { thisIframe = iframes[i]; break; }
-                } catch(e) {}
+            var TIMEOUT_MS = 5000;
+            var startTime = Date.now();
+
+            function applyOverlay() {
+                var iframes = window.parent.document.querySelectorAll('iframe');
+                var thisIframe = null;
+                for (var i = 0; i < iframes.length; i++) {
+                    try {
+                        if (iframes[i].contentWindow === window) { thisIframe = iframes[i]; break; }
+                    } catch(e) {}
+                }
+                if (!thisIframe) return false;
+
+                var container = thisIframe.closest('[data-testid="stElementContainer"]');
+                if (!container) return false;
+
+                // Find the previous sibling that contains a dataframe
+                var prev = container.previousElementSibling;
+                while (prev && !prev.querySelector('[data-testid="stDataFrame"]')) {
+                    prev = prev.previousElementSibling;
+                }
+                if (!prev) return false;
+
+                // Duplicate guard: skip if overlay already applied
+                if (prev.querySelector('[data-construction-overlay]')) return true;
+
+                // Make the df container relative-positioned
+                prev.style.position = 'relative';
+
+                // Create overlay using safe DOM methods
+                var overlay = window.parent.document.createElement('div');
+                overlay.setAttribute('data-construction-overlay', 'true');
+                overlay.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.55);pointer-events:none;z-index:10;';
+
+                var text = window.parent.document.createElement('div');
+                text.style.cssText = 'transform:rotate(-25deg);font-size:2.5rem;font-weight:800;color:rgba(180,83,9,0.35);white-space:nowrap;text-shadow:0 2px 4px rgba(0,0,0,0.05);letter-spacing:2px;';
+                text.textContent = String.fromCodePoint(0x1F6A7) + ' UNDER CONSTRUCTION ' + String.fromCodePoint(0x1F6A7);
+
+                overlay.appendChild(text);
+                prev.appendChild(overlay);
+                return true;
             }
-            if (!thisIframe) return;
 
-            var container = thisIframe.closest('[data-testid="stElementContainer"]');
-            if (!container) return;
-
-            // Find the previous sibling that contains a dataframe
-            var prev = container.previousElementSibling;
-            while (prev && !prev.querySelector('[data-testid="stDataFrame"]')) {
-                prev = prev.previousElementSibling;
+            function poll() {
+                if (applyOverlay()) return;
+                if (Date.now() - startTime < TIMEOUT_MS) {
+                    requestAnimationFrame(poll);
+                }
             }
-            if (!prev) return;
 
-            // Make the df container relative-positioned
-            prev.style.position = 'relative';
-
-            // Create overlay using safe DOM methods
-            var overlay = window.parent.document.createElement('div');
-            overlay.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.55);pointer-events:none;z-index:10;';
-
-            var text = window.parent.document.createElement('div');
-            text.style.cssText = 'transform:rotate(-25deg);font-size:2.5rem;font-weight:800;color:rgba(180,83,9,0.35);white-space:nowrap;text-shadow:0 2px 4px rgba(0,0,0,0.05);letter-spacing:2px;';
-            text.textContent = String.fromCodePoint(0x1F6A7) + ' UNDER CONSTRUCTION ' + String.fromCodePoint(0x1F6A7);
-
-            overlay.appendChild(text);
-            prev.appendChild(overlay);
+            requestAnimationFrame(poll);
         })();
         </script>
         """, height=0)
