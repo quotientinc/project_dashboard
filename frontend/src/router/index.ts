@@ -78,21 +78,25 @@ const router = createRouter({
     },
     {
       path: '/employees',
-      name: 'employees',
-      component: () => import('@/views/employees/EmployeesListView.vue'),
+      component: () => import('@/views/employees/EmployeesPage.vue'),
       meta: { title: 'Employees' },
-    },
-    {
-      path: '/employees/allocation_overview',
-      name: 'employees-allocation',
-      component: () => import('@/views/employees/EmployeesListView.vue'),
-      meta: { title: 'Employees - Allocation Overview' },
-    },
-    {
-      path: '/employees/utilization_overview',
-      name: 'employees-utilization',
-      component: () => import('@/views/employees/EmployeesListView.vue'),
-      meta: { title: 'Employees - Utilization Overview' },
+      children: [
+        {
+          path: '',
+          name: 'employees',
+          component: () => import('@/views/employees/EmployeesListView.vue'),
+        },
+        {
+          path: 'allocation_overview',
+          name: 'employees-allocation',
+          component: () => import('@/views/employees/AllocationOverviewView.vue'),
+        },
+        {
+          path: 'utilization_overview',
+          name: 'employees-utilization',
+          component: () => import('@/views/employees/UtilizationOverviewView.vue'),
+        },
+      ],
     },
     {
       path: '/employees/:id',

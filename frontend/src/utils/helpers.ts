@@ -26,6 +26,49 @@ export function formatPercent(value: number, decimals = 1): string {
 }
 
 /**
+ * Format a number as local currency with 2 decimal places: $1,234.56
+ * Returns '-' for null/undefined values.
+ */
+export function formatCurrencyLocal(value: number | null | undefined): string {
+  if (value == null) return '-'
+  return '$' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+/**
+ * Return a hex color based on allocation percentage thresholds.
+ * - >120%: red, >100%: orange, >=80%: green, else: blue
+ */
+export function allocPctColor(v: number | null | undefined): string {
+  if (v == null) return '#2196F3'
+  if (v > 120) return '#F44336'
+  if (v > 100) return '#FF9800'
+  if (v >= 80) return '#4CAF50'
+  return '#2196F3'
+}
+
+/**
+ * Return a Vuetify chip color name based on allocation status string.
+ */
+export function allocStatusColor(s: string): string {
+  if (s === 'Over-Allocated') return 'error'
+  if (s === 'Fully Allocated' || s === 'On Target') return 'success'
+  if (s === 'Under-Allocated') return 'info'
+  if (s === 'Warning') return 'warning'
+  return 'grey'
+}
+
+/**
+ * Return a hex color based on utilization percentage thresholds.
+ * - >=80%: green, >=60%: orange, else: red
+ */
+export function utilPctColor(v: number | null | undefined): string {
+  if (v == null) return '#F44336'
+  if (v >= 80) return '#4CAF50'
+  if (v >= 60) return '#FF9800'
+  return '#F44336'
+}
+
+/**
  * Trigger a client-side CSV download from arrays of objects.
  */
 export function downloadCsv(rows: Record<string, unknown>[], filename: string): void {
