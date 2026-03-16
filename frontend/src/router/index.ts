@@ -83,6 +83,18 @@ const router = createRouter({
       meta: { title: 'Employees' },
     },
     {
+      path: '/employees/allocation_overview',
+      name: 'employees-allocation',
+      component: () => import('@/views/employees/EmployeesListView.vue'),
+      meta: { title: 'Employees - Allocation Overview' },
+    },
+    {
+      path: '/employees/utilization_overview',
+      name: 'employees-utilization',
+      component: () => import('@/views/employees/EmployeesListView.vue'),
+      meta: { title: 'Employees - Utilization Overview' },
+    },
+    {
       path: '/employees/:id',
       component: () => import('@/views/employees/EmployeeDetailView.vue'),
       meta: { title: 'Employee Detail' },

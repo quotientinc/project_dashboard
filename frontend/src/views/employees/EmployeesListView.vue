@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
+import { storeToRefs } from 'pinia'
 import { useApi } from '@/composables/useApi'
+import { useEmployeesStore } from '@/stores/employees'
 import { downloadCsv } from '@/utils/helpers'
 import KpiCard from '@/components/KpiCard.vue'
 import PlotlyChart from '@/components/PlotlyChart.vue'
@@ -12,13 +14,47 @@ import type {
   DetailedUtilizationEntry,
 } from '@/types'
 
+const route = useRoute()
 const router = useRouter()
 const { get, loading, error } = useApi()
 
 // ---------------------------------------------------------------------------
+// Pinia store – persists filter/sort state across navigation
+// ---------------------------------------------------------------------------
+const store = useEmployeesStore()
+const {
+  // Tab 1: Employee List
+  selectedBillableStatus, selectedPayType, searchTerm, employeeListSortBy,
+  // Tab 2: Allocation Overview
+  allocYear, allocMonth, allocStatusFilter, allocSearchTerm,
+  // Tab 3: Utilization Overview
+  utilYear, utilTimeFrameType, selectedMonth, selectedQuarter, fyType,
+  includeProjectedHours, utilBandFilter, utilSearchTerm, utilTableSortBy,
+} = storeToRefs(store)
+
+// ---------------------------------------------------------------------------
 // Shared state
 // ---------------------------------------------------------------------------
-const activeTab = ref(0)
+const tabPathMap: Record<string, number> = {
+  '/employees': 0,
+  '/employees/allocation_overview': 1,
+  '/employees/utilization_overview': 2,
+}
+
+const tabIndexToPath: Record<number, string> = {
+  0: '/employees',
+  1: '/employees/allocation_overview',
+  2: '/employees/utilization_overview',
+}
+
+const activeTab = computed(() => tabPathMap[route.path] ?? 0)
+
+function navigateTab(tabIndex: number) {
+  const path = tabIndexToPath[tabIndex] ?? '/employees'
+  if (route.path !== path) {
+    router.push(path)
+  }
+}
 const employees = ref<Employee[]>([])
 
 async function fetchEmployees() {
@@ -35,10 +71,7 @@ onMounted(fetchEmployees)
 // TAB 1 - Employee List
 // =====================================================================
 
-// Filters
-const selectedBillableStatus = ref('All')
-const selectedPayType = ref('All')
-const searchTerm = ref('')
+// Filters (state stored in Pinia – see storeToRefs above)
 
 const filteredEmployees = computed(() => {
   let result = employees.value
@@ -124,8 +157,7 @@ function exportListCsv() {
 // =====================================================================
 
 const now = new Date()
-const allocYear = ref(now.getFullYear())
-const allocMonth = ref(now.getMonth() + 1)
+// allocYear, allocMonth stored in Pinia – see storeToRefs above
 const allocData = ref<AllocationPlanningEntry[]>([])
 const allocLoading = ref(false)
 
@@ -182,9 +214,7 @@ const allocAvgPct = computed(() => {
   return filteredAllocData.value.reduce((sum, e) => sum + e.allocation_pct, 0) / filteredAllocData.value.length
 })
 
-// Allocation filters
-const allocStatusFilter = ref<string[]>([])
-const allocSearchTerm = ref('')
+// Allocation filters (state stored in Pinia – see storeToRefs above)
 
 const allocStatusOptions = ['Over-Allocated', 'Fully Allocated', 'On Target', 'Under-Allocated', 'Warning']
 
@@ -304,40 +334,45 @@ function exportAllocCsv() {
 // TAB 3 - Utilization Overview
 // =====================================================================
 
-const utilYear = ref(now.getFullYear())
-const utilTimeFrame = ref('ytd_company')
+// utilYear, includeProjectedHours, utilTimeFrameType, selectedMonth,
+// selectedQuarter, fyType stored in Pinia – see storeToRefs above
 const utilData = ref<DetailedUtilizationEntry[]>([])
 const utilLoading = ref(false)
 
-const timeFrameOptions = [
-  { title: 'Current Month', value: 'current_month' },
-  { title: 'QTD (Company)', value: 'qtd_company' },
-  { title: 'QTD (Gov)', value: 'qtd_gov' },
-  { title: 'YTD (Company)', value: 'ytd_company' },
-  { title: 'YTD (Gov)', value: 'ytd_gov' },
-  { title: 'Q1', value: 'q1' },
-  { title: 'Q2', value: 'q2' },
-  { title: 'Q3', value: 'q3' },
-  { title: 'Q4', value: 'q4' },
-  { title: 'January', value: 'january' },
-  { title: 'February', value: 'february' },
-  { title: 'March', value: 'march' },
-  { title: 'April', value: 'april' },
-  { title: 'May', value: 'may' },
-  { title: 'June', value: 'june' },
-  { title: 'July', value: 'july' },
-  { title: 'August', value: 'august' },
-  { title: 'September', value: 'september' },
-  { title: 'October', value: 'october' },
-  { title: 'November', value: 'november' },
-  { title: 'December', value: 'december' },
+const monthNames = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
 ]
+
+const currentQuarter = `Q${Math.ceil((now.getMonth() + 1) / 3)}`
+
+// Gov quarter mapping: Company Q1 (Jan-Mar) = Gov Q2, etc.
+const govQuarterMap: Record<string, string> = { Q1: 'q2', Q2: 'q3', Q3: 'q4', Q4: 'q1' }
+
+// Compute the API time_frame param based on filter selections
+const utilTimeFrame = computed(() => {
+  switch (utilTimeFrameType.value) {
+    case 'Monthly':
+      return selectedMonth.value.toLowerCase()
+    case 'Quarterly':
+      if (fyType.value === 'Gov') {
+        return govQuarterMap[selectedQuarter.value] ?? selectedQuarter.value.toLowerCase()
+      }
+      return selectedQuarter.value.toLowerCase()
+    case 'QTD':
+      return fyType.value === 'Gov' ? 'qtd_gov' : 'qtd_company'
+    case 'YTD':
+      return fyType.value === 'Gov' ? 'ytd_gov' : 'ytd_company'
+    default:
+      return 'ytd_company'
+  }
+})
 
 async function fetchUtilizationData() {
   utilLoading.value = true
   try {
     utilData.value = await get<DetailedUtilizationEntry[]>(
-      `/analytics/utilization/detailed?year=${utilYear.value}&time_frame=${utilTimeFrame.value}`
+      `/analytics/utilization/detailed?year=${utilYear.value}&time_frame=${utilTimeFrame.value}&include_projected=${includeProjectedHours.value}`
     )
   } catch {
     // error handled by useApi
@@ -346,7 +381,7 @@ async function fetchUtilizationData() {
   }
 }
 
-watch([utilYear, utilTimeFrame], fetchUtilizationData)
+watch([utilYear, utilTimeFrame, includeProjectedHours], fetchUtilizationData)
 watch(activeTab, (tab) => {
   if (tab === 2 && utilData.value.length === 0 && !utilLoading.value) {
     fetchUtilizationData()
@@ -365,19 +400,23 @@ const utilAvgUtilization = computed(() => {
 const utilOverTarget = computed(() => filteredUtilData.value.filter((e) => (e.utilization_pct ?? 0) >= 80).length)
 const utilUnderTarget = computed(() => filteredUtilData.value.filter((e) => (e.utilization_pct ?? 0) < 80).length)
 const utilPtoHours = computed(() => filteredUtilData.value.reduce((sum, e) => sum + (e.pto_hours ?? 0), 0))
+const utilTotalPossibleHrs = computed(() => filteredUtilData.value.reduce((s, e) => s + (e.possible_hours ?? 0), 0))
+const utilTotalActualHrs = computed(() => filteredUtilData.value.reduce((s, e) => s + (e.actual_hours ?? 0), 0))
+const utilTotalBillableHrs = computed(() => filteredUtilData.value.reduce((s, e) => s + (e.actual_billable_hours ?? 0), 0))
+const utilTotalProjectedMissingHrs = computed(() => filteredUtilData.value.reduce((s, e) => s + (e.projected_hours ?? 0), 0))
+const utilTotalEffectiveBillableHrs = computed(() => filteredUtilData.value.reduce((s, e) => s + (e.effective_billable_hours ?? 0), 0))
+const utilTotalHolidayHrs = computed(() => filteredUtilData.value.reduce((s, e) => s + (e.holiday_hours ?? 0), 0))
 
-// Utilization filters
-const utilBandFilter = ref<string[]>([])
-const utilSearchTerm = ref('')
-const includeProjectedHours = ref(false)
+// Utilization filters (utilBandFilter, utilSearchTerm stored in Pinia)
 const showTimeFrameDefs = ref<number | undefined>(undefined)
 const selectedUtilEmployee = ref<string | null>(null)
 
 const utilBandOptions = [
-  { label: '< 50%', min: 0, max: 50 },
-  { label: '50-80%', min: 50, max: 80 },
-  { label: '80-100%', min: 80, max: 100 },
-  { label: '> 100%', min: 100, max: Infinity },
+  { label: '\u2265111% Over', min: 111, max: Infinity },
+  { label: '97-110% Good', min: 97, max: 111 },
+  { label: '80-96% Fair', min: 80, max: 97 },
+  { label: '51-79% Low', min: 51, max: 80 },
+  { label: '\u226450% Under', min: 0, max: 51 },
 ]
 
 const filteredUtilData = computed(() => {
@@ -385,7 +424,7 @@ const filteredUtilData = computed(() => {
 
   if (utilBandFilter.value.length > 0) {
     result = result.filter(e => {
-      const pct = e.utilization_pct ?? 0
+      const pct = Math.round(e.utilization_pct ?? 0)
       return utilBandFilter.value.some(label => {
         const band = utilBandOptions.find(b => b.label === label)
         if (!band) return false
@@ -406,20 +445,26 @@ const filteredUtilData = computed(() => {
 const utilBandSummary = computed(() => {
   const data = filteredUtilData.value
   const bands = [
-    { label: 'Critical (< 50%)', color: '#F44336', min: 0, max: 50, employees: [] as string[] },
-    { label: 'Below Target (50-80%)', color: '#FF9800', min: 50, max: 80, employees: [] as string[] },
-    { label: 'On Target (80-100%)', color: '#4CAF50', min: 80, max: 100, employees: [] as string[] },
-    { label: 'Over Target (> 100%)', color: '#2196F3', min: 100, max: Infinity, employees: [] as string[] },
+    { label: '111%+', icon: '\uD83D\uDFE3', bgColor: '#fce4ec', borderColor: '#e91e63', min: 111, max: Infinity, employees: [] as { name: string; pct: number }[] },
+    { label: '97% - 110%', icon: '\uD83D\uDFE2', bgColor: '#e8f5e9', borderColor: '#28a745', min: 97, max: 111, employees: [] as { name: string; pct: number }[] },
+    { label: '80% - 96%', icon: '\uD83D\uDFE1', bgColor: '#fff8e1', borderColor: '#ffc107', min: 80, max: 97, employees: [] as { name: string; pct: number }[] },
+    { label: '51% - 79%', icon: '\uD83D\uDFE0', bgColor: '#fff3e0', borderColor: '#fd7e14', min: 51, max: 80, employees: [] as { name: string; pct: number }[] },
+    { label: '\u2264 50%', icon: '\uD83D\uDD34', bgColor: '#ffebee', borderColor: '#dc3545', min: 0, max: 51, employees: [] as { name: string; pct: number }[] },
   ]
 
   for (const emp of data) {
-    const pct = emp.utilization_pct ?? 0
+    const pct = Math.round(emp.utilization_pct ?? 0)
     for (const band of bands) {
-      if (pct >= band.min && pct < band.max) {
-        band.employees.push(emp.employee_name)
+      if (pct >= band.min && (band.max === Infinity ? true : pct < band.max)) {
+        band.employees.push({ name: emp.employee_name, pct: Math.round(emp.utilization_pct ?? 0) })
         break
       }
     }
+  }
+
+  // Sort employees within each band by pct descending
+  for (const band of bands) {
+    band.employees.sort((a, b) => b.pct - a.pct)
   }
 
   return bands
@@ -527,15 +572,16 @@ const plannedVsActualLayout = {
 // v-data-table headers for Utilization Overview
 const utilHeaders = [
   { title: 'Employee', key: 'employee_name', minWidth: '160px' },
-  { title: 'Role', key: 'role', minWidth: '130px' },
-  { title: 'Billable', key: 'billable', minWidth: '90px' },
-  { title: 'Possible Hours', key: 'possible_hours', minWidth: '120px', align: 'end' as const },
-  { title: 'Actual Hours', key: 'actual_hours', minWidth: '110px', align: 'end' as const },
-  { title: 'Billable Hours', key: 'actual_billable_hours', minWidth: '120px', align: 'end' as const },
-  { title: 'Projected Hours', key: 'projected_hours', minWidth: '120px', align: 'end' as const },
-  { title: 'PTO Hours', key: 'pto_hours', minWidth: '100px', align: 'end' as const },
-  { title: 'Holiday Hours', key: 'holiday_hours', minWidth: '110px', align: 'end' as const },
-  { title: 'Utilization %', key: 'utilization_pct', minWidth: '120px', align: 'end' as const },
+  { title: 'Possible Billable Hrs', key: 'possible_hours', minWidth: '140px', align: 'end' as const },
+  { title: 'Actual Hrs', key: 'actual_hours', minWidth: '100px', align: 'end' as const },
+  { title: 'Actual Billable Hrs', key: 'actual_billable_hours', minWidth: '130px', align: 'end' as const },
+  { title: 'Projected Missing Hrs', key: 'projected_hours', minWidth: '140px', align: 'end' as const },
+  { title: 'Effective Billable Hrs', key: 'effective_billable_hours', minWidth: '150px', align: 'end' as const },
+  { title: 'PTO Hrs', key: 'pto_hours', minWidth: '90px', align: 'end' as const },
+  { title: 'Holiday Hrs', key: 'holiday_hours', minWidth: '100px', align: 'end' as const },
+  { title: 'Other Non-billable Hrs', key: 'other_nonbillable_hours', minWidth: '150px', align: 'end' as const },
+  { title: 'Billable Utilization %', key: 'utilization_pct', minWidth: '140px', align: 'end' as const },
+  { title: 'Status', key: 'status', minWidth: '100px' },
 ]
 
 // Cumulative utilization chart - line per employee (top 10 by hours)
@@ -578,17 +624,19 @@ const utilChartLayout = computed(() => ({
 function exportUtilCsv() {
   const rows = filteredUtilData.value.map((e) => ({
     Employee: e.employee_name,
-    Role: e.role ?? '',
-    Billable: e.billable === 1 ? 'Yes' : 'No',
-    'Possible Hours': e.possible_hours,
-    'Actual Hours': e.actual_hours,
-    'Billable Hours': e.actual_billable_hours,
-    'Projected Hours': e.projected_hours,
-    'PTO Hours': e.pto_hours,
-    'Holiday Hours': e.holiday_hours,
-    'Utilization %': e.utilization_pct ?? '',
+    'Possible Billable Hrs': e.possible_hours,
+    'Actual Hrs': e.actual_hours,
+    'Actual Billable Hrs': e.actual_billable_hours,
+    'Projected Missing Hrs': e.projected_hours,
+    'Effective Billable Hrs': e.effective_billable_hours ?? '',
+    'PTO Hrs': e.pto_hours,
+    'Holiday Hrs': e.holiday_hours,
+    'Other Non-billable Hrs': e.other_nonbillable_hours ?? '',
+    'Billable Utilization %': e.utilization_pct ?? '',
+    Status: e.status ?? '',
   }))
   downloadCsv(rows, `utilization_overview_${utilYear.value}_${utilTimeFrame.value}.csv`)
+
 }
 
 // Helper: allocation % color
@@ -634,13 +682,13 @@ function utilPctColor(v: number | null | undefined): string {
     </v-alert>
 
     <!-- Tabs -->
-    <v-tabs v-model="activeTab" class="mb-4">
+    <v-tabs :model-value="activeTab" @update:model-value="navigateTab" class="mb-4">
       <v-tab :value="0">Employee List</v-tab>
       <v-tab :value="1">Allocation Overview</v-tab>
       <v-tab :value="2">Utilization Overview</v-tab>
     </v-tabs>
 
-    <v-window v-model="activeTab" class="pt-2">
+    <v-window :model-value="activeTab" class="pt-2">
       <!-- ============================================================= -->
       <!-- TAB 1: Employee List -->
       <!-- ============================================================= -->
@@ -741,6 +789,7 @@ function utilPctColor(v: number | null | undefined): string {
             <v-data-table
               :headers="listHeaders"
               :items="filteredEmployees"
+              v-model:sort-by="employeeListSortBy"
               density="compact"
               hover
               class="cursor-pointer"
@@ -996,24 +1045,24 @@ function utilPctColor(v: number | null | undefined): string {
       <!-- ============================================================= -->
       <v-window-item :value="2">
         <!-- Controls -->
-        <v-row class="mb-2">
-          <v-col cols="12" sm="4" md="3">
-            <v-select
-              v-model="utilYear"
-              label="Year"
-              :items="yearOptions"
-              density="compact"
-            />
+        <v-row class="mb-4" align="center">
+          <v-col cols="2">
+            <v-select v-model="utilYear" :items="yearOptions" label="Year" density="compact" variant="outlined" hide-details />
           </v-col>
-          <v-col cols="12" sm="8" md="4">
-            <v-select
-              v-model="utilTimeFrame"
-              label="Time Frame"
-              :items="timeFrameOptions"
-              item-title="title"
-              item-value="value"
-              density="compact"
-            />
+          <v-col cols="2">
+            <v-select v-model="utilTimeFrameType" :items="['Monthly', 'Quarterly', 'QTD', 'YTD']" label="Time Frame" density="compact" variant="outlined" hide-details />
+          </v-col>
+          <v-col cols="2" v-if="utilTimeFrameType === 'Monthly'">
+            <v-select v-model="selectedMonth" :items="monthNames" label="Month" density="compact" variant="outlined" hide-details />
+          </v-col>
+          <v-col cols="2" v-if="utilTimeFrameType === 'Quarterly'">
+            <v-select v-model="selectedQuarter" :items="['Q1','Q2','Q3','Q4']" label="Quarter" density="compact" variant="outlined" hide-details />
+          </v-col>
+          <v-col cols="2" v-if="['Quarterly','QTD','YTD'].includes(utilTimeFrameType)">
+            <v-radio-group v-model="fyType" inline hide-details density="compact" label="FY Type">
+              <v-radio label="Company" value="Company" />
+              <v-radio label="Gov" value="Gov" />
+            </v-radio-group>
           </v-col>
         </v-row>
 
@@ -1102,18 +1151,18 @@ function utilPctColor(v: number | null | undefined): string {
           </v-expansion-panel>
         </v-expansion-panels>
 
-        <!-- KPI Cards -->
-        <v-row class="mb-4">
-          <v-col cols="12" sm="6" md="2">
+        <!-- KPI Cards - Row 1 -->
+        <v-row class="mb-2">
+          <v-col cols="12" sm="6" md="3">
             <KpiCard
-              title="Total Employees"
+              title="Employees"
               :value="String(utilTotalEmployees)"
               icon="mdi-account-group"
               color="#1976D2"
               :loading="utilLoading"
             />
           </v-col>
-          <v-col cols="12" sm="6" md="2">
+          <v-col cols="12" sm="6" md="3">
             <KpiCard
               title="Avg Utilization"
               :value="utilAvgUtilization.toFixed(1) + '%'"
@@ -1122,52 +1171,125 @@ function utilPctColor(v: number | null | undefined): string {
               :loading="utilLoading"
             />
           </v-col>
-          <v-col cols="12" sm="6" md="2">
+          <v-col cols="12" sm="6" md="3">
             <KpiCard
-              title="Over Target"
+              title="Over Target (&ge;80%)"
               :value="String(utilOverTarget)"
               icon="mdi-arrow-up-bold"
               color="#4CAF50"
               :loading="utilLoading"
             />
           </v-col>
-          <v-col cols="12" sm="6" md="2">
+          <v-col cols="12" sm="6" md="3">
             <KpiCard
-              title="Under Target"
+              title="Under Target (&lt;80%)"
               :value="String(utilUnderTarget)"
               icon="mdi-arrow-down-bold"
               color="#F44336"
               :loading="utilLoading"
             />
           </v-col>
-          <v-col cols="12" sm="6" md="2">
+        </v-row>
+
+        <!-- KPI Cards - Row 2 -->
+        <v-row class="mb-2">
+          <v-col cols="12" sm="6" md="3">
             <KpiCard
-              title="PTO Hours"
-              :value="utilPtoHours.toFixed(1)"
-              icon="mdi-beach"
+              title="Total Possible Hrs"
+              :value="utilTotalPossibleHrs.toFixed(1).replace(/\B(?=(\d{3})+(?!\d))/g, ',')"
+              icon="mdi-clock-outline"
+              color="#1976D2"
+              :loading="utilLoading"
+            />
+          </v-col>
+          <v-col cols="12" sm="6" md="3">
+            <KpiCard
+              title="Total Actual Hrs"
+              :value="utilTotalActualHrs.toFixed(1).replace(/\B(?=(\d{3})+(?!\d))/g, ',')"
+              icon="mdi-clock-check-outline"
+              color="#2196F3"
+              :loading="utilLoading"
+            />
+          </v-col>
+          <v-col cols="12" sm="6" md="3">
+            <KpiCard
+              title="Total Billable Hrs"
+              :value="utilTotalBillableHrs.toFixed(1).replace(/\B(?=(\d{3})+(?!\d))/g, ',')"
+              icon="mdi-currency-usd"
+              color="#4CAF50"
+              :loading="utilLoading"
+            />
+          </v-col>
+          <v-col cols="12" sm="6" md="3">
+            <KpiCard
+              title="Total Projected Missing Hrs"
+              :value="utilTotalProjectedMissingHrs.toFixed(1).replace(/\B(?=(\d{3})+(?!\d))/g, ',')"
+              icon="mdi-clock-alert-outline"
               color="#FF9800"
               :loading="utilLoading"
             />
           </v-col>
         </v-row>
 
+        <!-- KPI Cards - Row 3 -->
+        <v-row class="mb-4">
+          <v-col cols="12" sm="6" md="3">
+            <KpiCard
+              title="Total Effective Billable Hrs"
+              :value="utilTotalEffectiveBillableHrs.toFixed(1).replace(/\B(?=(\d{3})+(?!\d))/g, ',')"
+              icon="mdi-check-circle-outline"
+              color="#4CAF50"
+              :loading="utilLoading"
+            />
+          </v-col>
+          <v-col cols="12" sm="6" md="3">
+            <KpiCard
+              title="Total PTO Hrs"
+              :value="utilPtoHours.toFixed(1).replace(/\B(?=(\d{3})+(?!\d))/g, ',')"
+              icon="mdi-beach"
+              color="#FF9800"
+              :loading="utilLoading"
+            />
+          </v-col>
+          <v-col cols="12" sm="6" md="3">
+            <KpiCard
+              title="Total Holiday Hrs"
+              :value="utilTotalHolidayHrs.toFixed(1).replace(/\B(?=(\d{3})+(?!\d))/g, ',')"
+              icon="mdi-calendar-star"
+              color="#9C27B0"
+              :loading="utilLoading"
+            />
+          </v-col>
+        </v-row>
+
         <!-- Utilization Band Summary Cards -->
-        <v-row class="mb-4" v-if="!utilLoading">
-          <v-col v-for="band in utilBandSummary" :key="band.label" cols="12" sm="6" md="3">
-            <v-card variant="outlined" class="pa-3">
-              <div class="d-flex align-center justify-space-between mb-2">
-                <span class="text-subtitle-2">{{ band.label }}</span>
-                <v-chip :color="band.color" size="small" variant="flat" class="text-white">
-                  {{ band.employees.length }}
-                </v-chip>
+        <v-row class="mb-4" v-if="!utilLoading" align="start">
+          <v-col v-for="band in utilBandSummary" :key="band.label" cols="12" sm="6" md style="min-width: 0">
+            <div
+              :style="{
+                backgroundColor: band.bgColor,
+                padding: '15px',
+                borderRadius: '10px',
+                borderLeft: '5px solid ' + band.borderColor,
+                color: '#333',
+              }"
+            >
+              <div class="d-flex align-center mb-2">
+                <span style="font-size: 24px; margin-right: 8px">{{ band.icon }}</span>
+                <span style="font-size: 18px; font-weight: bold">{{ band.label }}</span>
               </div>
-              <div v-if="band.employees.length > 0" class="text-caption text-medium-emphasis" style="max-height: 80px; overflow-y: auto;">
-                {{ band.employees.join(', ') }}
+              <div style="font-size: 28px; font-weight: bold; margin-bottom: 5px">
+                {{ band.employees.length }} Employees
               </div>
-              <div v-else class="text-caption text-medium-emphasis font-italic">
-                No employees
+              <div style="font-size: 13px; color: #555">
+                <template v-if="band.employees.length > 0">
+                  <div v-for="emp in band.employees" :key="emp.name">
+                    {{ emp.name }} ({{ emp.pct }}%)
+                  </div>
+                </template>
+                <em v-else>None</em>
               </div>
-            </v-card>
+            </div>
           </v-col>
         </v-row>
 
@@ -1194,15 +1316,11 @@ function utilPctColor(v: number | null | undefined): string {
             <v-data-table
               :headers="utilHeaders"
               :items="filteredUtilData"
+              v-model:sort-by="utilTableSortBy"
               density="compact"
               hover
               items-per-page="25"
             >
-              <template #item.billable="{ value }">
-                <v-chip :color="value === 1 ? 'success' : 'grey'" size="small">
-                  {{ value === 1 ? 'Yes' : 'No' }}
-                </v-chip>
-              </template>
               <template #item.possible_hours="{ value }">
                 {{ value != null ? value.toFixed(1) : '-' }}
               </template>
@@ -1215,10 +1333,16 @@ function utilPctColor(v: number | null | undefined): string {
               <template #item.projected_hours="{ value }">
                 {{ value != null ? value.toFixed(1) : '-' }}
               </template>
+              <template #item.effective_billable_hours="{ value }">
+                {{ value != null ? value.toFixed(1) : '-' }}
+              </template>
               <template #item.pto_hours="{ value }">
                 {{ value != null ? value.toFixed(1) : '-' }}
               </template>
               <template #item.holiday_hours="{ value }">
+                {{ value != null ? value.toFixed(1) : '-' }}
+              </template>
+              <template #item.other_nonbillable_hours="{ value }">
                 {{ value != null ? value.toFixed(1) : '-' }}
               </template>
               <template #item.utilization_pct="{ value }">
@@ -1226,6 +1350,9 @@ function utilPctColor(v: number | null | undefined): string {
                   {{ value.toFixed(1) }}%
                 </span>
                 <span v-else>-</span>
+              </template>
+              <template #item.status="{ value }">
+                {{ value ?? '-' }}
               </template>
             </v-data-table>
           </v-card-text>

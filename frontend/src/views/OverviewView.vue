@@ -663,7 +663,7 @@ watch(timeRange, () => {
         <v-card class="pa-4 under-construction-wrapper">
           <!-- Under-construction watermark overlay -->
           <div class="under-construction-overlay" aria-hidden="true">
-            <div class="under-construction-text">UNDER CONSTRUCTION</div>
+            <div class="under-construction-text">🚧 UNDER CONSTRUCTION 🚧</div>
           </div>
           <div class="text-h6 mb-3 d-flex align-center">
             <v-icon icon="mdi-alert-circle-outline" size="20" class="mr-1" />

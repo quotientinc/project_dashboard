@@ -257,6 +257,10 @@ export interface EmployeeMonthUtilization {
   pto_hours: number
   holiday_hours: number
   utilization_pct: number | null
+  effective_billable_hours?: number
+  other_nonbillable_hours?: number
+  status?: string
+  status_num?: number
 }
 
 export interface DetailedUtilizationEntry {
@@ -271,6 +275,10 @@ export interface DetailedUtilizationEntry {
   pto_hours: number
   holiday_hours: number
   utilization_pct: number | null
+  effective_billable_hours?: number
+  other_nonbillable_hours?: number
+  status?: string
+  status_num?: number
   monthly_breakdown: EmployeeMonthUtilization[]
 }
 
@@ -348,7 +356,17 @@ export interface MonthlyUtilizationTrendEntry {
 export interface EmployeeBillableUtilizationEntry {
   employee_id: number
   name: string
+  department: string
+  role: string
+  fte: number
   utilization_pct: number
+  total_hours: number
+  billable_hours: number
+  non_billable_hours: number
+  available_hours: number
+  pto_hours: number
+  status: string
+  status_num: number
 }
 
 export interface MonthlyBurnRateEntry {

@@ -128,10 +128,14 @@ class EmployeeMonthUtilization(BaseModel):
     possible_hours: float = 0.0
     actual_hours: float = 0.0
     actual_billable_hours: float = 0.0
+    effective_billable_hours: Optional[float] = None
     projected_hours: float = 0.0
     pto_hours: float = 0.0
     holiday_hours: float = 0.0
+    other_nonbillable_hours: Optional[float] = None
     utilization_pct: Optional[float] = None
+    status: Optional[str] = None
+    status_num: Optional[int] = None
 
 
 class DetailedUtilizationEntry(BaseModel):
@@ -143,10 +147,14 @@ class DetailedUtilizationEntry(BaseModel):
     possible_hours: float = 0.0
     actual_hours: float = 0.0
     actual_billable_hours: float = 0.0
+    effective_billable_hours: float = 0.0
     projected_hours: float = 0.0
     pto_hours: float = 0.0
     holiday_hours: float = 0.0
+    other_nonbillable_hours: float = 0.0
     utilization_pct: Optional[float] = None
+    status: Optional[str] = None
+    status_num: Optional[int] = None
     monthly_breakdown: list[EmployeeMonthUtilization] = []
 
 
@@ -232,7 +240,17 @@ class EmployeeBillableUtilizationEntry(BaseModel):
     """Billable utilization for a single employee."""
     employee_id: int
     name: str
+    department: str = ""
+    role: str = ""
+    fte: float = 1.0
     utilization_pct: float = 0.0
+    total_hours: float = 0.0
+    billable_hours: float = 0.0
+    non_billable_hours: float = 0.0
+    available_hours: float = 0.0
+    pto_hours: float = 0.0
+    status: str = ""
+    status_num: int = 0
 
 
 class MonthlyBurnRateEntry(BaseModel):

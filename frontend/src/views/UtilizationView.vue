@@ -3,16 +3,22 @@
  * Team-wide Utilization Tracking page.
  *
  * Displays KPI summary, utilization trend, distribution histogram,
- * department breakdown, hours breakdown charts, and a detail AG Grid
+ * department breakdown, hours breakdown charts, and a detail
  * table with per-employee metrics.
+ *
+ * Employee utilization data is fetched from the backend endpoint
+ * `/analytics/overview/employee-utilization` which computes utilization
+ * server-side (including projected hours for the current month).
+ * Time entries are still fetched separately for charts that need
+ * monthly breakdown (trend chart, hours breakdown chart).
  */
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApi } from '@/composables/useApi'
 import { downloadCsv } from '@/utils/helpers'
 import KpiCard from '@/components/KpiCard.vue'
 import PlotlyChart from '@/components/PlotlyChart.vue'
-import type { Employee, TimeEntry } from '@/types'
+import type { EmployeeBillableUtilizationEntry, TimeEntry } from '@/types'
 import type Plotly from 'plotly.js-dist-min'
 
 const router = useRouter()
@@ -29,9 +35,9 @@ const selectedEmployees = ref<number[]>([])
 
 // ---- Data ----
 
-const employees = ref<Employee[]>([])
+const utilizationData = ref<EmployeeBillableUtilizationEntry[]>([])
 const timeEntries = ref<TimeEntry[]>([])
-const loadingEmployees = ref(true)
+const loadingUtilization = ref(true)
 const loadingTimeEntries = ref(true)
 const errorMessage = ref<string | null>(null)
 
@@ -39,54 +45,38 @@ const errorMessage = ref<string | null>(null)
 
 const departmentOptions = computed(() => {
   const depts = new Set<string>()
-  for (const e of employees.value) {
+  for (const e of utilizationData.value) {
     if (e.department) depts.add(e.department)
   }
   return Array.from(depts).sort()
 })
 
 const employeeOptions = computed(() => {
-  return employees.value
-    .filter((e) => e.billable === 1)
-    .map((e) => ({ title: e.name, value: e.id }))
+  return utilizationData.value
+    .map((e) => ({ title: e.name, value: e.employee_id }))
     .sort((a, b) => a.title.localeCompare(b.title))
 })
 
 // ---- Filtered data ----
 
-const filteredEmployees = computed(() => {
-  let result = employees.value.filter((e) => e.billable === 1)
-
-  // Exclude terminated before period start and hired after period end
-  const periodStart = new Date(filterStartDate.value)
-  const periodEnd = new Date(filterEndDate.value)
-  result = result.filter((e) => {
-    if (e.term_date) {
-      const termDate = new Date(e.term_date)
-      if (termDate < periodStart) return false
-    }
-    if (e.hire_date) {
-      const hireDate = new Date(e.hire_date)
-      if (hireDate > periodEnd) return false
-    }
-    return true
-  })
+const filteredUtilization = computed(() => {
+  let result = utilizationData.value
 
   if (selectedDepartments.value.length > 0) {
-    result = result.filter((e) => selectedDepartments.value.includes(e.department ?? ''))
+    result = result.filter((e) => selectedDepartments.value.includes(e.department))
   }
   if (selectedEmployees.value.length > 0) {
-    result = result.filter((e) => selectedEmployees.value.includes(e.id))
+    result = result.filter((e) => selectedEmployees.value.includes(e.employee_id))
   }
   return result
 })
 
 const filteredTimeEntries = computed(() => {
-  const empIds = new Set(filteredEmployees.value.map((e) => e.id))
+  const empIds = new Set(filteredUtilization.value.map((e) => e.employee_id))
   return timeEntries.value.filter((te) => empIds.has(te.employee_id))
 })
 
-// ---- Per-employee aggregation ----
+// ---- Per-employee rows (mapped from backend data) ----
 
 interface EmployeeRow {
   id: number
@@ -94,51 +84,34 @@ interface EmployeeRow {
   department: string
   role: string
   fte: number
-  target_utilization: number
-  actual_utilization: number
+  utilization_pct: number
   total_hours: number
   billable_hours: number
   non_billable_hours: number
+  available_hours: number
+  pto_hours: number
+  status: string
+  status_num: number
   billable_rate: number
 }
 
 const employeeRows = computed<EmployeeRow[]>(() => {
-  // Calculate months in range for capacity
-  const startD = new Date(filterStartDate.value)
-  const endD = new Date(filterEndDate.value)
-  const monthsDiff =
-    (endD.getFullYear() - startD.getFullYear()) * 12 +
-    endD.getMonth() -
-    startD.getMonth() +
-    1
-
-  // Aggregate time entries per employee
-  const hoursMap = new Map<number, { total: number; billable: number }>()
-  for (const te of filteredTimeEntries.value) {
-    const existing = hoursMap.get(te.employee_id) ?? { total: 0, billable: 0 }
-    existing.total += te.hours
-    if (te.billable === 1) existing.billable += te.hours
-    hoursMap.set(te.employee_id, existing)
-  }
-
-  return filteredEmployees.value.map((emp) => {
-    const hours = hoursMap.get(emp.id) ?? { total: 0, billable: 0 }
-    const standardHours = 160 * monthsDiff * (emp.fte ?? 1)
-    const utilPct = standardHours > 0 ? Math.min((hours.total / standardHours) * 100, 100) : 0
-    const billableRate = hours.total > 0 ? (hours.billable / hours.total) * 100 : 0
-    const target = emp.target_allocation != null ? emp.target_allocation * 100 : 80
-
+  return filteredUtilization.value.map((emp) => {
+    const billableRate = emp.total_hours > 0 ? (emp.billable_hours / emp.total_hours) * 100 : 0
     return {
-      id: emp.id,
+      id: emp.employee_id,
       name: emp.name,
-      department: emp.department ?? '',
-      role: emp.role ?? '',
+      department: emp.department,
+      role: emp.role,
       fte: emp.fte ?? 1,
-      target_utilization: target,
-      actual_utilization: Math.round(utilPct * 10) / 10,
-      total_hours: Math.round(hours.total),
-      billable_hours: Math.round(hours.billable),
-      non_billable_hours: Math.round(hours.total - hours.billable),
+      utilization_pct: Math.round(emp.utilization_pct * 10) / 10,
+      total_hours: Math.round(emp.total_hours),
+      billable_hours: Math.round(emp.billable_hours),
+      non_billable_hours: Math.round(emp.non_billable_hours),
+      available_hours: Math.round(emp.available_hours),
+      pto_hours: Math.round(emp.pto_hours),
+      status: emp.status,
+      status_num: emp.status_num,
       billable_rate: Math.round(billableRate * 10) / 10,
     }
   })
@@ -146,20 +119,20 @@ const employeeRows = computed<EmployeeRow[]>(() => {
 
 // ---- KPI computations ----
 
-const totalEmployeesCount = computed(() => filteredEmployees.value.length)
+const totalEmployeesCount = computed(() => filteredUtilization.value.length)
 
 const avgUtilization = computed(() => {
-  if (employeeRows.value.length === 0) return 0
-  const sum = employeeRows.value.reduce((s, r) => s + r.actual_utilization, 0)
-  return sum / employeeRows.value.length
+  if (filteredUtilization.value.length === 0) return 0
+  const sum = filteredUtilization.value.reduce((s, r) => s + r.utilization_pct, 0)
+  return sum / filteredUtilization.value.length
 })
 
 const totalHoursWorked = computed(() => {
-  return employeeRows.value.reduce((s, r) => s + r.total_hours, 0)
+  return filteredUtilization.value.reduce((s, r) => s + r.total_hours, 0)
 })
 
 const totalBillableHours = computed(() => {
-  return employeeRows.value.reduce((s, r) => s + r.billable_hours, 0)
+  return filteredUtilization.value.reduce((s, r) => s + r.billable_hours, 0)
 })
 
 const overallBillableRate = computed(() => {
@@ -168,7 +141,7 @@ const overallBillableRate = computed(() => {
 })
 
 const totalFteCount = computed(() => {
-  return filteredEmployees.value.reduce((s, e) => s + (e.fte ?? 1), 0)
+  return filteredUtilization.value.reduce((s, e) => s + (e.fte ?? 1), 0)
 })
 
 // ---- Helpers ----
@@ -204,7 +177,7 @@ const trendChartData = computed<Plotly.Data[]>(() => {
     cursor.setMonth(cursor.getMonth() + 1)
   }
 
-  const totalFte = filteredEmployees.value.reduce((s, e) => s + (e.fte ?? 1), 0)
+  const totalFte = filteredUtilization.value.reduce((s, e) => s + (e.fte ?? 1), 0)
   const monthlyCapacity = 160 * totalFte
 
   const utilPcts = allMonths.map((m) => {
@@ -237,9 +210,9 @@ const trendChartData = computed<Plotly.Data[]>(() => {
     const deptColors = ['#E91E63', '#9C27B0', '#00BCD4', '#8BC34A', '#FF5722', '#607D8B']
     selectedDepartments.value.forEach((dept, idx) => {
       const deptEmpIds = new Set(
-        filteredEmployees.value.filter((e) => e.department === dept).map((e) => e.id)
+        filteredUtilization.value.filter((e) => e.department === dept).map((e) => e.employee_id)
       )
-      const deptFte = filteredEmployees.value
+      const deptFte = filteredUtilization.value
         .filter((e) => e.department === dept)
         .reduce((s, e) => s + (e.fte ?? 1), 0)
       const deptCapacity = 160 * deptFte
@@ -294,7 +267,7 @@ const distributionChartData = computed<Plotly.Data[]>(() => {
 
   const counts = ranges.map((r) => {
     return employeeRows.value.filter(
-      (e) => e.actual_utilization >= r.min && (r.max === 100 ? e.actual_utilization <= r.max : e.actual_utilization < r.max)
+      (e) => e.utilization_pct >= r.min && (r.max === 100 ? e.utilization_pct <= r.max : e.utilization_pct < r.max)
     ).length
   })
 
@@ -328,7 +301,7 @@ const deptChartData = computed<Plotly.Data[]>(() => {
   for (const row of employeeRows.value) {
     const dept = row.department || 'Unknown'
     const existing = deptMap.get(dept) ?? { totalUtil: 0, count: 0 }
-    existing.totalUtil += row.actual_utilization
+    existing.totalUtil += row.utilization_pct
     existing.count++
     deptMap.set(dept, existing)
   }
@@ -414,7 +387,7 @@ const hoursChartData = computed<Plotly.Data[]>(() => {
   )
 
   // Total capacity line
-  const totalFte = filteredEmployees.value.reduce((s, e) => s + (e.fte ?? 1), 0)
+  const totalFte = filteredUtilization.value.reduce((s, e) => s + (e.fte ?? 1), 0)
   const monthlyCapacity = 160 * totalFte
   const capacityLine = allMonths.map(() => monthlyCapacity)
 
@@ -457,15 +430,17 @@ const hoursChartLayout = computed<Partial<Plotly.Layout>>(() => ({
 // ---- Data Table ----
 
 const headers = [
+  { title: 'Status', key: 'status', width: '70px' },
   { title: 'Employee Name', key: 'name' },
   { title: 'Department', key: 'department' },
   { title: 'Role', key: 'role' },
   { title: 'FTE', key: 'fte', align: 'end' as const },
-  { title: 'Target Util %', key: 'target_utilization', align: 'end' as const },
-  { title: 'Actual Util %', key: 'actual_utilization', align: 'end' as const },
+  { title: 'Utilization %', key: 'utilization_pct', align: 'end' as const },
   { title: 'Total Hours', key: 'total_hours', align: 'end' as const },
   { title: 'Billable Hours', key: 'billable_hours', align: 'end' as const },
   { title: 'Non-billable Hours', key: 'non_billable_hours', align: 'end' as const },
+  { title: 'Available Hours', key: 'available_hours', align: 'end' as const },
+  { title: 'PTO Hours', key: 'pto_hours', align: 'end' as const },
   { title: 'Billable Rate %', key: 'billable_rate', align: 'end' as const },
 ]
 
@@ -487,24 +462,31 @@ function exportCsv() {
 
 // ---- Data fetching ----
 
-async function fetchEmployees() {
-  loadingEmployees.value = true
+async function fetchUtilization() {
+  loadingUtilization.value = true
   try {
-    employees.value = await api.get<Employee[]>('/employees/')
+    const params: Record<string, string> = {
+      start_date: filterStartDate.value,
+      end_date: filterEndDate.value,
+    }
+    utilizationData.value = await api.get<EmployeeBillableUtilizationEntry[]>(
+      '/analytics/overview/employee-utilization',
+      { params }
+    )
   } catch {
-    errorMessage.value = 'Failed to load employees.'
+    errorMessage.value = 'Failed to load utilization data.'
   } finally {
-    loadingEmployees.value = false
+    loadingUtilization.value = false
   }
 }
 
 async function fetchTimeEntries() {
   loadingTimeEntries.value = true
   try {
-    const params: Record<string, string> = {}
-    params.start_date = filterStartDate.value
-    params.end_date = filterEndDate.value
-
+    const params: Record<string, string> = {
+      start_date: filterStartDate.value,
+      end_date: filterEndDate.value,
+    }
     timeEntries.value = await api.get<TimeEntry[]>('/time-entries/', { params })
   } catch {
     errorMessage.value = 'Failed to load time entries.'
@@ -515,26 +497,37 @@ async function fetchTimeEntries() {
 
 async function fetchAllData() {
   errorMessage.value = null
-  await Promise.allSettled([fetchEmployees(), fetchTimeEntries()])
+  await Promise.allSettled([fetchUtilization(), fetchTimeEntries()])
 }
 
 function applyFilters() {
-  // Adjust date range based on time period selection
-  const currentYear = now.getFullYear()
+  // Use a fresh date to avoid stale values if the tab stays open
+  const today = new Date()
+  const currentYear = today.getFullYear()
   if (timePeriod.value === 'YTD') {
     filterStartDate.value = `${currentYear}-01-01`
-    filterEndDate.value = now.toISOString().slice(0, 10)
+    filterEndDate.value = today.toISOString().slice(0, 10)
+    // watcher on [filterStartDate, filterEndDate] handles re-fetch
   } else if (timePeriod.value === 'Quarterly') {
-    const currentQuarter = Math.floor(now.getMonth() / 3)
+    const currentQuarter = Math.floor(today.getMonth() / 3)
     const quarterStart = new Date(currentYear, currentQuarter * 3, 1)
     filterStartDate.value = quarterStart.toISOString().slice(0, 10)
-    filterEndDate.value = now.toISOString().slice(0, 10)
+    filterEndDate.value = today.toISOString().slice(0, 10)
+    // watcher on [filterStartDate, filterEndDate] handles re-fetch
+  } else {
+    // Monthly: dates unchanged, watcher won't fire, so fetch explicitly
+    fetchAllData()
   }
-  // For 'Monthly', use whatever dates are set in the pickers
-  fetchTimeEntries()
 }
 
-const isLoading = computed(() => loadingEmployees.value || loadingTimeEntries.value)
+const isLoading = computed(() => loadingUtilization.value || loadingTimeEntries.value)
+
+// ---- Re-fetch when date filters change ----
+
+watch([filterStartDate, filterEndDate], () => {
+  // Debounce not needed since these are date pickers, not free text
+  fetchAllData()
+})
 
 // ---- Lifecycle ----
 
@@ -787,6 +780,10 @@ onMounted(fetchAllData)
           class="cursor-pointer"
           @click:row="(_e: Event, { item }: { item: any }) => onRowClicked(item)"
         >
+          <template #item.status="{ value }">
+            <span :title="value">{{ value }}</span>
+          </template>
+
           <template #item.name="{ value }">
             <span class="text-primary text-decoration-underline" style="cursor: pointer;">
               {{ value }}
@@ -797,11 +794,7 @@ onMounted(fetchAllData)
             {{ value != null ? value.toFixed(2) : '-' }}
           </template>
 
-          <template #item.target_utilization="{ value }">
-            {{ value != null ? value.toFixed(1) + '%' : '-' }}
-          </template>
-
-          <template #item.actual_utilization="{ value }">
+          <template #item.utilization_pct="{ value }">
             <v-chip
               v-if="value != null"
               :color="utilizationColor(value)"
@@ -822,6 +815,14 @@ onMounted(fetchAllData)
           </template>
 
           <template #item.non_billable_hours="{ value }">
+            {{ value != null ? value.toLocaleString() : '-' }}
+          </template>
+
+          <template #item.available_hours="{ value }">
+            {{ value != null ? value.toLocaleString() : '-' }}
+          </template>
+
+          <template #item.pto_hours="{ value }">
             {{ value != null ? value.toLocaleString() : '-' }}
           </template>
 
