@@ -7,7 +7,7 @@ DatabaseManager queries.
 """
 import calendar as cal_mod
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
 import numpy as np
@@ -88,15 +88,19 @@ def _get_working_days_in_range(start_date, end_date, months_df, year, month):
 
 @router.get("/overview", response_model=OverviewKPIs)
 def get_overview(
-    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),
     db: DatabaseManager = Depends(get_db),
 ):
     """Return dashboard-level KPI summary."""
 
+    # Convert date objects to ISO strings for downstream functions that expect str
+    start_date_str: Optional[str] = start_date.isoformat() if start_date else None
+    end_date_str: Optional[str] = end_date.isoformat() if end_date else None
+
     projects_df = db.get_projects()
     employees_df = db.get_employees()
-    time_entries_df = db.get_time_entries(start_date=start_date, end_date=end_date)
+    time_entries_df = db.get_time_entries(start_date=start_date_str, end_date=end_date_str)
 
     kpis = OverviewKPIs()
 
@@ -113,7 +117,6 @@ def get_overview(
         if not billable_projects_df.empty:
             kpis.total_quoted_value = float(billable_projects_df["quoted_value"].sum()) if "quoted_value" in billable_projects_df.columns else 0.0
             kpis.total_awarded_value = float(billable_projects_df["awarded_value"].sum()) if "awarded_value" in billable_projects_df.columns else 0.0
-            kpis.total_budget_used = float(billable_projects_df["budget_used"].sum()) if "budget_used" in billable_projects_df.columns else 0.0
 
     if not employees_df.empty:
         kpis.total_employees = len(employees_df)
@@ -130,11 +133,24 @@ def get_overview(
                 time_entries_df.loc[time_entries_df["billable"] == 1, "hours"].sum()
             )
 
-    # Calculate avg_utilization (YTD billable hours / available hours)
-    # Use start_date/end_date if provided, otherwise default to YTD
+    # Calculate total_budget_used from filtered time entries (respects time
+    # range) instead of the static projects_df['budget_used'] column.
+    # Uses amount if available, otherwise hours * bill_rate — matching the
+    # Streamlit overview fix for issue #40.
+    if not time_entries_df.empty:
+        kpis.total_budget_used = float(
+            time_entries_df.apply(_calculate_entry_revenue, axis=1).sum()
+        )
+
+    # Calculate avg_utilization using the user's date-range filter
+    # (start_date/end_date) instead of hardcoded YTD.
     now = datetime.now()
-    calc_start = start_date or f"{now.year}-01-01"
-    calc_end = end_date or now.strftime("%Y-%m-%d")
+    calc_start = start_date_str or f"{now.year}-01-01"
+    calc_end = end_date_str or now.strftime("%Y-%m-%d")
+
+    # Parse the calc range into year/month boundaries for month iteration
+    calc_start_dt = pd.to_datetime(calc_start)
+    calc_end_dt = pd.to_datetime(calc_end)
 
     if not employees_df.empty:
         billable_employees = employees_df[
@@ -159,48 +175,58 @@ def get_overview(
                     "July", "August", "September", "October", "November", "December"
                 ]
 
-                # Get full year time entries for PTO calculation
-                full_year_te = db.get_time_entries(
-                    start_date=f"{now.year}-01-01",
-                    end_date=f"{now.year}-12-31",
+                # Get time entries covering the calc range for PTO calculation
+                range_te = db.get_time_entries(
+                    start_date=calc_start,
+                    end_date=calc_end,
                 )
                 billable_emp_ids = billable_employees["id"].tolist()
 
-                ytd_total_billable = 0.0
-                ytd_total_possible = 0.0
-                ytd_total_pto = 0.0
+                total_billable = 0.0
+                total_possible = 0.0
+                total_pto = 0.0
 
-                for month_num in range(1, now.month + 1):
-                    month_name = f"{month_names[month_num - 1]} {now.year}"
+                # Iterate over every (year, month) in the calc range
+                iter_dt = calc_start_dt.replace(day=1)
+                while iter_dt <= calc_end_dt:
+                    m_year = iter_dt.year
+                    m_month = iter_dt.month
+                    month_name = f"{month_names[m_month - 1]} {m_year}"
 
                     actual_month_data = performance_data.get("actuals", {}).get(month_name, {})
-                    ytd_total_billable += sum(
+                    total_billable += sum(
                         emp_data.get("billable_hours", 0) for emp_data in actual_month_data.values()
                     )
 
                     possible_month_data = performance_data.get("possible", {}).get(month_name, {})
-                    ytd_total_possible += sum(
+                    total_possible += sum(
                         emp_data.get("hours", 0) for emp_data in possible_month_data.values()
                     )
 
                     # PTO hours
-                    if not full_year_te.empty:
-                        month_start_str = f"{now.year}-{month_num:02d}-01"
-                        month_end_day = cal_mod.monthrange(now.year, month_num)[1]
-                        month_end_str = f"{now.year}-{month_num:02d}-{month_end_day}"
+                    if not range_te.empty:
+                        month_start_str = f"{m_year}-{m_month:02d}-01"
+                        month_end_day = cal_mod.monthrange(m_year, m_month)[1]
+                        month_end_str = f"{m_year}-{m_month:02d}-{month_end_day}"
 
-                        month_entries = full_year_te[
-                            (full_year_te["date"] >= month_start_str) &
-                            (full_year_te["date"] <= month_end_str)
+                        month_entries = range_te[
+                            (range_te["date"] >= month_start_str) &
+                            (range_te["date"] <= month_end_str)
                         ]
 
                         if not month_entries.empty:
                             billable_entries = month_entries[month_entries["employee_id"].isin(billable_emp_ids)]
                             pto_entries = billable_entries[billable_entries["project_id"] == "FRINGE.PTO"]
-                            ytd_total_pto += pto_entries["hours"].sum() if not pto_entries.empty else 0
+                            total_pto += pto_entries["hours"].sum() if not pto_entries.empty else 0
 
-                ytd_available = max(ytd_total_possible - ytd_total_pto, 0)
-                kpis.avg_utilization = round((ytd_total_billable / ytd_available * 100), 1) if ytd_available > 0 else 0.0
+                    # Advance to next month
+                    if m_month == 12:
+                        iter_dt = iter_dt.replace(year=m_year + 1, month=1)
+                    else:
+                        iter_dt = iter_dt.replace(month=m_month + 1)
+
+                available = max(total_possible - total_pto, 0)
+                kpis.avg_utilization = round((total_billable / available * 100), 1) if available > 0 else 0.0
             except Exception as exc:
                 logger.exception("Failed to compute avg_utilization")
 

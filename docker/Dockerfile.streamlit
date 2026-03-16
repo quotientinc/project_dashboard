@@ -21,6 +21,12 @@ COPY streamlit-app/.streamlit/ ./.streamlit/
 
 RUN mkdir -p data logs
 
+# Non-root user for security
+RUN groupadd --gid 1000 appuser && \
+    useradd --uid 1000 --gid appuser --shell /bin/bash appuser && \
+    chown -R appuser:appuser /app
+USER appuser
+
 VOLUME /app/data
 VOLUME /app/logs
 

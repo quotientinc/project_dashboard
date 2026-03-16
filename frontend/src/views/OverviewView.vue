@@ -660,7 +660,11 @@ watch(timeRange, () => {
     <!-- Under-Utilized Projects Alert -->
     <v-row v-if="!loadingProjectUtil && underUtilizedProjects.length > 0" class="mt-4">
       <v-col cols="12">
-        <v-card class="pa-4">
+        <v-card class="pa-4 under-construction-wrapper">
+          <!-- Under-construction watermark overlay -->
+          <div class="under-construction-overlay" aria-hidden="true">
+            <div class="under-construction-text">UNDER CONSTRUCTION</div>
+          </div>
           <div class="text-h6 mb-3 d-flex align-center">
             <v-icon icon="mdi-alert-circle-outline" size="20" class="mr-1" />
             Under-Utilized Projects
@@ -865,3 +869,34 @@ watch(timeRange, () => {
     </v-row>
   </div>
 </template>
+
+<style scoped>
+.under-construction-wrapper {
+  position: relative;
+  overflow: hidden;
+}
+
+.under-construction-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.55);
+  pointer-events: none;
+  z-index: 10;
+}
+
+.under-construction-text {
+  transform: rotate(-25deg);
+  font-size: 2.5rem;
+  font-weight: 800;
+  color: rgba(180, 83, 9, 0.35);
+  white-space: nowrap;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  letter-spacing: 2px;
+}
+</style>

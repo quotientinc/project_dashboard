@@ -340,11 +340,14 @@ def get_utilization_health_status(utilization_pct):
     """
     if utilization_pct is None:
         return ("N/A", "#999999", "\u26aa")
-    if utilization_pct >= 90:
+    # Round before comparing against thresholds so that the status matches
+    # the displayed (rounded) value.  E.g. 89.5 rounds to 90 -> "Good".
+    rounded = round(utilization_pct)
+    if rounded >= 90:
         return ("Good", "#28a745", "\U0001f7e2")
-    elif utilization_pct >= 70:
+    elif rounded >= 70:
         return ("Minor Risk", "#ffc107", "\U0001f7e1")
-    elif utilization_pct >= 50:
+    elif rounded >= 50:
         return ("Medium", "#fd7e14", "\U0001f7e0")
     else:
         return ("Risk", "#dc3545", "\U0001f534")
