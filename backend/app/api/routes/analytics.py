@@ -1521,6 +1521,21 @@ def get_detailed_utilization(
         last_entry_by_month_emp[(m_year, m_month)] = last_entry_map
 
     # ------------------------------------------------------------------
+    # 4b. Compute period-level workdays and holidays totals
+    # ------------------------------------------------------------------
+    period_workdays = 0
+    period_holidays = 0
+    for m_year, m_month in month_tuples:
+        if not months_df.empty:
+            month_info = months_df[(months_df["year"] == m_year) & (months_df["month"] == m_month)]
+            if not month_info.empty:
+                period_workdays += int(month_info["working_days"].iloc[0])
+                hol = month_info["holidays"].iloc[0]
+                period_holidays += int(hol) if pd.notna(hol) else 0
+
+    total_days_in_period = (period_end_date - period_start_date).days + 1
+
+    # ------------------------------------------------------------------
     # 5. Per-employee, per-month calculation
     # ------------------------------------------------------------------
     results = []
@@ -1538,6 +1553,17 @@ def get_detailed_utilization(
             term_date = pd.to_datetime(emp["term_date"]).date()
         else:
             term_date = None
+
+        # Employment proration
+        emp_start_p = max(hire_date, period_start_date) if hire_date else period_start_date
+        emp_end_p = min(term_date, period_end_date) if term_date else period_end_date
+        if emp_start_p == period_start_date and emp_end_p == period_end_date:
+            emp_proration = 1.0
+        elif emp_end_p < emp_start_p:
+            emp_proration = 0.0
+        else:
+            days_worked = (emp_end_p - emp_start_p).days + 1
+            emp_proration = days_worked / total_days_in_period
 
         total_possible = 0.0
         total_actual = 0.0
@@ -1714,6 +1740,13 @@ def get_detailed_utilization(
             holiday_hours=round(total_holiday, 2),
             other_nonbillable_hours=round(total_other_nonbillable, 2),
             utilization_pct=round(overall_util, 2),
+            workdays_total=period_workdays,
+            holidays_total=period_holidays,
+            employment_proration=round(emp_proration, 4),
+            target_allocation=float(emp.get("target_allocation", 0) or 0),
+            overhead_allocation=float(emp.get("overhead_allocation", 0) or 0),
+            hire_date=str(emp["hire_date"]) if pd.notna(emp.get("hire_date")) else None,
+            term_date=str(emp["term_date"]) if pd.notna(emp.get("term_date")) else None,
             status=overall_status,
             status_num=overall_status_num,
             monthly_breakdown=monthly_entries,

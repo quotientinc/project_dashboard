@@ -277,6 +277,13 @@ export interface DetailedUtilizationEntry {
   utilization_pct: number | null
   effective_billable_hours?: number
   other_nonbillable_hours?: number
+  workdays_total?: number
+  holidays_total?: number
+  employment_proration?: number
+  target_allocation?: number
+  overhead_allocation?: number
+  hire_date?: string
+  term_date?: string
   status?: string
   status_num?: number
   monthly_breakdown: EmployeeMonthUtilization[]

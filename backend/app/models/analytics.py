@@ -153,6 +153,13 @@ class DetailedUtilizationEntry(BaseModel):
     holiday_hours: float = 0.0
     other_nonbillable_hours: float = 0.0
     utilization_pct: Optional[float] = None
+    target_allocation: Optional[float] = None
+    overhead_allocation: Optional[float] = None
+    hire_date: Optional[str] = None
+    term_date: Optional[str] = None
+    workdays_total: int = 0
+    holidays_total: int = 0
+    employment_proration: float = 1.0
     status: Optional[str] = None
     status_num: Optional[int] = None
     monthly_breakdown: list[EmployeeMonthUtilization] = []

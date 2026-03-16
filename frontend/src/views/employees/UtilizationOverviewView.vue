@@ -7,7 +7,7 @@ import { useEmployeesStore } from '@/stores/employees'
 import { utilPctColor, downloadCsv } from '@/utils/helpers'
 import KpiCard from '@/components/KpiCard.vue'
 import PlotlyChart from '@/components/PlotlyChart.vue'
-import type { DetailedUtilizationEntry } from '@/types'
+import type { DetailedUtilizationEntry, TimeEntry } from '@/types'
 
 const router = useRouter()
 const { get } = useApi()
@@ -28,6 +28,12 @@ const utilData = ref<DetailedUtilizationEntry[]>([])
 const utilLoading = ref(false)
 const showTimeFrameDefs = ref<number | undefined>(undefined)
 const selectedUtilEmployee = ref<string | null>(null)
+
+// Dialog state
+const utilDialogOpen = ref(false)
+const utilDialogEmployee = ref<DetailedUtilizationEntry | null>(null)
+const dialogTimeEntries = ref<TimeEntry[]>([])
+const dialogLoading = ref(false)
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -339,6 +345,266 @@ const utilChartLayout = computed(() => ({
 }))
 
 // ---------------------------------------------------------------------------
+// Date range derived from current filter selections (for time entry API call)
+// ---------------------------------------------------------------------------
+const utilDateRange = computed(() => {
+  const year = utilYear.value
+  switch (utilTimeFrameType.value) {
+    case 'Monthly': {
+      const monthIndex = monthNames.indexOf(selectedMonth.value)
+      const lastDay = new Date(year, monthIndex + 1, 0).getDate()
+      return {
+        startDate: `${year}-${String(monthIndex + 1).padStart(2, '0')}-01`,
+        endDate: `${year}-${String(monthIndex + 1).padStart(2, '0')}-${lastDay}`,
+      }
+    }
+    case 'Quarterly': {
+      const q = parseInt(selectedQuarter.value.slice(1))
+      const startMonth = (q - 1) * 3 + 1
+      const endMonth = q * 3
+      const lastDay = new Date(year, endMonth, 0).getDate()
+      return {
+        startDate: `${year}-${String(startMonth).padStart(2, '0')}-01`,
+        endDate: `${year}-${String(endMonth).padStart(2, '0')}-${lastDay}`,
+      }
+    }
+    case 'QTD': {
+      const currentQ = Math.ceil((now.getMonth() + 1) / 3)
+      const qStart = (currentQ - 1) * 3 + 1
+      return {
+        startDate: `${year}-${String(qStart).padStart(2, '0')}-01`,
+        endDate: now.toISOString().slice(0, 10),
+      }
+    }
+    case 'YTD':
+    default: {
+      const endDate = year === now.getFullYear() ? now.toISOString().slice(0, 10) : `${year}-12-31`
+      if (fyType.value === 'Gov') {
+        return { startDate: `${year - 1}-10-01`, endDate: `${year}-09-30` }
+      }
+      return { startDate: `${year}-01-01`, endDate }
+    }
+  }
+})
+
+const dialogPeriodLabel = computed(() => {
+  const { startDate, endDate } = utilDateRange.value
+  const start = new Date(startDate + 'T00:00:00')
+  const end = new Date(endDate + 'T00:00:00')
+  const startLabel = `${monthNames[start.getMonth()]} ${start.getFullYear()}`
+  const endLabel = `${monthNames[end.getMonth()]} ${end.getFullYear()}`
+  return startLabel === endLabel ? startLabel : `${startLabel} \u2013 ${endLabel}`
+})
+
+// ---------------------------------------------------------------------------
+// Dialog: row click handler
+// ---------------------------------------------------------------------------
+async function onUtilRowClicked(item: DetailedUtilizationEntry) {
+  utilDialogEmployee.value = item
+  utilDialogOpen.value = true
+  dialogLoading.value = true
+  try {
+    dialogTimeEntries.value = await get<TimeEntry[]>('/time-entries/', {
+      params: {
+        employee_id: item.employee_id,
+        start_date: utilDateRange.value.startDate,
+        end_date: utilDateRange.value.endDate,
+      },
+    })
+  } catch {
+    dialogTimeEntries.value = []
+  } finally {
+    dialogLoading.value = false
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Dialog: Streamlit-style step cards and variable reference table (HTML)
+// ---------------------------------------------------------------------------
+const badgeColors: Record<string, string> = {
+  workdays: '#dbeafe', holidays: '#dbeafe', daily_hrs: '#dbeafe',
+  fte: '#dbeafe', proration: '#dbeafe', possible: '#e0e7ff',
+  pto: '#fef3c7', available: '#d1fae5', actual_billable: '#ede9fe',
+  projected: '#fce7f3', effective: '#bae6fd', utilization: '#fef9c3',
+}
+
+function badge(colorKey: string, label: string, value: string): string {
+  return `<span style="display:inline-block;padding:2px 8px;border-radius:4px;margin:0 2px;font-size:14px;background:${badgeColors[colorKey] ?? '#f1f5f9'}">${label} <strong>${value}</strong></span>`
+}
+
+function resultBadge(colorKey: string, value: string): string {
+  return `<span style="display:inline-block;padding:2px 8px;border-radius:4px;margin:0 2px;font-size:14px;background:${badgeColors[colorKey] ?? '#f1f5f9'};font-weight:700">${value}</span>`
+}
+
+function stepCard(accentColor: string, stepLabel: string, formulaHtml: string): string {
+  return `<div style="margin-bottom:10px;padding:10px 14px;background:#f8fafc;border-radius:8px;border-left:3px solid ${accentColor};">
+    <div style="font-size:12px;color:#64748b;margin-bottom:4px;">${stepLabel}</div>
+    <div style="line-height:1.8;">${formulaHtml}</div>
+  </div>`
+}
+
+const dialogCalculationHtml = computed(() => {
+  const emp = utilDialogEmployee.value
+  if (!emp) return ''
+
+  const workdays = emp.workdays_total ?? 0
+  const holidays = emp.holidays_total ?? 0
+  const possible = emp.possible_hours ?? 0
+  const pto = emp.pto_hours ?? 0
+  const available = Math.max(possible - pto, 0)
+  const actualBillable = emp.actual_billable_hours ?? 0
+  const projectedMissing = emp.projected_hours ?? 0
+  const effectiveBillable = emp.effective_billable_hours ?? 0
+  const utilPct = emp.utilization_pct ?? 0
+  const ftePct = (emp.target_allocation ?? 1) - (emp.overhead_allocation ?? 0)
+  const proration = emp.employment_proration ?? 1
+
+  // Step 1: Possible Billable Hours
+  const step1 = stepCard('#6366f1',
+    'Step 1: Possible Billable Hours',
+    `(${badge('workdays', 'Workdays', String(workdays))} &minus; ${badge('holidays', 'Holidays', String(holidays))}) &times; ${badge('daily_hrs', 'Daily Hrs', '8.0')} &times; ${badge('fte', 'FTE%', ftePct.toFixed(2))} &times; ${badge('proration', 'Proration', proration.toFixed(2))} = ${resultBadge('possible', possible.toFixed(1))}`
+  )
+
+  // Step 2: Available Work Hours
+  const step2 = stepCard('#22c55e',
+    'Step 2: Available Work Hours',
+    `${badge('possible', 'Possible Billable Hrs', possible.toFixed(1))} &minus; ${badge('pto', 'PTO Hours', pto.toFixed(1))} = ${resultBadge('available', available.toFixed(1))}`
+  )
+
+  // Step 3: Effective Billable Hours
+  const step3 = stepCard('#a855f7',
+    'Step 3: Effective Billable Hours',
+    `${badge('actual_billable', 'Actual Billable Hrs', actualBillable.toFixed(1))} + ${badge('projected', 'Projected Missing Hrs', projectedMissing.toFixed(1))} = ${resultBadge('effective', effectiveBillable.toFixed(1))}`
+  )
+
+  // Step 4: Billable Utilization %
+  const step4Formula = available > 0
+    ? `${badge('effective', 'Effective Billable Hrs', effectiveBillable.toFixed(1))} &divide; ${badge('available', 'Available Work Hrs', available.toFixed(1))} &times; 100 = ${resultBadge('utilization', utilPct.toFixed(1) + '%')}`
+    : `${badge('effective', 'Effective Billable Hrs', effectiveBillable.toFixed(1))} &divide; ${badge('available', 'Available Work Hrs', available.toFixed(1))} &times; 100 = ${resultBadge('utilization', 'N/A')}`
+  const step4 = stepCard('#eab308',
+    'Step 4: Billable Utilization %',
+    step4Formula
+  )
+
+  return step1 + step2 + step3 + step4
+})
+
+const dialogVariableTableHtml = computed(() => {
+  const emp = utilDialogEmployee.value
+  if (!emp) return ''
+
+  const workdays = emp.workdays_total ?? 0
+  const holidays = emp.holidays_total ?? 0
+  const possible = emp.possible_hours ?? 0
+  const pto = emp.pto_hours ?? 0
+  const available = Math.max(possible - pto, 0)
+  const actualBillable = emp.actual_billable_hours ?? 0
+  const projectedMissing = emp.projected_hours ?? 0
+  const effectiveBillable = emp.effective_billable_hours ?? 0
+  const utilPct = emp.utilization_pct ?? 0
+  const ftePct = (emp.target_allocation ?? 1) - (emp.overhead_allocation ?? 0)
+  const proration = emp.employment_proration ?? 1
+
+  type VarRow = { variable: string; value: string; definition: string; source: string; colorKey: string; highlight?: boolean }
+  const rows: VarRow[] = [
+    { variable: 'Workdays in Period', value: String(workdays), definition: 'Total scheduled working days', source: 'months table', colorKey: 'workdays' },
+    { variable: 'Holiday Days', value: String(holidays), definition: 'Company holidays in period', source: 'months table', colorKey: 'holidays' },
+    { variable: 'Daily Scheduled Hours', value: '8.0', definition: 'Standard hours per day', source: 'Constant', colorKey: 'daily_hrs' },
+    { variable: 'FTE %', value: ftePct.toFixed(2), definition: 'target_allocation - overhead_allocation', source: 'employees table', colorKey: 'fte' },
+    { variable: 'Employment Proration', value: proration.toFixed(2), definition: 'Proportion of period employed', source: 'Calculated from hire/term dates', colorKey: 'proration' },
+    { variable: 'Possible Billable Hrs', value: possible.toFixed(1), definition: '(Workdays-Holidays) x 8 x FTE% x Proration', source: 'Calculated', colorKey: 'possible' },
+    { variable: 'PTO Hours', value: pto.toFixed(1), definition: 'Approved PTO time', source: 'time_entries (FRINGE.PTO)', colorKey: 'pto' },
+    { variable: 'Available Work Hours', value: available.toFixed(1), definition: 'Possible Billable Hrs - PTO Hours', source: 'Calculated', colorKey: 'available' },
+    { variable: 'Actual Billable Hours', value: actualBillable.toFixed(1), definition: 'Billable hours logged', source: 'time_entries (billable=1)', colorKey: 'actual_billable' },
+    { variable: 'Projected Missing Hrs', value: projectedMissing.toFixed(1), definition: 'Projected hours for missing days from last timesheet entry to end of month', source: 'projected_hours x (missing_days / available_days)', colorKey: 'projected' },
+    { variable: 'Effective Billable Hrs', value: effectiveBillable.toFixed(1), definition: 'Actual Billable + Projected Missing', source: 'Calculated', colorKey: 'effective' },
+    { variable: 'Billable Utilization %', value: utilPct.toFixed(1) + '%', definition: 'Effective Billable / Available x 100', source: 'Final Result', colorKey: 'utilization', highlight: true },
+  ]
+
+  const thStyle = 'background:#f1f5f9;padding:8px 12px;text-align:left;border-bottom:2px solid #e2e8f0;font-weight:600;'
+  const tdBase = 'padding:6px 12px;border-bottom:1px solid #e2e8f0;font-size:14px;'
+
+  let html = `<table style="width:100%;border-collapse:collapse;font-size:14px;">
+    <tr>
+      <th style="${thStyle}">Variable</th>
+      <th style="${thStyle}">Value</th>
+      <th style="${thStyle}">Definition</th>
+      <th style="${thStyle}">Source</th>
+    </tr>`
+
+  for (const r of rows) {
+    const bg = badgeColors[r.colorKey] ?? '#f1f5f9'
+    if (r.highlight) {
+      const rowStyle = `background:${bg};font-weight:700;`
+      html += `<tr>
+        <td style="${tdBase}${rowStyle}">${r.variable}</td>
+        <td style="${tdBase}${rowStyle}">${r.value}</td>
+        <td style="${tdBase}${rowStyle}">${r.definition}</td>
+        <td style="${tdBase}${rowStyle}">${r.source}</td>
+      </tr>`
+    } else {
+      html += `<tr>
+        <td style="${tdBase}background:${bg};">${r.variable}</td>
+        <td style="${tdBase}background:${bg};font-weight:600;">${r.value}</td>
+        <td style="${tdBase}">${r.definition}</td>
+        <td style="${tdBase}">${r.source}</td>
+      </tr>`
+    }
+  }
+
+  html += '</table>'
+  return html
+})
+
+// ---------------------------------------------------------------------------
+// Dialog: hours by project (aggregated from time entries)
+// ---------------------------------------------------------------------------
+const dialogHoursByProject = computed(() => {
+  if (!dialogTimeEntries.value.length) return []
+
+  const projectMap = new Map<string, {
+    project_id: string; project_name: string
+    billable_hrs: number; nonbillable_hrs: number; total_hrs: number; amount: number
+  }>()
+
+  for (const te of dialogTimeEntries.value) {
+    const key = te.project_id
+    const existing = projectMap.get(key) ?? {
+      project_id: te.project_id,
+      project_name: te.project_name ?? te.project_id,
+      billable_hrs: 0, nonbillable_hrs: 0, total_hrs: 0, amount: 0,
+    }
+    existing.total_hrs += te.hours
+    if (te.billable === 1) {
+      existing.billable_hrs += te.hours
+    } else {
+      existing.nonbillable_hrs += te.hours
+    }
+    existing.amount += te.hours * (te.hourly_rate ?? 0)
+    projectMap.set(key, existing)
+  }
+
+  const totalHrs = Array.from(projectMap.values()).reduce((s, p) => s + p.total_hrs, 0)
+  return Array.from(projectMap.values())
+    .map(p => ({ ...p, pct_of_total: totalHrs > 0 ? (p.total_hrs / totalHrs * 100) : 0 }))
+    .sort((a, b) => b.total_hrs - a.total_hrs)
+})
+
+// ---------------------------------------------------------------------------
+// Dialog: formatted timesheet entries
+// ---------------------------------------------------------------------------
+const dialogTimesheetEntries = computed(() => {
+  return dialogTimeEntries.value
+    .map(te => ({
+      ...te,
+      billable_label: te.billable === 1 ? 'Yes' : 'No',
+      bill_rate_display: te.hourly_rate ?? 0,
+      amount: te.hours * (te.hourly_rate ?? 0),
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date))
+})
+
+// ---------------------------------------------------------------------------
 // Export CSV
 // ---------------------------------------------------------------------------
 function exportUtilCsv() {
@@ -618,7 +884,7 @@ function exportUtilCsv() {
       <v-card-text class="pa-0">
         <div class="d-flex align-center justify-space-between pa-3 pb-0">
           <div class="text-caption text-medium-emphasis">
-            {{ filteredUtilData.length }} of {{ utilData.length }} employees
+            {{ filteredUtilData.length }} of {{ utilData.length }} employees &mdash; Click a row to view details
           </div>
           <v-btn
             variant="outlined"
@@ -636,7 +902,9 @@ function exportUtilCsv() {
           v-model:sort-by="utilTableSortBy"
           density="compact"
           hover
+          class="cursor-pointer"
           items-per-page="25"
+          @click:row="(_e: Event, { item }: { item: any }) => onUtilRowClicked(item)"
         >
           <template #item.possible_hours="{ value }">
             {{ value != null ? value.toFixed(1) : '-' }}
@@ -722,5 +990,105 @@ function exportUtilCsv() {
         </v-alert>
       </v-card-text>
     </v-card>
+    <!-- Utilization Detail Dialog -->
+    <v-dialog v-model="utilDialogOpen" max-width="1100" scrollable>
+      <v-card v-if="utilDialogEmployee">
+        <v-card-title class="d-flex align-center justify-space-between">
+          <span>Employee Timesheet &amp; Utilization Detail</span>
+          <v-btn icon="mdi-close" variant="text" @click="utilDialogOpen = false" />
+        </v-card-title>
+
+        <v-card-text>
+          <!-- Employee Name & Period -->
+          <div class="text-h5 font-weight-bold mb-1">
+            {{ utilDialogEmployee.employee_name }}
+            <v-chip
+              class="ml-2"
+              :color="utilPctColor(utilDialogEmployee.utilization_pct)"
+              variant="flat"
+              size="small"
+            >
+              {{ (utilDialogEmployee.utilization_pct ?? 0).toFixed(1) }}%
+            </v-chip>
+            <v-chip v-if="utilDialogEmployee.status" class="ml-1" size="small" variant="flat">
+              {{ utilDialogEmployee.status }}
+            </v-chip>
+          </div>
+          <div class="text-caption text-medium-emphasis mb-4">
+            {{ dialogPeriodLabel }}
+          </div>
+
+          <!-- Section 1: Calculation Breakdown -->
+          <div class="text-h6 mb-3">Billable Utilization Calculation</div>
+
+          <!-- Streamlit-style Step Cards -->
+          <div v-html="dialogCalculationHtml" class="mb-4"></div>
+
+          <!-- Multi-month note -->
+          <div
+            v-if="utilTimeFrameType !== 'Monthly'"
+            class="text-caption text-medium-emphasis mb-4"
+            style="font-style: italic;"
+          >
+            Note: For multi-month periods, possible hours are calculated per-month with per-month proration, then summed. The single proration factor shown above is an approximate overall value.
+          </div>
+
+          <!-- Variable Reference Table (always visible) -->
+          <div class="text-subtitle-1 font-weight-medium mb-2">Variable Reference</div>
+          <div v-html="dialogVariableTableHtml" class="mb-6"></div>
+
+          <!-- Section 2: Hours by Project -->
+          <div class="text-h6 mb-3">Hours by Project</div>
+          <v-data-table
+            :items="dialogHoursByProject"
+            :headers="[
+              { title: 'Project Code', key: 'project_id' },
+              { title: 'Project', key: 'project_name' },
+              { title: 'Billable Hrs', key: 'billable_hrs', align: 'end' as const },
+              { title: 'Non-billable Hrs', key: 'nonbillable_hrs', align: 'end' as const },
+              { title: 'Total Hrs', key: 'total_hrs', align: 'end' as const },
+              { title: 'Amount', key: 'amount', align: 'end' as const },
+              { title: '% of Total', key: 'pct_of_total', align: 'end' as const },
+            ]"
+            :loading="dialogLoading"
+            density="compact"
+            :items-per-page="-1"
+            hide-default-footer
+            class="mb-6"
+          >
+            <template #item.billable_hrs="{ value }">{{ value.toFixed(1) }}</template>
+            <template #item.nonbillable_hrs="{ value }">{{ value.toFixed(1) }}</template>
+            <template #item.total_hrs="{ value }">{{ value.toFixed(1) }}</template>
+            <template #item.amount="{ value }">${{ value.toFixed(2) }}</template>
+            <template #item.pct_of_total="{ value }">{{ value.toFixed(1) }}%</template>
+          </v-data-table>
+
+          <!-- Section 3: Timesheet Entries -->
+          <div class="text-h6 mb-3">Timesheet Entries</div>
+          <v-data-table
+            :items="dialogTimesheetEntries"
+            :headers="[
+              { title: 'Date', key: 'date' },
+              { title: 'Project Code', key: 'project_id' },
+              { title: 'Project', key: 'project_name' },
+              { title: 'Hours', key: 'hours', align: 'end' as const },
+              { title: 'Billable', key: 'billable_label' },
+              { title: 'Bill Rate', key: 'bill_rate_display', align: 'end' as const },
+              { title: 'Amount', key: 'amount', align: 'end' as const },
+              { title: 'Description', key: 'description' },
+            ]"
+            :loading="dialogLoading"
+            density="compact"
+            :items-per-page="25"
+          >
+            <template #item.hours="{ value }">{{ value.toFixed(2) }}</template>
+            <template #item.bill_rate_display="{ value }">
+              {{ value ? '$' + value.toFixed(2) : '-' }}
+            </template>
+            <template #item.amount="{ value }">${{ value.toFixed(2) }}</template>
+          </v-data-table>
+        </v-card-text>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
