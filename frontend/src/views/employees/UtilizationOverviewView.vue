@@ -187,11 +187,11 @@ const utilTotalHolidayHrs = computed(() => filteredUtilData.value.reduce((s, e) 
 const utilBandSummary = computed(() => {
   const data = filteredUtilData.value
   const bands = [
-    { label: '111%+', icon: '\uD83D\uDFE3', bgColor: '#f3e5f5', borderColor: '#9C27B0', min: 111, max: Infinity, employees: [] as { name: string; pct: number }[] },
-    { label: '97% - 110%', icon: '\uD83D\uDFE2', bgColor: '#e8f5e9', borderColor: '#28a745', min: 97, max: 111, employees: [] as { name: string; pct: number }[] },
-    { label: '80% - 96%', icon: '\uD83D\uDFE1', bgColor: '#fff8e1', borderColor: '#ffc107', min: 80, max: 97, employees: [] as { name: string; pct: number }[] },
-    { label: '51% - 79%', icon: '\uD83D\uDFE0', bgColor: '#fff3e0', borderColor: '#fd7e14', min: 51, max: 80, employees: [] as { name: string; pct: number }[] },
-    { label: '\u2264 50%', icon: '\uD83D\uDD34', bgColor: '#ffebee', borderColor: '#dc3545', min: 0, max: 51, employees: [] as { name: string; pct: number }[] },
+    { label: '111%+', icon: '\uD83D\uDFE3', borderColor: '#9C27B0', bgRgba: 'rgba(156, 39, 176, 0.12)', min: 111, max: Infinity, employees: [] as { name: string; pct: number }[] },
+    { label: '97% - 110%', icon: '\uD83D\uDFE2', borderColor: '#28a745', bgRgba: 'rgba(40, 167, 69, 0.12)', min: 97, max: 111, employees: [] as { name: string; pct: number }[] },
+    { label: '80% - 96%', icon: '\uD83D\uDFE1', borderColor: '#ffc107', bgRgba: 'rgba(255, 193, 7, 0.12)', min: 80, max: 97, employees: [] as { name: string; pct: number }[] },
+    { label: '51% - 79%', icon: '\uD83D\uDFE0', borderColor: '#fd7e14', bgRgba: 'rgba(253, 126, 20, 0.12)', min: 51, max: 80, employees: [] as { name: string; pct: number }[] },
+    { label: '\u2264 50%', icon: '\uD83D\uDD34', borderColor: '#dc3545', bgRgba: 'rgba(220, 53, 69, 0.12)', min: 0, max: 51, employees: [] as { name: string; pct: number }[] },
   ]
 
   for (const emp of data) {
@@ -806,11 +806,10 @@ function exportUtilCsv() {
       <v-col v-for="band in utilBandSummary" :key="band.label" cols="12" sm="6" md style="min-width: 0">
         <div
           :style="{
-            backgroundColor: band.bgColor,
+            backgroundColor: band.bgRgba,
             padding: '15px',
             borderRadius: '10px',
             borderLeft: '5px solid ' + band.borderColor,
-            color: '#333',
           }"
         >
           <div class="d-flex align-center mb-2">
@@ -820,7 +819,7 @@ function exportUtilCsv() {
           <div style="font-size: 28px; font-weight: bold; margin-bottom: 5px">
             {{ band.employees.length }} Employees
           </div>
-          <div style="font-size: 13px; color: #555">
+          <div class="text-medium-emphasis" style="font-size: 13px;">
             <template v-if="band.employees.length > 0">
               <div v-for="emp in band.employees" :key="emp.name">
                 {{ emp.name }} ({{ emp.pct }}%)
