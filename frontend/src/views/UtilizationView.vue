@@ -8,7 +8,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApi } from '@/composables/useApi'
-import { utilPctColor, utilPctBgColor, utilBandShapes, downloadCsv } from '@/utils/helpers'
+import { utilPctColor, utilBandShapes, downloadCsv } from '@/utils/helpers'
 import KpiCard from '@/components/KpiCard.vue'
 import PlotlyChart from '@/components/PlotlyChart.vue'
 import UtilizationFilters from '@/components/UtilizationFilters.vue'
@@ -602,12 +602,15 @@ onMounted(fetchAllData)
           </template>
 
           <template #item.utilization_pct="{ value }">
-            <span
+            <v-chip
               v-if="value != null"
-              :style="{ fontWeight: 600, color: utilPctColor(value), background: utilPctBgColor(value), padding: '2px 8px', borderRadius: '4px', display: 'inline-block' }"
+              :color="utilPctColor(value)"
+              size="small"
+              label
+              variant="tonal"
             >
               {{ value.toFixed(1) }}%
-            </span>
+            </v-chip>
             <span v-else>-</span>
           </template>
 

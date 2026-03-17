@@ -2,7 +2,7 @@
 import { ref, computed, inject, onMounted, watch, type Ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useApi } from '@/composables/useApi'
-import { utilPctColor, utilPctBgColor, utilBandShapes } from '@/utils/helpers'
+import { utilPctColor, utilBandShapes } from '@/utils/helpers'
 import KpiCard from '@/components/KpiCard.vue'
 import PlotlyChart from '@/components/PlotlyChart.vue'
 import UtilizationFilters from '@/components/UtilizationFilters.vue'
@@ -353,12 +353,15 @@ function formatNum(val: number | null | undefined, decimals = 1): string {
                 {{ formatNum(item.holiday_hours) }}
               </template>
               <template #item.utilization_pct="{ item }">
-                <span
+                <v-chip
                   v-if="item.utilization_pct != null"
-                  :style="{ fontWeight: 600, color: utilPctColor(item.utilization_pct), background: utilPctBgColor(item.utilization_pct), padding: '2px 8px', borderRadius: '4px', display: 'inline-block' }"
+                  :color="utilPctColor(item.utilization_pct)"
+                  size="small"
+                  label
+                  variant="tonal"
                 >
                   {{ formatNum(item.utilization_pct) }}%
-                </span>
+                </v-chip>
                 <span v-else>N/A</span>
               </template>
             </v-data-table>

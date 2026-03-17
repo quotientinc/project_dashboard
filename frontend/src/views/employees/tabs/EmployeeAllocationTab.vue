@@ -183,16 +183,16 @@ const hasChanges = computed(() => unsavedCount.value > 0)
 // Cell styling
 // -------------------------------------------------------------------
 function cellBgColor(fte: number): string {
-  if (fte > 1.0) return '#FFCDD2'   // light red
-  if (fte >= 0.5) return '#C8E6C9'  // light green
-  if (fte > 0) return '#BBDEFB'     // light blue
+  if (fte > 1.0) return 'rgba(244, 67, 54, 0.15)'   // red tint
+  if (fte >= 0.5) return 'rgba(76, 175, 80, 0.15)'   // green tint
+  if (fte > 0) return 'rgba(33, 150, 243, 0.15)'     // blue tint
   return 'transparent'
 }
 
 function totalBgColor(total: number): string {
-  if (total > 1.0) return '#FFCDD2'
-  if (total >= 0.8) return '#C8E6C9'
-  if (total > 0) return '#FFF9C4'
+  if (total > 1.0) return 'rgba(244, 67, 54, 0.15)'
+  if (total >= 0.8) return 'rgba(76, 175, 80, 0.15)'
+  if (total > 0) return 'rgba(255, 193, 7, 0.15)'
   return 'transparent'
 }
 

@@ -612,15 +612,15 @@ const runwayGaugeLayout = computed(() => ({
               {{ value != null ? value.toFixed(1) : 'N/A' }}
             </template>
             <template #item.funding_pct="{ value }">
-              <span
+              <v-chip
                 v-if="value != null"
-                :style="{
-                  color: value >= 50 ? '#4CAF50' : value >= 30 ? '#FFC107' : value >= 10 ? '#FF9800' : '#F44336',
-                  fontWeight: 600,
-                }"
+                :color="value >= 50 ? 'success' : value >= 30 ? 'warning' : value >= 10 ? 'orange' : 'error'"
+                size="x-small"
+                label
+                variant="tonal"
               >
                 {{ value.toFixed(1) }}%
-              </span>
+              </v-chip>
             </template>
             <template #item.health_label="{ item }">
               <v-chip
@@ -628,7 +628,7 @@ const runwayGaugeLayout = computed(() => ({
                 :color="healthLabelColor(item.health_label)"
                 size="small"
                 label
-                style="color: #fff;"
+                variant="tonal"
               >
                 {{ item.health_label }}
               </v-chip>

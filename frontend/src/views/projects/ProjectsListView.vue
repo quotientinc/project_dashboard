@@ -259,18 +259,18 @@ const headers = [
   { title: 'Revenue Gap', key: 'revenue_gap', minWidth: '130px', align: 'end' as const },
 ]
 
-// Style helpers for color-coded cells
-function budgetPctStyle(value: number): Record<string, string> {
-  if (value > 100) return { backgroundColor: '#ffcccc', fontWeight: 'bold' }
-  if (value >= 80) return { backgroundColor: '#fff9cc' }
-  return { backgroundColor: '#ccffcc' }
+// Color helpers for table chips
+function budgetPctChipColor(value: number): string {
+  if (value > 100) return 'error'
+  if (value >= 80) return 'warning'
+  return 'success'
 }
 
-function utilizationPctStyle(value: number): Record<string, string> {
-  if (value >= 90) return { backgroundColor: '#ccffcc' }
-  if (value >= 70) return { backgroundColor: '#fff9cc' }
-  if (value >= 50) return { backgroundColor: '#ffe0b2' }
-  return { backgroundColor: '#ffcccc', fontWeight: 'bold' }
+function utilizationPctChipColor(value: number): string {
+  if (value >= 90) return 'success'
+  if (value >= 70) return 'warning'
+  if (value >= 50) return 'orange'
+  return 'error'
 }
 
 function onRowClicked(item: Record<string, unknown>) {
@@ -447,24 +447,28 @@ function onRowClicked(item: Record<string, unknown>) {
           </template>
 
           <template #item.budget_pct_used="{ value }">
-            <div
+            <v-chip
               v-if="value != null"
-              :style="budgetPctStyle(value)"
-              class="px-2 py-1 rounded text-center"
+              :color="budgetPctChipColor(value)"
+              size="x-small"
+              label
+              variant="tonal"
             >
               {{ value.toFixed(1) }}%
-            </div>
+            </v-chip>
             <span v-else class="text-grey">N/A</span>
           </template>
 
           <template #item.utilization_pct="{ value }">
-            <div
+            <v-chip
               v-if="value != null"
-              :style="utilizationPctStyle(value)"
-              class="px-2 py-1 rounded text-center"
+              :color="utilizationPctChipColor(value)"
+              size="x-small"
+              label
+              variant="tonal"
             >
               {{ value.toFixed(1) }}%
-            </div>
+            </v-chip>
             <span v-else class="text-grey">N/A</span>
           </template>
 

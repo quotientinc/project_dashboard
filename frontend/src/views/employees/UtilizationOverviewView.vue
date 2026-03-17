@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useApi } from '@/composables/useApi'
 import { useEmployeesStore } from '@/stores/employees'
-import { utilPctColor, utilPctBgColor, utilBandShapes, downloadCsv } from '@/utils/helpers'
+import { utilPctColor, utilBandShapes, downloadCsv } from '@/utils/helpers'
 import KpiCard from '@/components/KpiCard.vue'
 import PlotlyChart from '@/components/PlotlyChart.vue'
 import UtilizationFilters from '@/components/UtilizationFilters.vue'
@@ -919,17 +919,17 @@ function exportUtilCsv() {
                         <td>Calculated</td>
                         <td>&ge;111% Over, 97-110% Good, 80-96% Fair, 51-79% Low, &le;50% Under</td>
                       </tr>
-                      <tr style="background: #f5f5f5;">
+                      <tr class="bg-surface-variant">
                         <td>YTD Possible Billable Hrs</td>
                         <td>ytd_metrics['possible']</td>
                         <td>Sum of possible hours from Jan 1 to end of selected month</td>
                       </tr>
-                      <tr style="background: #f5f5f5;">
+                      <tr class="bg-surface-variant">
                         <td>YTD Actual Billable Hrs</td>
                         <td>ytd_metrics['actuals']</td>
                         <td>Sum of actual billable hours from Jan 1 to end of selected month</td>
                       </tr>
-                      <tr style="background: #f5f5f5;">
+                      <tr class="bg-surface-variant">
                         <td>YTD Billable Utilization %</td>
                         <td>Calculated</td>
                         <td>(ytd_actual_billable_hours / (ytd_possible_hours &minus; ytd_pto_hours)) &times; 100</td>
@@ -996,35 +996,41 @@ function exportUtilCsv() {
             {{ value != null ? value.toFixed(1) : '-' }}
           </template>
           <template #item.utilization_pct="{ value }">
-            <span
+            <v-chip
               v-if="value != null"
-              :style="{ fontWeight: 600, color: utilPctColor(value), background: utilPctBgColor(value), padding: '2px 8px', borderRadius: '4px', display: 'inline-block' }"
+              :color="utilPctColor(value)"
+              size="small"
+              label
+              variant="tonal"
             >
               {{ value.toFixed(1) }}%
-            </span>
+            </v-chip>
             <span v-else>-</span>
           </template>
           <template #item.status="{ value }">
             {{ value ?? '-' }}
           </template>
           <template #item.ytd_possible_hours="{ value }">
-            <span style="background: #f5f5f5; display: block; padding: 0 4px;">
+            <span class="text-medium-emphasis">
               {{ value != null ? value.toFixed(1) : '-' }}
             </span>
           </template>
           <template #item.ytd_actual_billable_hours="{ value }">
-            <span style="background: #f5f5f5; display: block; padding: 0 4px;">
+            <span class="text-medium-emphasis">
               {{ value != null ? value.toFixed(1) : '-' }}
             </span>
           </template>
           <template #item.ytd_utilization_pct="{ value }">
-            <span
+            <v-chip
               v-if="value != null"
-              :style="{ fontWeight: 600, color: utilPctColor(value), background: utilPctBgColor(value), padding: '2px 8px', borderRadius: '4px', display: 'inline-block' }"
+              :color="utilPctColor(value)"
+              size="small"
+              label
+              variant="tonal"
             >
               {{ value.toFixed(1) }}%
-            </span>
-            <span v-else style="background: #f5f5f5; display: block; padding: 0 4px;">-</span>
+            </v-chip>
+            <span v-else>-</span>
           </template>
         </v-data-table>
       </v-card-text>
@@ -1089,20 +1095,14 @@ function exportUtilCsv() {
           <!-- Employee Name & Period -->
           <div class="text-h5 font-weight-bold mb-1">
             {{ utilDialogEmployee.employee_name }}
-            <span
+            <v-chip
               class="ml-2"
-              :style="{
-                fontWeight: 600,
-                color: utilPctColor(utilDialogEmployee.utilization_pct),
-                background: utilPctBgColor(utilDialogEmployee.utilization_pct),
-                padding: '2px 10px',
-                borderRadius: '4px',
-                fontSize: '14px',
-                display: 'inline-block',
-              }"
+              :color="utilPctColor(utilDialogEmployee.utilization_pct)"
+              variant="tonal"
+              size="small"
             >
               {{ (utilDialogEmployee.utilization_pct ?? 0).toFixed(1) }}%
-            </span>
+            </v-chip>
             <v-chip v-if="utilDialogEmployee.status" class="ml-1" size="small" variant="flat">
               {{ utilDialogEmployee.status }}
             </v-chip>

@@ -359,9 +359,15 @@ function exportAllocCsv() {
           {{ value != null ? value.toFixed(1) : '-' }}
         </template>
         <template #item.allocation_pct="{ value }">
-          <span v-if="value != null" :style="{ fontWeight: 600, color: allocPctColor(value) }">
+          <v-chip
+            v-if="value != null"
+            :color="allocPctColor(value)"
+            size="small"
+            label
+            variant="tonal"
+          >
             {{ value.toFixed(1) }}%
-          </span>
+          </v-chip>
           <span v-else>-</span>
         </template>
         <template #item.variance="{ value }">
