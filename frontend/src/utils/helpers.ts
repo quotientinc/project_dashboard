@@ -58,14 +58,64 @@ export function allocStatusColor(s: string): string {
 }
 
 /**
- * Return a hex color based on utilization percentage thresholds.
- * - >=80%: green, >=60%: orange, else: red
+ * 5-band utilization status thresholds matching the Utilization Band Summary
+ * cards on the /employees/utilization_overview page.
+ *
+ *  Band          Border         Background
+ *  >=111% Over   #9C27B0 purple #f3e5f5
+ *  97-110% Good  #28A745 green  #e8f5e9
+ *  80-96%  Fair  #FFC107 amber  #fff8e1
+ *  51-79%  Low   #FD7E14 orange #fff3e0
+ *  <=50%   Under #DC3545 red    #ffebee
  */
+interface UtilBand { border: string; bg: string }
+const UTIL_BANDS: { min: number; band: UtilBand }[] = [
+  { min: 111, band: { border: '#9C27B0', bg: '#f3e5f5' } },
+  { min: 97,  band: { border: '#28A745', bg: '#e8f5e9' } },
+  { min: 80,  band: { border: '#FFC107', bg: '#fff8e1' } },
+  { min: 51,  band: { border: '#FD7E14', bg: '#fff3e0' } },
+  { min: -Infinity, band: { border: '#DC3545', bg: '#ffebee' } },
+]
+
+function _band(v: number | null | undefined): UtilBand {
+  if (v == null) return UTIL_BANDS[UTIL_BANDS.length - 1].band
+  const rounded = Math.round(v)
+  for (const { min, band } of UTIL_BANDS) {
+    if (rounded >= min) return band
+  }
+  return UTIL_BANDS[UTIL_BANDS.length - 1].band
+}
+
+/** Return the border / accent color for a utilization percentage. */
 export function utilPctColor(v: number | null | undefined): string {
-  if (v == null) return '#F44336'
-  if (v >= 80) return '#4CAF50'
-  if (v >= 60) return '#FF9800'
-  return '#F44336'
+  return _band(v).border
+}
+
+/** Return the light background color for a utilization percentage. */
+export function utilPctBgColor(v: number | null | undefined): string {
+  return _band(v).bg
+}
+
+/**
+ * Return Plotly shape objects for utilization band background rectangles.
+ * Use in a chart layout's `shapes` array. `yMax` controls the top of the
+ * topmost band (default 120 for charts with y-range 0–120).
+ */
+export function utilBandShapes(yMax = 120): Record<string, unknown>[] {
+  return [
+    // ≤50% Under (red)
+    { type: 'rect', xref: 'paper', x0: 0, x1: 1, y0: 0, y1: 51, fillcolor: '#DC3545', opacity: 0.08, line: { width: 0 } },
+    // 51-79% Low (orange)
+    { type: 'rect', xref: 'paper', x0: 0, x1: 1, y0: 51, y1: 80, fillcolor: '#FD7E14', opacity: 0.08, line: { width: 0 } },
+    // 80-96% Fair (amber)
+    { type: 'rect', xref: 'paper', x0: 0, x1: 1, y0: 80, y1: 97, fillcolor: '#FFC107', opacity: 0.08, line: { width: 0 } },
+    // 97-110% Good (green)
+    { type: 'rect', xref: 'paper', x0: 0, x1: 1, y0: 97, y1: 111, fillcolor: '#28A745', opacity: 0.08, line: { width: 0 } },
+    // >=111% Over (purple)
+    { type: 'rect', xref: 'paper', x0: 0, x1: 1, y0: 111, y1: yMax, fillcolor: '#9C27B0', opacity: 0.08, line: { width: 0 } },
+    // 80% target line
+    { type: 'line', xref: 'paper', x0: 0, x1: 1, y0: 80, y1: 80, line: { color: '#DC3545', dash: 'dash', width: 1.5 } },
+  ]
 }
 
 /**

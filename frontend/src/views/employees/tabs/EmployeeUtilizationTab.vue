@@ -2,8 +2,10 @@
 import { ref, computed, inject, onMounted, watch, type Ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useApi } from '@/composables/useApi'
+import { utilPctColor, utilPctBgColor, utilBandShapes } from '@/utils/helpers'
 import KpiCard from '@/components/KpiCard.vue'
 import PlotlyChart from '@/components/PlotlyChart.vue'
+import UtilizationFilters from '@/components/UtilizationFilters.vue'
 import type { Employee, DetailedUtilizationEntry, EmployeeMonthUtilization } from '@/types'
 import type Plotly from 'plotly.js-dist-min'
 
@@ -13,36 +15,20 @@ const { get, error } = useApi()
 const employee = inject<Ref<Employee | null>>('employee', ref(null))
 const employeeId = computed(() => Number(route.params.id))
 
-// ---- Time Frame Selectors ----
+// ---- Filter State ----
 
-const currentYear = new Date().getFullYear()
-const yearOptions = [currentYear - 1, currentYear, currentYear + 1]
-const selectedYear = ref(currentYear)
+const filtersRef = ref<InstanceType<typeof UtilizationFilters> | null>(null)
 
-const timeFrameOptions = [
-  { title: 'Current Month', value: 'current_month' },
-  { title: 'QTD (Company)', value: 'qtd_company' },
-  { title: 'QTD (Gov)', value: 'qtd_gov' },
-  { title: 'YTD (Company)', value: 'ytd_company' },
-  { title: 'YTD (Gov)', value: 'ytd_gov' },
-  { title: 'Q1', value: 'q1' },
-  { title: 'Q2', value: 'q2' },
-  { title: 'Q3', value: 'q3' },
-  { title: 'Q4', value: 'q4' },
-  { title: 'January', value: 'january' },
-  { title: 'February', value: 'february' },
-  { title: 'March', value: 'march' },
-  { title: 'April', value: 'april' },
-  { title: 'May', value: 'may' },
-  { title: 'June', value: 'june' },
-  { title: 'July', value: 'july' },
-  { title: 'August', value: 'august' },
-  { title: 'September', value: 'september' },
-  { title: 'October', value: 'october' },
-  { title: 'November', value: 'november' },
-  { title: 'December', value: 'december' },
-]
-const selectedTimeFrame = ref('ytd_company')
+function getMonthName(index: number): string {
+  return ['January','February','March','April','May','June','July','August','September','October','November','December'][index]
+}
+
+const filterYear = ref(new Date().getFullYear())
+const filterTimeFrameType = ref<'Monthly' | 'Quarterly' | 'QTD' | 'YTD'>('YTD')
+const filterSelectedMonth = ref(getMonthName(new Date().getMonth()))
+const filterSelectedQuarter = ref(`Q${Math.ceil((new Date().getMonth() + 1) / 3)}`)
+const filterFyType = ref('Company')
+const filterIncludeProjected = ref(true)
 
 // ---- Data ----
 
@@ -54,7 +40,7 @@ async function fetchData() {
   utilizationEntry.value = null
   try {
     const result = await get<DetailedUtilizationEntry[]>(
-      `/analytics/utilization/detailed?year=${selectedYear.value}&time_frame=${selectedTimeFrame.value}&employee_id=${employeeId.value}`
+      `/analytics/utilization/detailed?year=${filterYear.value}&time_frame=${filtersRef.value?.timeFrame ?? 'ytd_company'}&employee_id=${employeeId.value}&include_projected=${filterIncludeProjected.value}`
     )
     utilizationEntry.value = result.length > 0 ? result[0] ?? null : null
   } catch {
@@ -65,7 +51,11 @@ async function fetchData() {
 }
 
 onMounted(fetchData)
-watch([employeeId, selectedYear, selectedTimeFrame], fetchData)
+watch(
+  [employeeId, filterYear, filterTimeFrameType, filterSelectedMonth, filterSelectedQuarter, filterFyType, filterIncludeProjected],
+  fetchData,
+  { flush: 'post' },
+)
 
 // ---- KPI Computations ----
 
@@ -75,12 +65,7 @@ const billableHours = computed(() => utilizationEntry.value?.actual_billable_hou
 const ptoHours = computed(() => utilizationEntry.value?.pto_hours ?? 0)
 const holidayHours = computed(() => utilizationEntry.value?.holiday_hours ?? 0)
 
-const utilizationColor = computed(() => {
-  const pct = utilizationPct.value
-  if (pct >= 80) return '#4CAF50'
-  if (pct >= 60) return '#FF9800'
-  return '#FF5252'
-})
+const utilizationColor = computed(() => utilPctColor(utilizationPct.value))
 
 const targetAllocationLabel = computed(() => {
   const target = employee.value?.target_allocation
@@ -107,12 +92,6 @@ const tableHeaders = [
   { title: 'Utilization %', key: 'utilization_pct', sortable: true },
 ]
 
-function utilizationChipColor(pct: number | null): string {
-  if (pct == null) return 'grey'
-  if (pct >= 80) return 'success'
-  if (pct >= 60) return 'warning'
-  return 'error'
-}
 
 // ---- Cumulative Utilization Chart ----
 
@@ -144,66 +123,14 @@ const utilizationChartLayout = computed<Partial<Plotly.Layout>>(() => {
     },
     yaxis: {
       title: { text: 'Utilization %' },
-      range: [0, 110],
+      range: [0, 120],
     },
     height: 350,
     legend: {
       orientation: 'h' as const,
       y: -0.3,
     },
-    shapes: [
-      // Red zone (0-60)
-      {
-        type: 'rect' as const,
-        xref: 'paper' as const,
-        yref: 'y' as const,
-        x0: 0,
-        x1: 1,
-        y0: 0,
-        y1: 60,
-        fillcolor: 'rgba(255, 82, 82, 0.08)',
-        line: { width: 0 },
-        layer: 'below',
-      },
-      // Yellow zone (60-80)
-      {
-        type: 'rect' as const,
-        xref: 'paper' as const,
-        yref: 'y' as const,
-        x0: 0,
-        x1: 1,
-        y0: 60,
-        y1: 80,
-        fillcolor: 'rgba(255, 152, 0, 0.08)',
-        line: { width: 0 },
-        layer: 'below',
-      },
-      // Green zone (80-100)
-      {
-        type: 'rect' as const,
-        xref: 'paper' as const,
-        yref: 'y' as const,
-        x0: 0,
-        x1: 1,
-        y0: 80,
-        y1: 100,
-        fillcolor: 'rgba(76, 175, 80, 0.08)',
-        line: { width: 0 },
-        layer: 'below',
-      },
-      // Target line at 80%
-      {
-        type: 'line' as const,
-        xref: 'paper' as const,
-        yref: 'y' as const,
-        x0: 0,
-        x1: 1,
-        y0: 80,
-        y1: 80,
-        line: { color: '#4CAF50', width: 1.5, dash: 'dash' },
-        layer: 'below',
-      },
-    ] as Plotly.Shape[],
+    shapes: utilBandShapes(120) as Plotly.Shape[],
   }
 })
 
@@ -267,35 +194,17 @@ function formatNum(val: number | null | undefined, decimals = 1): string {
 
 <template>
   <div>
-    <!-- Time Frame Selectors -->
-    <v-card class="mb-4">
-      <v-card-text>
-        <v-row align="center">
-          <v-col cols="12" sm="4" md="3">
-            <v-select
-              v-model="selectedYear"
-              :items="yearOptions"
-              label="Year"
-              density="compact"
-              hide-details
-              variant="outlined"
-            />
-          </v-col>
-          <v-col cols="12" sm="8" md="5">
-            <v-select
-              v-model="selectedTimeFrame"
-              :items="timeFrameOptions"
-              item-title="title"
-              item-value="value"
-              label="Time Frame"
-              density="compact"
-              hide-details
-              variant="outlined"
-            />
-          </v-col>
-        </v-row>
-      </v-card-text>
-    </v-card>
+    <!-- Utilization Filters -->
+    <UtilizationFilters
+      ref="filtersRef"
+      v-model:year="filterYear"
+      v-model:time-frame-type="filterTimeFrameType"
+      v-model:selected-month="filterSelectedMonth"
+      v-model:selected-quarter="filterSelectedQuarter"
+      v-model:fy-type="filterFyType"
+      v-model:include-projected-hours="filterIncludeProjected"
+      class="mb-4"
+    />
 
     <!-- Loading -->
     <v-skeleton-loader v-if="dataLoading" type="card, card, image, table" />
@@ -444,13 +353,13 @@ function formatNum(val: number | null | undefined, decimals = 1): string {
                 {{ formatNum(item.holiday_hours) }}
               </template>
               <template #item.utilization_pct="{ item }">
-                <v-chip
-                  :color="utilizationChipColor(item.utilization_pct)"
-                  size="small"
-                  label
+                <span
+                  v-if="item.utilization_pct != null"
+                  :style="{ fontWeight: 600, color: utilPctColor(item.utilization_pct), background: utilPctBgColor(item.utilization_pct), padding: '2px 8px', borderRadius: '4px', display: 'inline-block' }"
                 >
-                  {{ item.utilization_pct != null ? formatNum(item.utilization_pct) + '%' : 'N/A' }}
-                </v-chip>
+                  {{ formatNum(item.utilization_pct) }}%
+                </span>
+                <span v-else>N/A</span>
               </template>
             </v-data-table>
           </v-card-text>

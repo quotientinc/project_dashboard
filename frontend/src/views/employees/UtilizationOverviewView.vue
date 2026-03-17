@@ -4,9 +4,10 @@ import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useApi } from '@/composables/useApi'
 import { useEmployeesStore } from '@/stores/employees'
-import { utilPctColor, downloadCsv } from '@/utils/helpers'
+import { utilPctColor, utilPctBgColor, utilBandShapes, downloadCsv } from '@/utils/helpers'
 import KpiCard from '@/components/KpiCard.vue'
 import PlotlyChart from '@/components/PlotlyChart.vue'
+import UtilizationFilters from '@/components/UtilizationFilters.vue'
 import type { DetailedUtilizationEntry, TimeEntry } from '@/types'
 
 const router = useRouter()
@@ -35,56 +36,36 @@ const utilDialogEmployee = ref<DetailedUtilizationEntry | null>(null)
 const dialogTimeEntries = ref<TimeEntry[]>([])
 const dialogLoading = ref(false)
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-const now = new Date()
-
-const monthNames = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-]
-
-const currentQuarter = `Q${Math.ceil((now.getMonth() + 1) / 3)}`
-
-const yearOptions = computed(() => {
-  const y = now.getFullYear()
-  return [y - 1, y, y + 1]
-})
-
-// Gov quarter mapping: Company Q1 (Jan-Mar) = Gov Q2, etc.
-const govQuarterMap: Record<string, string> = { Q1: 'q2', Q2: 'q3', Q3: 'q4', Q4: 'q1' }
+// Template ref for UtilizationFilters component
+const filtersRef = ref<InstanceType<typeof UtilizationFilters> | null>(null)
 
 // ---------------------------------------------------------------------------
-// Compute the API time_frame param based on filter selections
+// YTD data (parallel fetch, merged into main data)
 // ---------------------------------------------------------------------------
-const utilTimeFrame = computed(() => {
-  switch (utilTimeFrameType.value) {
-    case 'Monthly':
-      return selectedMonth.value.toLowerCase()
-    case 'Quarterly':
-      if (fyType.value === 'Gov') {
-        return govQuarterMap[selectedQuarter.value] ?? selectedQuarter.value.toLowerCase()
-      }
-      return selectedQuarter.value.toLowerCase()
-    case 'QTD':
-      return fyType.value === 'Gov' ? 'qtd_gov' : 'qtd_company'
-    case 'YTD':
-      return fyType.value === 'Gov' ? 'ytd_gov' : 'ytd_company'
-    default:
-      return 'ytd_company'
-  }
-})
+const ytdData = ref<DetailedUtilizationEntry[]>([])
 
 // ---------------------------------------------------------------------------
 // Data fetching
 // ---------------------------------------------------------------------------
 async function fetchUtilizationData() {
   utilLoading.value = true
+  const timeFrame = filtersRef.value?.timeFrame ?? 'ytd_company'
+  const year = utilYear.value
+  const projected = includeProjectedHours.value
   try {
-    utilData.value = await get<DetailedUtilizationEntry[]>(
-      `/analytics/utilization/detailed?year=${utilYear.value}&time_frame=${utilTimeFrame.value}&include_projected=${includeProjectedHours.value}`
-    )
+    const [mainResult, ytdResult] = await Promise.all([
+      get<DetailedUtilizationEntry[]>(
+        `/analytics/utilization/detailed?year=${year}&time_frame=${timeFrame}&include_projected=${projected}`
+      ),
+      // Always fetch YTD (Company) in parallel for the YTD columns
+      timeFrame === 'ytd_company'
+        ? Promise.resolve(null)
+        : get<DetailedUtilizationEntry[]>(
+            `/analytics/utilization/detailed?year=${year}&time_frame=ytd_company&include_projected=${projected}`
+          ),
+    ])
+    utilData.value = mainResult
+    ytdData.value = ytdResult ?? []
   } catch {
     // error handled by useApi
   } finally {
@@ -92,8 +73,21 @@ async function fetchUtilizationData() {
   }
 }
 
+// Build a lookup map: employee_id → YTD entry for quick access in table
+const ytdMap = computed(() => {
+  const map = new Map<number, DetailedUtilizationEntry>()
+  for (const entry of ytdData.value) {
+    map.set(entry.employee_id, entry)
+  }
+  return map
+})
+
 onMounted(fetchUtilizationData)
-watch([utilYear, utilTimeFrame, includeProjectedHours], fetchUtilizationData)
+watch(
+  [utilYear, utilTimeFrameType, selectedMonth, selectedQuarter, fyType, includeProjectedHours],
+  fetchUtilizationData,
+  { flush: 'post' },
+)
 
 // ---------------------------------------------------------------------------
 // Utilization band filter options
@@ -132,6 +126,41 @@ const filteredUtilData = computed(() => {
 })
 
 // ---------------------------------------------------------------------------
+// Merge YTD fields into filtered data for table display
+// ---------------------------------------------------------------------------
+const filteredUtilDataWithYtd = computed(() => {
+  const tf = filtersRef.value?.timeFrame ?? ''
+  const isYtdCompany = tf === 'ytd_company'
+  return filteredUtilData.value.map(e => {
+    if (isYtdCompany) {
+      // When already viewing YTD Company, main data IS the YTD data
+      const available = Math.max((e.possible_hours ?? 0) - (e.pto_hours ?? 0), 0)
+      return {
+        ...e,
+        ytd_possible_hours: e.possible_hours,
+        ytd_actual_billable_hours: e.effective_billable_hours ?? e.actual_billable_hours,
+        ytd_pto_hours: e.pto_hours,
+        ytd_utilization_pct: available > 0
+          ? ((e.effective_billable_hours ?? e.actual_billable_hours) / available * 100)
+          : 0,
+      }
+    }
+    const ytd = ytdMap.value.get(e.employee_id)
+    if (!ytd) return { ...e, ytd_possible_hours: 0, ytd_actual_billable_hours: 0, ytd_pto_hours: 0, ytd_utilization_pct: 0 }
+    const ytdAvailable = Math.max((ytd.possible_hours ?? 0) - (ytd.pto_hours ?? 0), 0)
+    return {
+      ...e,
+      ytd_possible_hours: ytd.possible_hours,
+      ytd_actual_billable_hours: ytd.effective_billable_hours ?? ytd.actual_billable_hours,
+      ytd_pto_hours: ytd.pto_hours,
+      ytd_utilization_pct: ytdAvailable > 0
+        ? ((ytd.effective_billable_hours ?? ytd.actual_billable_hours) / ytdAvailable * 100)
+        : 0,
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
 // KPI computeds
 // ---------------------------------------------------------------------------
 const utilTotalEmployees = computed(() => filteredUtilData.value.length)
@@ -158,7 +187,7 @@ const utilTotalHolidayHrs = computed(() => filteredUtilData.value.reduce((s, e) 
 const utilBandSummary = computed(() => {
   const data = filteredUtilData.value
   const bands = [
-    { label: '111%+', icon: '\uD83D\uDFE3', bgColor: '#fce4ec', borderColor: '#e91e63', min: 111, max: Infinity, employees: [] as { name: string; pct: number }[] },
+    { label: '111%+', icon: '\uD83D\uDFE3', bgColor: '#f3e5f5', borderColor: '#9C27B0', min: 111, max: Infinity, employees: [] as { name: string; pct: number }[] },
     { label: '97% - 110%', icon: '\uD83D\uDFE2', bgColor: '#e8f5e9', borderColor: '#28a745', min: 97, max: 111, employees: [] as { name: string; pct: number }[] },
     { label: '80% - 96%', icon: '\uD83D\uDFE1', bgColor: '#fff8e1', borderColor: '#ffc107', min: 80, max: 97, employees: [] as { name: string; pct: number }[] },
     { label: '51% - 79%', icon: '\uD83D\uDFE0', bgColor: '#fff3e0', borderColor: '#fd7e14', min: 51, max: 80, employees: [] as { name: string; pct: number }[] },
@@ -303,6 +332,9 @@ const utilHeaders = [
   { title: 'Other Non-billable Hrs', key: 'other_nonbillable_hours', minWidth: '150px', align: 'end' as const },
   { title: 'Billable Utilization %', key: 'utilization_pct', minWidth: '140px', align: 'end' as const },
   { title: 'Status', key: 'status', minWidth: '100px' },
+  { title: 'YTD Possible Billable Hrs', key: 'ytd_possible_hours', minWidth: '160px', align: 'end' as const },
+  { title: 'YTD Actual Billable Hrs', key: 'ytd_actual_billable_hours', minWidth: '160px', align: 'end' as const },
+  { title: 'YTD Billable Utilization %', key: 'ytd_utilization_pct', minWidth: '170px', align: 'end' as const },
 ]
 
 // ---------------------------------------------------------------------------
@@ -332,69 +364,10 @@ const utilChartLayout = computed(() => ({
   height: 400,
   margin: { t: 20, r: 20, b: 60, l: 50 },
   xaxis: { title: { text: 'Month' }, tickangle: -45 },
-  yaxis: { title: { text: 'Utilization %' } },
+  yaxis: { title: { text: 'Utilization %' }, range: [0, 120] },
   legend: { orientation: 'h' as const, y: -0.3 },
-  shapes: [
-    {
-      type: 'line' as const,
-      x0: 0, x1: 1, xref: 'paper' as const,
-      y0: 80, y1: 80, yref: 'y' as const,
-      line: { color: '#4CAF50', width: 2, dash: 'dash' as const },
-    },
-  ],
+  shapes: utilBandShapes(120),
 }))
-
-// ---------------------------------------------------------------------------
-// Date range derived from current filter selections (for time entry API call)
-// ---------------------------------------------------------------------------
-const utilDateRange = computed(() => {
-  const year = utilYear.value
-  switch (utilTimeFrameType.value) {
-    case 'Monthly': {
-      const monthIndex = monthNames.indexOf(selectedMonth.value)
-      const lastDay = new Date(year, monthIndex + 1, 0).getDate()
-      return {
-        startDate: `${year}-${String(monthIndex + 1).padStart(2, '0')}-01`,
-        endDate: `${year}-${String(monthIndex + 1).padStart(2, '0')}-${lastDay}`,
-      }
-    }
-    case 'Quarterly': {
-      const q = parseInt(selectedQuarter.value.slice(1))
-      const startMonth = (q - 1) * 3 + 1
-      const endMonth = q * 3
-      const lastDay = new Date(year, endMonth, 0).getDate()
-      return {
-        startDate: `${year}-${String(startMonth).padStart(2, '0')}-01`,
-        endDate: `${year}-${String(endMonth).padStart(2, '0')}-${lastDay}`,
-      }
-    }
-    case 'QTD': {
-      const currentQ = Math.ceil((now.getMonth() + 1) / 3)
-      const qStart = (currentQ - 1) * 3 + 1
-      return {
-        startDate: `${year}-${String(qStart).padStart(2, '0')}-01`,
-        endDate: now.toISOString().slice(0, 10),
-      }
-    }
-    case 'YTD':
-    default: {
-      const endDate = year === now.getFullYear() ? now.toISOString().slice(0, 10) : `${year}-12-31`
-      if (fyType.value === 'Gov') {
-        return { startDate: `${year - 1}-10-01`, endDate: `${year}-09-30` }
-      }
-      return { startDate: `${year}-01-01`, endDate }
-    }
-  }
-})
-
-const dialogPeriodLabel = computed(() => {
-  const { startDate, endDate } = utilDateRange.value
-  const start = new Date(startDate + 'T00:00:00')
-  const end = new Date(endDate + 'T00:00:00')
-  const startLabel = `${monthNames[start.getMonth()]} ${start.getFullYear()}`
-  const endLabel = `${monthNames[end.getMonth()]} ${end.getFullYear()}`
-  return startLabel === endLabel ? startLabel : `${startLabel} \u2013 ${endLabel}`
-})
 
 // ---------------------------------------------------------------------------
 // Dialog: row click handler
@@ -404,11 +377,12 @@ async function onUtilRowClicked(item: DetailedUtilizationEntry) {
   utilDialogOpen.value = true
   dialogLoading.value = true
   try {
+    const dr = filtersRef.value?.dateRange
     dialogTimeEntries.value = await get<TimeEntry[]>('/time-entries/', {
       params: {
         employee_id: item.employee_id,
-        start_date: utilDateRange.value.startDate,
-        end_date: utilDateRange.value.endDate,
+        start_date: dr?.startDate ?? '',
+        end_date: dr?.endDate ?? '',
       },
     })
   } catch {
@@ -621,33 +595,23 @@ function exportUtilCsv() {
     'Billable Utilization %': e.utilization_pct ?? '',
     Status: e.status ?? '',
   }))
-  downloadCsv(rows, `utilization_overview_${utilYear.value}_${utilTimeFrame.value}.csv`)
+  downloadCsv(rows, `utilization_overview_${utilYear.value}_${filtersRef.value?.timeFrame ?? 'ytd_company'}.csv`)
 }
 </script>
 
 <template>
   <div>
     <!-- Controls -->
-    <v-row class="mb-4" align="center">
-      <v-col cols="2">
-        <v-select v-model="utilYear" :items="yearOptions" label="Year" density="compact" variant="outlined" hide-details />
-      </v-col>
-      <v-col cols="2">
-        <v-select v-model="utilTimeFrameType" :items="['Monthly', 'Quarterly', 'QTD', 'YTD']" label="Time Frame" density="compact" variant="outlined" hide-details />
-      </v-col>
-      <v-col cols="2" v-if="utilTimeFrameType === 'Monthly'">
-        <v-select v-model="selectedMonth" :items="monthNames" label="Month" density="compact" variant="outlined" hide-details />
-      </v-col>
-      <v-col cols="2" v-if="utilTimeFrameType === 'Quarterly'">
-        <v-select v-model="selectedQuarter" :items="['Q1','Q2','Q3','Q4']" label="Quarter" density="compact" variant="outlined" hide-details />
-      </v-col>
-      <v-col cols="2" v-if="['Quarterly','QTD','YTD'].includes(utilTimeFrameType)">
-        <v-radio-group v-model="fyType" inline hide-details density="compact" label="FY Type">
-          <v-radio label="Company" value="Company" />
-          <v-radio label="Gov" value="Gov" />
-        </v-radio-group>
-      </v-col>
-    </v-row>
+    <UtilizationFilters
+      ref="filtersRef"
+      v-model:year="utilYear"
+      v-model:time-frame-type="utilTimeFrameType"
+      v-model:selected-month="selectedMonth"
+      v-model:selected-quarter="selectedQuarter"
+      v-model:fy-type="fyType"
+      v-model:include-projected-hours="includeProjectedHours"
+      class="mb-4"
+    />
 
     <!-- Utilization Filters -->
     <v-row class="mb-2">
@@ -688,14 +652,6 @@ function exportUtilCsv() {
           density="compact"
           hide-details
           @click:clear="utilSearchTerm = ''"
-        />
-      </v-col>
-      <v-col cols="12" md="3">
-        <v-checkbox
-          v-model="includeProjectedHours"
-          label="Include projected hours"
-          density="compact"
-          hide-details
         />
       </v-col>
     </v-row>
@@ -750,7 +706,7 @@ function exportUtilCsv() {
           title="Avg Utilization"
           :value="utilAvgUtilization.toFixed(1) + '%'"
           icon="mdi-chart-line"
-          color="#4CAF50"
+          :color="utilPctColor(utilAvgUtilization)"
           :loading="utilLoading"
         />
       </v-col>
@@ -883,8 +839,117 @@ function exportUtilCsv() {
     <v-card v-else class="mb-4">
       <v-card-text class="pa-0">
         <div class="d-flex align-center justify-space-between pa-3 pb-0">
-          <div class="text-caption text-medium-emphasis">
-            {{ filteredUtilData.length }} of {{ utilData.length }} employees &mdash; Click a row to view details
+          <div class="d-flex align-center ga-2">
+            <div class="text-caption text-medium-emphasis">
+              {{ filteredUtilData.length }} of {{ utilData.length }} employees &mdash; Click a row to view details
+            </div>
+            <v-menu location="bottom start" :close-on-content-click="false" max-width="720">
+              <template v-slot:activator="{ props: menuProps }">
+                <v-btn v-bind="menuProps" variant="text" size="small" prepend-icon="mdi-information-outline" color="primary">
+                  Logic for Utilization Table
+                </v-btn>
+              </template>
+              <v-card class="pa-4">
+                <v-card-title class="text-subtitle-1 font-weight-bold pa-0 mb-2">
+                  Logic for Utilization Table
+                </v-card-title>
+                <v-card-text class="pa-0 text-body-2">
+                  <p class="mb-2">For each employee in the utilization table:</p>
+                  <v-table density="compact" class="mb-3 text-caption">
+                    <thead>
+                      <tr>
+                        <th style="min-width:160px">Column</th>
+                        <th style="min-width:180px">Source</th>
+                        <th>Calculation</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>Employee</td>
+                        <td>employees_df['name']</td>
+                        <td>Direct from employees table</td>
+                      </tr>
+                      <tr>
+                        <td>Possible Billable Hrs</td>
+                        <td>metrics['possible']</td>
+                        <td>(working_days &minus; holidays) &times; (target_allocation &minus; overhead_allocation) &times; 8</td>
+                      </tr>
+                      <tr>
+                        <td>Actual Hrs</td>
+                        <td>metrics['actuals']</td>
+                        <td>Sum of ALL hours logged (billable + non-billable)</td>
+                      </tr>
+                      <tr>
+                        <td>Actual Billable Hrs</td>
+                        <td>metrics['actuals']</td>
+                        <td>Sum of hours where billable=1</td>
+                      </tr>
+                      <tr>
+                        <td>Projected Missing Hrs</td>
+                        <td>Calculated (current month only)</td>
+                        <td>projected_hours &times; (missing_working_days / available_working_days)</td>
+                      </tr>
+                      <tr>
+                        <td>Effective Billable Hrs</td>
+                        <td>Calculated</td>
+                        <td>actual_billable_hours + projected_missing_hours</td>
+                      </tr>
+                      <tr>
+                        <td>PTO Hrs</td>
+                        <td>time_entries (FRINGE.PTO)</td>
+                        <td>Sum of hours from time_entries for PTO project</td>
+                      </tr>
+                      <tr>
+                        <td>Holiday Hrs</td>
+                        <td>time_entries (FRINGE.HOL)</td>
+                        <td>Sum of hours for Holiday project (for reference; not in denominator)</td>
+                      </tr>
+                      <tr>
+                        <td>Other Non-billable Hrs</td>
+                        <td>Calculated</td>
+                        <td>(actual_hours &minus; actual_billable_hours) &minus; pto_hours</td>
+                      </tr>
+                      <tr>
+                        <td>Billable Utilization %</td>
+                        <td>Calculated</td>
+                        <td>(effective_billable_hours / (possible_hours &minus; pto_hours)) &times; 100</td>
+                      </tr>
+                      <tr>
+                        <td>Status</td>
+                        <td>Calculated</td>
+                        <td>&ge;111% Over, 97-110% Good, 80-96% Fair, 51-79% Low, &le;50% Under</td>
+                      </tr>
+                      <tr style="background: #f5f5f5;">
+                        <td>YTD Possible Billable Hrs</td>
+                        <td>ytd_metrics['possible']</td>
+                        <td>Sum of possible hours from Jan 1 to end of selected month</td>
+                      </tr>
+                      <tr style="background: #f5f5f5;">
+                        <td>YTD Actual Billable Hrs</td>
+                        <td>ytd_metrics['actuals']</td>
+                        <td>Sum of actual billable hours from Jan 1 to end of selected month</td>
+                      </tr>
+                      <tr style="background: #f5f5f5;">
+                        <td>YTD Billable Utilization %</td>
+                        <td>Calculated</td>
+                        <td>(ytd_actual_billable_hours / (ytd_possible_hours &minus; ytd_pto_hours)) &times; 100</td>
+                      </tr>
+                    </tbody>
+                  </v-table>
+                  <p class="mb-1 font-weight-medium">Notes:</p>
+                  <ul class="text-caption" style="padding-left: 20px;">
+                    <li>Possible hours use (working_days &minus; holidays) from the months table as the authoritative holiday source.</li>
+                    <li>For the current month, missing billable hours are projected using allocation FTE data from the employee's last timesheet entry through end of month.</li>
+                    <li>Effective Billable Hrs = Actual Billable + Projected Missing.</li>
+                    <li>Use the "Include projected hours" toggle to switch between projected and actual-only views.</li>
+                    <li>Possible hours are adjusted for employees hired or terminated mid-month (employment proration).</li>
+                    <li>Billable Utilization % uses available hours (possible &minus; PTO) as the denominator.</li>
+                    <li>Click on any row to view project-level breakdown.</li>
+                    <li>YTD columns show cumulative data from January 1st through the end of the selected month.</li>
+                  </ul>
+                </v-card-text>
+              </v-card>
+            </v-menu>
           </div>
           <v-btn
             variant="outlined"
@@ -898,7 +963,7 @@ function exportUtilCsv() {
         </div>
         <v-data-table
           :headers="utilHeaders"
-          :items="filteredUtilData"
+          :items="filteredUtilDataWithYtd"
           v-model:sort-by="utilTableSortBy"
           density="compact"
           hover
@@ -931,13 +996,35 @@ function exportUtilCsv() {
             {{ value != null ? value.toFixed(1) : '-' }}
           </template>
           <template #item.utilization_pct="{ value }">
-            <span v-if="value != null" :style="{ fontWeight: 600, color: utilPctColor(value) }">
+            <span
+              v-if="value != null"
+              :style="{ fontWeight: 600, color: utilPctColor(value), background: utilPctBgColor(value), padding: '2px 8px', borderRadius: '4px', display: 'inline-block' }"
+            >
               {{ value.toFixed(1) }}%
             </span>
             <span v-else>-</span>
           </template>
           <template #item.status="{ value }">
             {{ value ?? '-' }}
+          </template>
+          <template #item.ytd_possible_hours="{ value }">
+            <span style="background: #f5f5f5; display: block; padding: 0 4px;">
+              {{ value != null ? value.toFixed(1) : '-' }}
+            </span>
+          </template>
+          <template #item.ytd_actual_billable_hours="{ value }">
+            <span style="background: #f5f5f5; display: block; padding: 0 4px;">
+              {{ value != null ? value.toFixed(1) : '-' }}
+            </span>
+          </template>
+          <template #item.ytd_utilization_pct="{ value }">
+            <span
+              v-if="value != null"
+              :style="{ fontWeight: 600, color: utilPctColor(value), background: utilPctBgColor(value), padding: '2px 8px', borderRadius: '4px', display: 'inline-block' }"
+            >
+              {{ value.toFixed(1) }}%
+            </span>
+            <span v-else style="background: #f5f5f5; display: block; padding: 0 4px;">-</span>
           </template>
         </v-data-table>
       </v-card-text>
@@ -1002,20 +1089,26 @@ function exportUtilCsv() {
           <!-- Employee Name & Period -->
           <div class="text-h5 font-weight-bold mb-1">
             {{ utilDialogEmployee.employee_name }}
-            <v-chip
+            <span
               class="ml-2"
-              :color="utilPctColor(utilDialogEmployee.utilization_pct)"
-              variant="flat"
-              size="small"
+              :style="{
+                fontWeight: 600,
+                color: utilPctColor(utilDialogEmployee.utilization_pct),
+                background: utilPctBgColor(utilDialogEmployee.utilization_pct),
+                padding: '2px 10px',
+                borderRadius: '4px',
+                fontSize: '14px',
+                display: 'inline-block',
+              }"
             >
               {{ (utilDialogEmployee.utilization_pct ?? 0).toFixed(1) }}%
-            </v-chip>
+            </span>
             <v-chip v-if="utilDialogEmployee.status" class="ml-1" size="small" variant="flat">
               {{ utilDialogEmployee.status }}
             </v-chip>
           </div>
           <div class="text-caption text-medium-emphasis mb-4">
-            {{ dialogPeriodLabel }}
+            {{ filtersRef?.periodLabel ?? '' }}
           </div>
 
           <!-- Section 1: Calculation Breakdown -->

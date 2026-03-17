@@ -266,6 +266,7 @@ export interface EmployeeMonthUtilization {
 export interface DetailedUtilizationEntry {
   employee_id: number
   employee_name: string
+  department: string | null
   role: string | null
   billable: number
   possible_hours: number
@@ -287,6 +288,11 @@ export interface DetailedUtilizationEntry {
   status?: string
   status_num?: number
   monthly_breakdown: EmployeeMonthUtilization[]
+  // YTD fields (merged on frontend from a parallel ytd_company API call)
+  ytd_possible_hours?: number
+  ytd_actual_billable_hours?: number
+  ytd_pto_hours?: number
+  ytd_utilization_pct?: number | null
 }
 
 // ---- Allocation Planning ----

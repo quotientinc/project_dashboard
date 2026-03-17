@@ -7,6 +7,7 @@
  */
 import { ref, computed, onMounted, watch } from 'vue'
 import { useApi } from '@/composables/useApi'
+import { utilPctColor, utilBandShapes } from '@/utils/helpers'
 import KpiCard from '@/components/KpiCard.vue'
 import PlotlyChart from '@/components/PlotlyChart.vue'
 import type {
@@ -118,11 +119,6 @@ function formatPercent(value: number): string {
   return `${value.toFixed(1)}%`
 }
 
-function utilizationColor(pct: number): string {
-  if (pct >= 80) return '#4CAF50'
-  if (pct >= 60) return '#FB8C00'
-  return '#FF5252'
-}
 
 // ---- KPI computed values ----
 
@@ -204,12 +200,7 @@ const utilizationChartData = computed<Plotly.Data[]>(() => {
 
   const names = sorted.map((e) => e.name)
   const pcts = sorted.map((e) => e.utilization_pct ?? 0)
-  const colors = pcts.map((p) => {
-    if (p > 120) return '#ffcccc'
-    if (p >= 100) return '#fff9cc'
-    if (p >= 80) return '#4CAF50'
-    return '#cce5ff'
-  })
+  const colors = pcts.map((p) => utilPctColor(p))
 
   return [
     {
@@ -228,17 +219,7 @@ const utilizationChartLayout = computed<Partial<Plotly.Layout>>(() => ({
   height: 350,
   yaxis: { title: { text: 'Billable Utilization %' }, range: [0, 150] },
   xaxis: { tickangle: -45 },
-  shapes: [
-    {
-      type: 'line' as const,
-      x0: 0,
-      x1: 1,
-      y0: 80,
-      y1: 80,
-      xref: 'paper' as const,
-      line: { color: 'red', dash: 'dash', width: 2 },
-    },
-  ],
+  shapes: utilBandShapes(150) as Plotly.Shape[],
 }))
 
 // Monthly Burn Rate (stacked area + total line)
@@ -332,54 +313,11 @@ const monthlyUtilTrendData = computed<Plotly.Data[]>(() => {
 const monthlyUtilTrendLayout = computed<Partial<Plotly.Layout>>(() => ({
   height: 350,
   xaxis: { title: { text: 'Month' } },
-  yaxis: { title: { text: 'Average Utilization %' }, range: [0, 100] },
+  yaxis: { title: { text: 'Average Utilization %' }, range: [0, 120] },
   hovermode: 'x unified' as const,
   showlegend: true,
   legend: { orientation: 'h' as const, y: 1.12 },
-  shapes: [
-    {
-      type: 'rect' as const,
-      xref: 'paper' as const,
-      x0: 0,
-      x1: 1,
-      y0: 80,
-      y1: 100,
-      fillcolor: 'green',
-      opacity: 0.1,
-      line: { width: 0 },
-    },
-    {
-      type: 'rect' as const,
-      xref: 'paper' as const,
-      x0: 0,
-      x1: 1,
-      y0: 60,
-      y1: 80,
-      fillcolor: 'yellow',
-      opacity: 0.1,
-      line: { width: 0 },
-    },
-    {
-      type: 'rect' as const,
-      xref: 'paper' as const,
-      x0: 0,
-      x1: 1,
-      y0: 0,
-      y1: 60,
-      fillcolor: 'red',
-      opacity: 0.1,
-      line: { width: 0 },
-    },
-    {
-      type: 'line' as const,
-      x0: 0,
-      x1: 1,
-      y0: 80,
-      y1: 80,
-      xref: 'paper' as const,
-      line: { color: '#FF5252', dash: 'dash', width: 2 },
-    },
-  ],
+  shapes: utilBandShapes(120) as Plotly.Shape[],
 }))
 
 // ---- Under-Utilized Projects ----
@@ -400,12 +338,6 @@ const underUtilizedHeaders = [
   { title: 'Revenue Gap', key: 'revenue_gap', align: 'end' as const, width: '140px' },
 ]
 
-function underUtilColor(pct: number): string {
-  if (pct >= 90) return 'success'
-  if (pct >= 70) return 'warning'
-  if (pct >= 50) return 'orange'
-  return 'error'
-}
 
 // ---- Recent activity ----
 
@@ -621,7 +553,7 @@ watch(timeRange, () => {
           title="Avg Utilization"
           :value="kpis ? formatPercent(kpis.avg_utilization) : '--'"
           icon="mdi-chart-arc"
-          :color="kpis && kpis.avg_utilization > 0 ? utilizationColor(kpis.avg_utilization) : '#1976D2'"
+          :color="kpis && kpis.avg_utilization > 0 ? utilPctColor(kpis.avg_utilization) : '#1976D2'"
           :loading="loadingKpis"
         />
       </v-col>
@@ -740,7 +672,7 @@ watch(timeRange, () => {
           >
             <template #item.utilization_pct="{ item }">
               <v-chip
-                :color="underUtilColor(item.utilization_pct ?? 0)"
+                :color="(item.utilization_pct ?? 0) >= 90 ? 'success' : (item.utilization_pct ?? 0) >= 70 ? 'warning' : (item.utilization_pct ?? 0) >= 50 ? 'orange' : 'error'"
                 size="small"
                 variant="tonal"
               >
