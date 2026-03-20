@@ -395,24 +395,35 @@ async function onUtilRowClicked(item: DetailedUtilizationEntry) {
 // ---------------------------------------------------------------------------
 // Dialog: Streamlit-style step cards and variable reference table (HTML)
 // ---------------------------------------------------------------------------
+// Badge colors using rgba so they work on both light and dark surfaces
 const badgeColors: Record<string, string> = {
-  workdays: '#dbeafe', holidays: '#dbeafe', daily_hrs: '#dbeafe',
-  fte: '#dbeafe', proration: '#dbeafe', possible: '#e0e7ff',
-  pto: '#fef3c7', available: '#d1fae5', actual_billable: '#ede9fe',
-  projected: '#fce7f3', effective: '#bae6fd', utilization: '#fef9c3',
+  workdays: 'rgba(59, 130, 246, 0.15)',    // blue
+  holidays: 'rgba(59, 130, 246, 0.15)',    // blue
+  daily_hrs: 'rgba(59, 130, 246, 0.15)',   // blue
+  fte: 'rgba(59, 130, 246, 0.15)',         // blue
+  proration: 'rgba(59, 130, 246, 0.15)',   // blue
+  possible: 'rgba(99, 102, 241, 0.15)',    // indigo
+  pto: 'rgba(245, 158, 11, 0.15)',         // amber
+  available: 'rgba(16, 185, 129, 0.15)',   // green
+  actual_billable: 'rgba(139, 92, 246, 0.15)', // purple
+  projected: 'rgba(236, 72, 153, 0.15)',   // pink
+  effective: 'rgba(14, 165, 233, 0.15)',   // sky
+  utilization: 'rgba(234, 179, 8, 0.15)',  // yellow
 }
 
+const defaultBadgeBg = 'rgba(100, 116, 139, 0.1)'
+
 function badge(colorKey: string, label: string, value: string): string {
-  return `<span style="display:inline-block;padding:2px 8px;border-radius:4px;margin:0 2px;font-size:14px;background:${badgeColors[colorKey] ?? '#f1f5f9'}">${label} <strong>${value}</strong></span>`
+  return `<span style="display:inline-block;padding:2px 8px;border-radius:4px;margin:0 2px;font-size:14px;background:${badgeColors[colorKey] ?? defaultBadgeBg}">${label} <strong>${value}</strong></span>`
 }
 
 function resultBadge(colorKey: string, value: string): string {
-  return `<span style="display:inline-block;padding:2px 8px;border-radius:4px;margin:0 2px;font-size:14px;background:${badgeColors[colorKey] ?? '#f1f5f9'};font-weight:700">${value}</span>`
+  return `<span style="display:inline-block;padding:2px 8px;border-radius:4px;margin:0 2px;font-size:14px;background:${badgeColors[colorKey] ?? defaultBadgeBg};font-weight:700">${value}</span>`
 }
 
 function stepCard(accentColor: string, stepLabel: string, formulaHtml: string): string {
-  return `<div style="margin-bottom:10px;padding:10px 14px;background:#f8fafc;border-radius:8px;border-left:3px solid ${accentColor};">
-    <div style="font-size:12px;color:#64748b;margin-bottom:4px;">${stepLabel}</div>
+  return `<div style="margin-bottom:10px;padding:10px 14px;background:rgba(100, 116, 139, 0.06);border-radius:8px;border-left:3px solid ${accentColor};">
+    <div style="font-size:12px;opacity:0.6;margin-bottom:4px;">${stepLabel}</div>
     <div style="line-height:1.8;">${formulaHtml}</div>
   </div>`
 }
@@ -495,8 +506,9 @@ const dialogVariableTableHtml = computed(() => {
     { variable: 'Billable Utilization %', value: utilPct.toFixed(1) + '%', definition: 'Effective Billable / Available x 100', source: 'Final Result', colorKey: 'utilization', highlight: true },
   ]
 
-  const thStyle = 'background:#f1f5f9;padding:8px 12px;text-align:left;border-bottom:2px solid #e2e8f0;font-weight:600;'
-  const tdBase = 'padding:6px 12px;border-bottom:1px solid #e2e8f0;font-size:14px;'
+  const borderColor = 'rgba(100, 116, 139, 0.2)'
+  const thStyle = `background:rgba(100, 116, 139, 0.08);padding:8px 12px;text-align:left;border-bottom:2px solid ${borderColor};font-weight:600;`
+  const tdBase = `padding:6px 12px;border-bottom:1px solid ${borderColor};font-size:14px;`
 
   let html = `<table style="width:100%;border-collapse:collapse;font-size:14px;">
     <tr>
@@ -507,7 +519,7 @@ const dialogVariableTableHtml = computed(() => {
     </tr>`
 
   for (const r of rows) {
-    const bg = badgeColors[r.colorKey] ?? '#f1f5f9'
+    const bg = badgeColors[r.colorKey] ?? defaultBadgeBg
     if (r.highlight) {
       const rowStyle = `background:${bg};font-weight:700;`
       html += `<tr>
