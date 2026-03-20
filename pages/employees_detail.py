@@ -698,14 +698,12 @@ def render_employee_edit_tab(db, processor, employee_id):
                 key=f"target_{employee_id}"
             )
 
-        # Apply defaults for billable employees
+        # Show info about typical defaults for billable employees
         if billable:
-            overhead_allocation = 0.0
-            # Show info about defaults
             if pay_type == "Salary":
-                st.info("Billable Salary employees: overhead set to 0, target typically 1.0")
+                st.info("Billable Salary employees: overhead typically 0, target typically 1.0")
             else:  # Hourly
-                st.info("Billable Hourly employees: overhead set to 0, target typically 0.3")
+                st.info("Billable Hourly employees: overhead typically 0, target typically 0.3")
 
         st.markdown("---")
 
