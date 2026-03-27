@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useApi } from '@/composables/useApi'
 import { useEmployeesStore } from '@/stores/employees'
@@ -10,7 +9,6 @@ import PlotlyChart from '@/components/PlotlyChart.vue'
 import UtilizationFilters from '@/components/UtilizationFilters.vue'
 import type { DetailedUtilizationEntry, TimeEntry } from '@/types'
 
-const router = useRouter()
 const { get } = useApi()
 
 // ---------------------------------------------------------------------------

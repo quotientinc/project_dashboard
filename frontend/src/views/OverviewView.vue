@@ -219,7 +219,7 @@ const utilizationChartLayout = computed<Partial<Plotly.Layout>>(() => ({
   height: 350,
   yaxis: { title: { text: 'Billable Utilization %' }, range: [0, 150] },
   xaxis: { tickangle: -45 },
-  shapes: utilBandShapes(150) as Plotly.Shape[],
+  shapes: utilBandShapes(150) as unknown as Plotly.Shape[],
 }))
 
 // Monthly Burn Rate (stacked area + total line)
@@ -317,7 +317,7 @@ const monthlyUtilTrendLayout = computed<Partial<Plotly.Layout>>(() => ({
   hovermode: 'x unified' as const,
   showlegend: true,
   legend: { orientation: 'h' as const, y: 1.12 },
-  shapes: utilBandShapes(120) as Plotly.Shape[],
+  shapes: utilBandShapes(120) as unknown as Plotly.Shape[],
 }))
 
 // ---- Under-Utilized Projects ----

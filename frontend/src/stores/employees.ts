@@ -22,10 +22,10 @@ export const useEmployeesStore = defineStore('employees', () => {
   // Tab 3: Utilization Overview filters
   // -----------------------------------------------------------------------
   const utilYear = ref(new Date().getFullYear())
-  const utilTimeFrameType = ref('YTD')
+  const utilTimeFrameType = ref<'YTD' | 'Monthly' | 'Quarterly' | 'QTD'>('YTD')
   const selectedMonth = ref(getMonthName(new Date().getMonth()))
   const selectedQuarter = ref(`Q${Math.ceil((new Date().getMonth() + 1) / 3)}`)
-  const fyType = ref('Company')
+  const fyType = ref<'Company' | 'Gov'>('Company')
   const includeProjectedHours = ref(true)
   const utilBandFilter = ref<string[]>([])
   const utilSearchTerm = ref('')
@@ -59,5 +59,5 @@ function getMonthName(index: number): string {
   return [
     'January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December',
-  ][index]
+  ][index] ?? 'January'
 }

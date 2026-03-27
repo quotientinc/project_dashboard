@@ -78,12 +78,12 @@ const UTIL_BANDS: { min: number; band: UtilBand }[] = [
 ]
 
 function _band(v: number | null | undefined): UtilBand {
-  if (v == null) return UTIL_BANDS[UTIL_BANDS.length - 1].band
+  if (v == null) return UTIL_BANDS[UTIL_BANDS.length - 1]!.band
   const rounded = Math.round(v)
   for (const { min, band } of UTIL_BANDS) {
     if (rounded >= min) return band
   }
-  return UTIL_BANDS[UTIL_BANDS.length - 1].band
+  return UTIL_BANDS[UTIL_BANDS.length - 1]!.band
 }
 
 /** Return the border / accent color for a utilization percentage. */

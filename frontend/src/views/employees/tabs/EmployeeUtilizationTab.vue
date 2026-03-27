@@ -20,14 +20,14 @@ const employeeId = computed(() => Number(route.params.id))
 const filtersRef = ref<InstanceType<typeof UtilizationFilters> | null>(null)
 
 function getMonthName(index: number): string {
-  return ['January','February','March','April','May','June','July','August','September','October','November','December'][index]
+  return ['January','February','March','April','May','June','July','August','September','October','November','December'][index] ?? 'January'
 }
 
 const filterYear = ref(new Date().getFullYear())
 const filterTimeFrameType = ref<'Monthly' | 'Quarterly' | 'QTD' | 'YTD'>('YTD')
 const filterSelectedMonth = ref(getMonthName(new Date().getMonth()))
 const filterSelectedQuarter = ref(`Q${Math.ceil((new Date().getMonth() + 1) / 3)}`)
-const filterFyType = ref('Company')
+const filterFyType = ref<'Company' | 'Gov'>('Company')
 const filterIncludeProjected = ref(true)
 
 // ---- Data ----
@@ -130,7 +130,7 @@ const utilizationChartLayout = computed<Partial<Plotly.Layout>>(() => {
       orientation: 'h' as const,
       y: -0.3,
     },
-    shapes: utilBandShapes(120) as Plotly.Shape[],
+    shapes: utilBandShapes(120) as unknown as Plotly.Shape[],
   }
 })
 

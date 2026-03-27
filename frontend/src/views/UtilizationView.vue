@@ -26,13 +26,13 @@ const filterYear = ref(new Date().getFullYear())
 const filterTimeFrameType = ref<'Monthly' | 'Quarterly' | 'QTD' | 'YTD'>('YTD')
 const filterSelectedMonth = ref(getMonthName(new Date().getMonth()))
 const filterSelectedQuarter = ref(`Q${Math.ceil((new Date().getMonth() + 1) / 3)}`)
-const filterFyType = ref('Company')
+const filterFyType = ref<'Company' | 'Gov'>('Company')
 const filterIncludeProjected = ref(true)
 
 const selectedEmployees = ref<number[]>([])
 
 function getMonthName(index: number): string {
-  return ['January','February','March','April','May','June','July','August','September','October','November','December'][index]
+  return ['January','February','March','April','May','June','July','August','September','October','November','December'][index] ?? 'January'
 }
 
 // ---- Data ----
@@ -187,7 +187,7 @@ const trendChartLayout = computed<Partial<Plotly.Layout>>(() => ({
   hovermode: 'x unified',
   showlegend: true,
   legend: { orientation: 'h' as const, y: -0.25 },
-  shapes: utilBandShapes(120) as Plotly.Shape[],
+  shapes: utilBandShapes(120) as unknown as Plotly.Shape[],
 }))
 
 // ---- Chart 2: Utilization Distribution (histogram using 5 bands) ----
