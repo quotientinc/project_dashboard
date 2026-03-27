@@ -766,8 +766,11 @@ class DataProcessor:
         """Build projected data from allocations table"""
 
         # Build query to get allocations
-        # Compare at YYYY-MM level using SUBSTR to handle both YYYY-MM and
-        # YYYY-MM-DD storage formats in the allocation_date column.
+        # Use direct date range comparison so SQLite can leverage the
+        # idx_allocations_allocation_date index (SUBSTR prevented index use).
+        # end_exclusive is the first day after the end month to include all
+        # dates within the end month.
+        end_exclusive = (end + pd.offsets.MonthEnd(0) + pd.Timedelta(days=1))
         query = """
             SELECT
                 a.employee_id,
@@ -776,10 +779,10 @@ class DataProcessor:
                 a.allocated_fte,
                 a.bill_rate
             FROM allocations a
-            WHERE SUBSTR(a.allocation_date, 1, 7) >= ?
-                AND SUBSTR(a.allocation_date, 1, 7) <= ?
+            WHERE a.allocation_date >= ?
+                AND a.allocation_date < ?
         """
-        params = [start.strftime('%Y-%m'), end.strftime('%Y-%m')]
+        params = [start.strftime('%Y-%m-%d'), end_exclusive.strftime('%Y-%m-%d')]
 
         # Add constraint filter
         if filter_type == 'project' and filter_value:
@@ -961,29 +964,31 @@ class DataProcessor:
         if cross_join.empty:
             return {}
 
-        # Calculate proration factor for partial months
-        def calculate_proration_factor(row):
-            """Calculate the proportion of the month the employee was active"""
-            month_start = row['month_start']
-            month_end = row['month_end']
-            hire_date = row['hire_date']
-            term_date = row['term_date']
+        # Calculate proration factor for partial months (vectorized)
+        # Determine actual start: use hire_date if present and later than month_start
+        has_hire = cross_join['hire_date'].notna()
+        actual_start = cross_join['month_start'].copy()
+        actual_start = actual_start.where(
+            ~has_hire | (cross_join['month_start'] >= cross_join['hire_date']),
+            cross_join['hire_date']
+        )
 
-            # Determine actual start and end dates for this employee in this month
-            actual_start = month_start if pd.isna(hire_date) else max(month_start, hire_date)
-            actual_end = month_end if pd.isna(term_date) else min(month_end, term_date)
+        # Determine actual end: use term_date if present and earlier than month_end
+        has_term = cross_join['term_date'].notna()
+        actual_end = cross_join['month_end'].copy()
+        actual_end = actual_end.where(
+            ~has_term | (cross_join['month_end'] <= cross_join['term_date']),
+            cross_join['term_date']
+        )
 
-            # If full month, return 1.0
-            if actual_start == month_start and actual_end == month_end:
-                return 1.0
+        # Full month case: actual_start == month_start and actual_end == month_end
+        is_full_month = (actual_start == cross_join['month_start']) & (actual_end == cross_join['month_end'])
 
-            # Calculate proportion of month worked
-            days_in_month = (month_end - month_start).days + 1
-            days_worked = (actual_end - actual_start).days + 1
+        # Calculate days
+        days_in_month = (cross_join['month_end'] - cross_join['month_start']).dt.days + 1
+        days_worked = (actual_end - actual_start).dt.days + 1
 
-            return days_worked / days_in_month
-
-        cross_join['proration_factor'] = cross_join.apply(calculate_proration_factor, axis=1)
+        cross_join['proration_factor'] = np.where(is_full_month, 1.0, days_worked / days_in_month)
 
         # Subtract holidays from working_days to get available working days
         # months.holidays is the authoritative source for company holidays

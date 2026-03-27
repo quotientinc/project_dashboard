@@ -87,26 +87,22 @@ def _count_working_days(start_d, end_d) -> int:
     return max(count, 0)
 
 
-def _get_working_days_in_range(start_date, end_date, months_df, year, month):
+def _get_working_days_in_range(start_date, end_date, months_lookup, year, month):
     """Calculate working days an employee was active in a specific month.
 
     Prorates based on hire/term dates relative to the month boundaries.
     Matches the helper `get_working_days_in_range`.
-    """
-    month_info = months_df[
-        (months_df["year"] == year) & (months_df["month"] == month)
-    ] if not months_df.empty else pd.DataFrame()
 
-    if month_info.empty:
+    ``months_lookup`` is a dict keyed by ``(year, month)`` with values
+    ``{"working_days": int, "holidays": int}`` – pre-built from the months
+    DataFrame to avoid repeated boolean-index filtering.
+    """
+    m_info = months_lookup.get((year, month))
+
+    if m_info is None:
         return 21  # Default fallback
 
-    working_days_in_month = int(month_info["working_days"].iloc[0])
-    holidays_in_month = (
-        int(month_info["holidays"].iloc[0])
-        if "holidays" in month_info.columns and pd.notna(month_info["holidays"].iloc[0])
-        else 0
-    )
-    working_days_in_month = max(working_days_in_month - holidays_in_month, 0)
+    working_days_in_month = max(m_info["working_days"] - m_info["holidays"], 0)
 
     month_start = datetime(year, month, 1).date()
     month_end = datetime(year, month, cal_mod.monthrange(year, month)[1]).date()
@@ -155,25 +151,27 @@ def _compute_employee_utilizations(
     period_start_date = pd.to_datetime(start_date).date()
     period_end_date = pd.to_datetime(end_date).date()
 
-    def is_active_in_period(row):
-        if pd.notna(row.get("term_date")):
-            term_d = pd.to_datetime(row["term_date"]).date()
-            if term_d < period_start_date:
-                return False
-        if pd.notna(row.get("hire_date")):
-            hire_d = pd.to_datetime(row["hire_date"]).date()
-            if hire_d > period_end_date:
-                return False
-        return True
-
-    billable_employees = billable_employees[
-        billable_employees.apply(is_active_in_period, axis=1)
-    ]
+    # Vectorized active-in-period filter (replaces .apply row-by-row)
+    term_dates = pd.to_datetime(billable_employees["term_date"], errors="coerce")
+    hire_dates = pd.to_datetime(billable_employees["hire_date"], errors="coerce")
+    term_ok = term_dates.isna() | (term_dates.dt.date >= period_start_date)
+    hire_ok = hire_dates.isna() | (hire_dates.dt.date <= period_end_date)
+    billable_employees = billable_employees[term_ok & hire_ok]
     if billable_employees.empty:
         return []
 
     # Get months metadata for working-days calculation
     months_df = db.get_months()
+
+    # Pre-build months lookup to avoid repeated DataFrame filtering
+    months_lookup: dict[tuple[int, int], dict] = {}
+    if not months_df.empty:
+        for _, mrow in months_df.iterrows():
+            key = (int(mrow["year"]), int(mrow["month"]))
+            months_lookup[key] = {
+                "working_days": int(mrow["working_days"]),
+                "holidays": int(mrow["holidays"]) if pd.notna(mrow.get("holidays")) else 0,
+            }
 
     # Get time entries for PTO/holiday and last-entry-date calculations
     all_time_entries = db.get_time_entries(start_date=start_date, end_date=end_date)
@@ -260,20 +258,11 @@ def _compute_employee_utilizations(
         last_entry_map = last_entry_by_month_emp.get((m_year, m_month), {})
 
         # Current month info for projected-missing calculation
-        cm_month_info = pd.DataFrame()
         cm_available_working_days = 0
-        if is_current_month and not months_df.empty:
-            cm_month_info = months_df[
-                (months_df["year"] == m_year) & (months_df["month"] == m_month)
-            ]
-            if not cm_month_info.empty:
-                wd = int(cm_month_info["working_days"].iloc[0])
-                hd = (
-                    int(cm_month_info["holidays"].iloc[0])
-                    if pd.notna(cm_month_info["holidays"].iloc[0])
-                    else 0
-                )
-                cm_available_working_days = max(wd - hd, 1)
+        if is_current_month:
+            cm_info = months_lookup.get((m_year, m_month))
+            if cm_info:
+                cm_available_working_days = max(cm_info["working_days"] - cm_info["holidays"], 1)
 
         for _, emp in billable_employees.iterrows():
             emp_id = int(emp["id"])
@@ -314,7 +303,7 @@ def _compute_employee_utilizations(
             possible_worked_days = emp_possible.get("worked_days", 0)
 
             actual_working_days = _get_working_days_in_range(
-                hire_date, term_date, months_df, m_year, m_month
+                hire_date, term_date, months_lookup, m_year, m_month
             )
 
             if actual_working_days != possible_worked_days and possible_worked_days > 0:
@@ -462,7 +451,7 @@ def get_overview(
     # Streamlit overview fix for issue #40.
     if not time_entries_df.empty:
         kpis.total_budget_used = float(
-            time_entries_df.apply(_calculate_entry_revenue, axis=1).sum()
+            _vectorized_revenue(time_entries_df).sum()
         )
 
     # Calculate avg_utilization using the shared per-employee helper
@@ -642,6 +631,18 @@ def _calculate_entry_revenue(row) -> float:
     elif pd.notna(row.get("hourly_rate")) and pd.notna(row.get("hours")):
         return row["hours"] * row["hourly_rate"]
     return 0.0
+
+
+def _vectorized_revenue(df: pd.DataFrame) -> pd.Series:
+    """Vectorized revenue calculation: use amount if present, else hours * hourly_rate."""
+    has_amount = df["amount"].notna() & (df["amount"] != 0)
+    has_rate = (df["hourly_rate"].notna() & df["hours"].notna()) if "hourly_rate" in df.columns else pd.Series(False, index=df.index)
+    rate_col = df.get("hourly_rate", 0)
+    return pd.Series(
+        np.where(has_amount, df["amount"],
+                 np.where(has_rate, df["hours"] * rate_col, 0.0)),
+        index=df.index,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -986,7 +987,7 @@ def get_client_analysis(
         return []
 
     # Calculate revenue per entry
-    time_entries_df["revenue"] = time_entries_df.apply(_calculate_entry_revenue, axis=1)
+    time_entries_df["revenue"] = _vectorized_revenue(time_entries_df)
 
     # Join with projects to get client
     client_df = time_entries_df.merge(
@@ -1062,7 +1063,7 @@ def get_year_forecast(
     # Calculate revenue
     if not time_entries_df.empty:
         time_entries_df["date"] = pd.to_datetime(time_entries_df["date"])
-        time_entries_df["revenue"] = time_entries_df.apply(_calculate_entry_revenue, axis=1)
+        time_entries_df["revenue"] = _vectorized_revenue(time_entries_df)
         time_entries_df["month_num"] = time_entries_df["date"].dt.month
         ytd_monthly = time_entries_df.groupby("month_num")["revenue"].sum().to_dict()
     else:
@@ -1168,6 +1169,7 @@ def _build_funding_entry(
     db: DatabaseManager,
     allocations_df=None,
     months_df=None,
+    avg_monthly_invoice=None,
 ) -> FundingReviewEntry:
     """Build a FundingReviewEntry for a single project row.
 
@@ -1178,6 +1180,9 @@ def _build_funding_entry(
             per-project db.get_allocations() calls.
         months_df: Optional pre-fetched months DataFrame to avoid
             per-project db.get_months() calls.
+        avg_monthly_invoice: Optional pre-computed average monthly invoice.
+            If provided, skips the per-project calculation. Use with
+            calculate_avg_monthly_invoices_batch() to avoid N+1 queries.
     """
     from app.services.funding_helpers import (
         calculate_avg_monthly_invoice,
@@ -1192,7 +1197,11 @@ def _build_funding_entry(
     remaining = awarded_value - budget_used
     funding_pct = (remaining / awarded_value * 100) if awarded_value > 0 else 0.0
 
-    avg_monthly = calculate_avg_monthly_invoice(project_id, db, DataProcessor)
+    avg_monthly = (
+        avg_monthly_invoice
+        if avg_monthly_invoice is not None
+        else calculate_avg_monthly_invoice(project_id, db, DataProcessor)
+    )
     runway = calculate_funding_runway(remaining, avg_monthly)
     health_label = get_funding_health_status(funding_pct)
     current_potential = calculate_current_month_potential(
@@ -1238,13 +1247,20 @@ def get_funding_review(
     all_allocations = db.get_allocations()
     months_df = db.get_months()
 
+    # Batch-compute avg monthly invoices for all projects in one SQL query
+    # instead of calling get_performance_metrics per project (N+1 elimination)
+    from app.services.funding_helpers import calculate_avg_monthly_invoices_batch
+    avg_invoices = calculate_avg_monthly_invoices_batch(db)
+
     results = []
     for _, project in billable.iterrows():
         try:
+            project_id = str(project["id"])
             entry = _build_funding_entry(
                 project, db,
                 allocations_df=all_allocations,
                 months_df=months_df,
+                avg_monthly_invoice=avg_invoices.get(project_id, 0.0),
             )
             results.append(entry)
         except Exception:
@@ -1426,17 +1442,12 @@ def get_detailed_utilization(
     if employees_df.empty:
         return []
 
-    # Filter to active-in-period (same logic as _compute_employee_utilizations)
-    def is_active_in_period(row):
-        if pd.notna(row.get("term_date")):
-            if pd.to_datetime(row["term_date"]).date() < period_start_date:
-                return False
-        if pd.notna(row.get("hire_date")):
-            if pd.to_datetime(row["hire_date"]).date() > period_end_date:
-                return False
-        return True
-
-    employees_df = employees_df[employees_df.apply(is_active_in_period, axis=1)]
+    # Vectorized active-in-period filter (replaces .apply row-by-row)
+    term_dates = pd.to_datetime(employees_df["term_date"], errors="coerce")
+    hire_dates = pd.to_datetime(employees_df["hire_date"], errors="coerce")
+    term_ok = term_dates.isna() | (term_dates.dt.date >= period_start_date)
+    hire_ok = hire_dates.isna() | (hire_dates.dt.date <= period_end_date)
+    employees_df = employees_df[term_ok & hire_ok]
     if employees_df.empty:
         return []
 
@@ -1449,6 +1460,17 @@ def get_detailed_utilization(
     # 2. Load shared data sources
     # ------------------------------------------------------------------
     months_df = db.get_months()
+
+    # Pre-build months lookup to avoid repeated DataFrame filtering
+    months_lookup: dict[tuple[int, int], dict] = {}
+    if not months_df.empty:
+        for _, mrow in months_df.iterrows():
+            key = (int(mrow["year"]), int(mrow["month"]))
+            months_lookup[key] = {
+                "working_days": int(mrow["working_days"]),
+                "holidays": int(mrow["holidays"]) if pd.notna(mrow.get("holidays")) else 0,
+            }
+
     all_time_entries = db.get_time_entries(start_date=start_date_str, end_date=end_date_str)
 
     try:
@@ -1526,12 +1548,10 @@ def get_detailed_utilization(
     period_workdays = 0
     period_holidays = 0
     for m_year, m_month in month_tuples:
-        if not months_df.empty:
-            month_info = months_df[(months_df["year"] == m_year) & (months_df["month"] == m_month)]
-            if not month_info.empty:
-                period_workdays += int(month_info["working_days"].iloc[0])
-                hol = month_info["holidays"].iloc[0]
-                period_holidays += int(hol) if pd.notna(hol) else 0
+        m_info = months_lookup.get((m_year, m_month))
+        if m_info:
+            period_workdays += m_info["working_days"]
+            period_holidays += m_info["holidays"]
 
     total_days_in_period = (period_end_date - period_start_date).days + 1
 
@@ -1616,7 +1636,7 @@ def get_detailed_utilization(
             possible_worked_days = emp_possible.get("worked_days", 0)
 
             actual_working_days = _get_working_days_in_range(
-                emp_start, emp_end, months_df, m_year, m_month,
+                emp_start, emp_end, months_lookup, m_year, m_month,
             )
 
             if actual_working_days != possible_worked_days and possible_worked_days > 0:
@@ -1638,18 +1658,10 @@ def get_detailed_utilization(
             effective_billable_hours = actual_billable_hours
 
             if include_projected and is_current_month and projected_hours > 0:
-                cm_month_info = months_df[
-                    (months_df["year"] == m_year) & (months_df["month"] == m_month)
-                ] if not months_df.empty else pd.DataFrame()
+                cm_info = months_lookup.get((m_year, m_month))
 
-                if not cm_month_info.empty:
-                    wd = int(cm_month_info["working_days"].iloc[0])
-                    hd = (
-                        int(cm_month_info["holidays"].iloc[0])
-                        if pd.notna(cm_month_info["holidays"].iloc[0])
-                        else 0
-                    )
-                    cm_available_working_days = max(wd - hd, 1)
+                if cm_info:
+                    cm_available_working_days = max(cm_info["working_days"] - cm_info["holidays"], 1)
 
                     last_entry_str = last_entry_by_month_emp.get(
                         (m_year, m_month), {},

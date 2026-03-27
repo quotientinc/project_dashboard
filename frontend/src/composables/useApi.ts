@@ -23,6 +23,16 @@ apiClient.interceptors.response.use(
   }
 )
 
+// Module-level deduplication map (shared across all useApi instances)
+const inflightGets = new Map<string, Promise<unknown>>()
+
+function getCacheKey(url: string, config?: AxiosRequestConfig): string {
+  const params = config?.params
+    ? JSON.stringify(config.params, Object.keys(config.params).sort())
+    : ''
+  return `${url}::${params}`
+}
+
 export function useApi() {
   const activeRequests = ref(0)
   const loading = computed(() => activeRequests.value > 0)
@@ -35,6 +45,7 @@ export function useApi() {
     controller.abort()
     controller = new AbortController()
     activeRequests.value = 0
+    inflightGets.clear()
   }
 
   onScopeDispose(() => {
@@ -42,10 +53,27 @@ export function useApi() {
   })
 
   async function get<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
+    const key = getCacheKey(url, config)
+
+    // Return existing in-flight request if available
+    const existing = inflightGets.get(key)
+    if (existing) {
+      return existing as Promise<T>
+    }
+
     activeRequests.value++
+    const promise = apiClient
+      .get<T>(url, { ...config, signal: controller.signal })
+      .then((response) => response.data)
+      .finally(() => {
+        inflightGets.delete(key)
+        activeRequests.value--
+      })
+
+    inflightGets.set(key, promise)
+
     try {
-      const response = await apiClient.get<T>(url, { ...config, signal: controller.signal })
-      return response.data
+      return await promise
     } catch (err) {
       if (axios.isCancel(err)) throw err
       const axiosError = err as AxiosError
@@ -55,8 +83,6 @@ export function useApi() {
       error.value = msg
       errors.value.push(msg)
       throw err
-    } finally {
-      activeRequests.value--
     }
   }
 

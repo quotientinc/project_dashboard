@@ -852,35 +852,21 @@ class DatabaseManager:
 
         df = pd.read_sql_query(query, self.conn, params=params)
 
-        # Calculate budget_used from time_entries for all projects in bulk (avoid N+1 query)
+        # Calculate budget_used via SQL aggregation (avoids loading all time_entries into Python)
         if not df.empty:
-            # Get all time entries once
-            all_time_entries = self.get_time_entries()
-
-            if not all_time_entries.empty:
-                # Calculate cost for each entry
-                def calculate_entry_cost(row):
-                    if pd.notna(row.get('amount')) and row['amount'] != 0:
-                        return row['amount']
-                    elif pd.notna(row.get('bill_rate')) and pd.notna(row.get('hours')):
-                        return row['hours'] * row['bill_rate']
-                    else:
-                        return 0.0
-
-                all_time_entries['cost'] = all_time_entries.apply(calculate_entry_cost, axis=1)
-
-                # Group by project_id and sum costs
-                budget_by_project = all_time_entries.groupby('project_id')['cost'].sum().reset_index()
-                budget_by_project.columns = ['id', 'budget_used']
-
-                # Merge with projects dataframe
-                df = df.merge(budget_by_project, on='id', how='left')
-
-                # Fill NaN with 0.0 for projects with no time entries
-                df['budget_used'] = df['budget_used'].fillna(0.0)
-            else:
-                # No time entries at all
-                df['budget_used'] = 0.0
+            budget_query = """
+                SELECT t.project_id as id,
+                       SUM(CASE
+                           WHEN t.amount IS NOT NULL AND t.amount != 0 THEN t.amount
+                           WHEN t.bill_rate IS NOT NULL AND t.hours IS NOT NULL THEN t.hours * t.bill_rate
+                           ELSE 0.0
+                       END) as budget_used
+                FROM time_entries t
+                GROUP BY t.project_id
+            """
+            budget_df = pd.read_sql_query(budget_query, self.conn)
+            df = df.merge(budget_df, on='id', how='left')
+            df['budget_used'] = df['budget_used'].fillna(0.0)
 
         return df
 
@@ -1285,14 +1271,15 @@ class DatabaseManager:
         """Get time entries with filters"""
         query = """
             SELECT t.*, e.name as employee_name, p.name as project_name,
-                   (SELECT a.bill_rate
-                    FROM allocations a
-                    WHERE a.project_id = t.project_id
-                    AND a.employee_id = t.employee_id
-                    LIMIT 1) as hourly_rate
+                   ar.bill_rate as hourly_rate
             FROM time_entries t
             JOIN employees e ON t.employee_id = e.id
             JOIN projects p ON t.project_id = p.id
+            LEFT JOIN (
+                SELECT employee_id, project_id, MAX(bill_rate) as bill_rate
+                FROM allocations
+                GROUP BY employee_id, project_id
+            ) ar ON ar.project_id = t.project_id AND ar.employee_id = t.employee_id
         """
         params = []
         conditions = []

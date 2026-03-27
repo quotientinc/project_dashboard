@@ -15,6 +15,60 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def calculate_avg_monthly_invoices_batch(db, lookback_months=12):
+    """Calculate avg monthly invoice for all projects in a single DB query.
+
+    Instead of calling get_performance_metrics per project (N+1 pattern),
+    this queries time_entries directly and groups by project_id and month.
+
+    Revenue logic matches _build_actuals_data in data_processor.py:
+        1) Use amount if non-null and non-zero
+        2) Otherwise use hours * bill_rate from the time_entries row
+
+    Args:
+        db: DatabaseManager instance.
+        lookback_months: Number of months to look back from today (default 12).
+
+    Returns:
+        dict: Mapping of project_id -> avg_monthly_invoice (float).
+              Only projects with positive revenue in at least one month are included.
+    """
+    end_date = datetime.now().strftime('%Y-%m-%d')
+    start_date = (datetime.now() - relativedelta(months=lookback_months)).strftime('%Y-%m-%d')
+
+    query = """
+        SELECT t.project_id,
+               strftime('%Y-%m', t.date) AS month,
+               SUM(CASE
+                   WHEN t.amount IS NOT NULL AND t.amount != 0 THEN t.amount
+                   WHEN t.bill_rate IS NOT NULL THEN t.hours * t.bill_rate
+                   ELSE 0.0
+               END) AS revenue
+        FROM time_entries t
+        WHERE t.date >= ? AND t.date <= ?
+            AND t.project_id NOT LIKE 'FRINGE.%'
+        GROUP BY t.project_id, strftime('%Y-%m', t.date)
+    """
+
+    try:
+        df = pd.read_sql_query(query, db.conn, params=[start_date, end_date])
+    except Exception:
+        logger.exception("Failed to query batch monthly invoices")
+        return {}
+
+    if df.empty:
+        return {}
+
+    # For each project, average over months that had positive revenue
+    result = {}
+    for project_id, group in df.groupby('project_id'):
+        positive_months = group[group['revenue'] > 0]
+        if not positive_months.empty:
+            result[project_id] = positive_months['revenue'].sum() / len(positive_months)
+
+    return result
+
+
 def calculate_avg_monthly_invoice(project_id, db, processor, lookback_months=12):
     """
     Calculate the average monthly invoice for a project over the last N months.
@@ -360,6 +414,12 @@ def calculate_all_projects_utilization(db, processor, start_date, end_date):
     Iterates over all billable projects, computes per-project utilization via
     calculate_project_utilization, and assembles the results into a DataFrame
     with health status annotations.
+
+    TODO: This function has an N+1 query pattern similar to the one fixed in
+    get_funding_review(). Each call to calculate_project_utilization() invokes
+    get_performance_metrics() per project. A batch approach querying all
+    projects at once would be more efficient. The TTL cache on
+    get_performance_metrics partially mitigates the cost for now.
 
     Args:
         db: DatabaseManager instance.
