@@ -1,16 +1,15 @@
 <script setup lang="ts">
-import { ref, computed, inject, onMounted, watch, type Ref } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useApi } from '@/composables/useApi'
 import { formatCurrency } from '@/utils/helpers'
 import KpiCard from '@/components/KpiCard.vue'
 import TimeFrameFilters from '@/components/TimeFrameFilters.vue'
-import type { Employee, TimeEntry } from '@/types'
+import type { TimeEntry } from '@/types'
 
 const route = useRoute()
 const { get, error } = useApi()
 
-const employee = inject<Ref<Employee | null>>('employee', ref(null))
 const employeeId = computed(() => Number(route.params.id))
 
 // ---- Filter State ----
