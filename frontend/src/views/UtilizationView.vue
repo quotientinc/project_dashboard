@@ -333,7 +333,7 @@ function billableRateColor(value: number): string {
 
 function onRowClicked(item: EmployeeRow) {
   if (item?.id != null) {
-    router.push(`/employees/${encodeURIComponent(item.id)}?tab=utilization`)
+    router.push(`/employees/${encodeURIComponent(item.id)}/utilization`)
   }
 }
 
