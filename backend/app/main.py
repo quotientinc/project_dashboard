@@ -11,8 +11,10 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import settings
 from app.core.logger import setup_logging
@@ -59,6 +61,33 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
     lifespan=lifespan,
 )
+
+# ---------------------------------------------------------------------------
+# GZip compression — compress responses larger than 500 bytes
+# ---------------------------------------------------------------------------
+app.add_middleware(GZipMiddleware, minimum_size=500)
+
+# ---------------------------------------------------------------------------
+# Cache-Control headers for static assets
+# ---------------------------------------------------------------------------
+
+
+class StaticCacheMiddleware(BaseHTTPMiddleware):
+    """Add Cache-Control headers for hashed static assets (JS/CSS)."""
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        path = request.url.path
+        if path.startswith("/assets/"):
+            # Vite hashed filenames — cache for 1 year
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        elif path == "/" or path.endswith(".html"):
+            # HTML — always revalidate to pick up new deploys
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.add_middleware(StaticCacheMiddleware)
 
 # ---------------------------------------------------------------------------
 # CORS

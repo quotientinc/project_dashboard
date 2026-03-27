@@ -1,5 +1,7 @@
 import pandas as pd
 import numpy as np
+import threading
+import time as _time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from dateutil.relativedelta import relativedelta
@@ -7,6 +9,14 @@ import calendar
 import logging
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Simple TTL cache for expensive performance metrics computation.
+# Key: (start_date, end_date, constraint_key)  Value: (timestamp, result)
+# ---------------------------------------------------------------------------
+_PERF_CACHE: Dict[tuple, tuple] = {}
+_PERF_CACHE_LOCK = threading.Lock()
+_PERF_CACHE_TTL = 300  # 5 minutes
 
 class DataProcessor:
     """Process and analyze project management data"""
@@ -582,6 +592,17 @@ class DataProcessor:
         if db is None:
             raise ValueError("db (DatabaseManager) is required")
 
+        # Check TTL cache
+        constraint_key = tuple(sorted(constraint.items())) if constraint else ()
+        cache_key = (start_date, end_date, constraint_key)
+        with _PERF_CACHE_LOCK:
+            if cache_key in _PERF_CACHE:
+                cached_at, cached_result = _PERF_CACHE[cache_key]
+                if _time.monotonic() - cached_at < _PERF_CACHE_TTL:
+                    logger.debug("Performance metrics cache hit for %s", cache_key)
+                    return cached_result
+                del _PERF_CACHE[cache_key]
+
         # Parse dates
         start = pd.to_datetime(start_date)
         end = pd.to_datetime(end_date)
@@ -627,6 +648,10 @@ class DataProcessor:
             db, start, end, filter_type, filter_value, months_df
         )
         result['possible'] = possible_data
+
+        # Store in TTL cache
+        with _PERF_CACHE_LOCK:
+            _PERF_CACHE[cache_key] = (_time.monotonic(), result)
 
         return result
 
