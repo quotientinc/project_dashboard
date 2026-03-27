@@ -1,5 +1,6 @@
 import logging
 import sqlite3
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -12,14 +13,7 @@ class DatabaseManager:
         """Initialize database connection and create tables if they don't exist"""
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False, isolation_level=None)
-
-        # Performance PRAGMAs
-        self.conn.execute("PRAGMA journal_mode = WAL;")
-        self.conn.execute("PRAGMA synchronous = NORMAL;")
-        self.conn.execute("PRAGMA cache_size = -64000;")
-        self.conn.execute("PRAGMA temp_store = MEMORY;")
-        self.conn.execute("PRAGMA mmap_size = 268435456;")
+        self._local = threading.local()
 
         self.create_tables()
         self.migrate_employee_allocation_fields()
@@ -32,11 +26,24 @@ class DatabaseManager:
         self.create_indexes()
         self.migrate_add_project_phases_table()
 
-    def close(self):
-        """Close the database connection."""
-        if self.conn:
-            self.conn.close()
-            self.conn = None
+    def _create_connection(self) -> sqlite3.Connection:
+        """Create a new SQLite connection with performance PRAGMAs."""
+        conn = sqlite3.connect(str(self.db_path), isolation_level=None)
+        conn.execute("PRAGMA journal_mode = WAL;")
+        conn.execute("PRAGMA synchronous = NORMAL;")
+        conn.execute("PRAGMA cache_size = -64000;")
+        conn.execute("PRAGMA temp_store = MEMORY;")
+        conn.execute("PRAGMA mmap_size = 268435456;")
+        return conn
+
+    @property
+    def conn(self) -> sqlite3.Connection:
+        """Return a thread-local SQLite connection, creating one if needed."""
+        c = getattr(self._local, 'conn', None)
+        if c is None:
+            c = self._create_connection()
+            self._local.conn = c
+        return c
 
     def create_tables(self):
         """Create all necessary tables"""
@@ -1699,5 +1706,8 @@ class DatabaseManager:
         self.conn.commit()
 
     def close(self):
-        """Close database connection"""
-        self.conn.close()
+        """Close the current thread's database connection."""
+        c = getattr(self._local, 'conn', None)
+        if c is not None:
+            c.close()
+            self._local.conn = None
