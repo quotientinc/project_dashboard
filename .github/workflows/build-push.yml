@@ -39,10 +39,7 @@ jobs:
 
     # On workflow_dispatch, skip matrix entries that don't match the selected input.
     # On push events, inputs.app_type is empty so the condition always passes (builds both).
-    if: >-
-      github.event_name == 'push'
-      || inputs.app_type == 'both'
-      || inputs.app_type == matrix.app_type
+    if: ${{ github.event_name == 'push' || inputs.app_type == 'both' || inputs.app_type == matrix.app_type }}
 
     steps:
       - name: Checkout code
