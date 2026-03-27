@@ -46,21 +46,21 @@ watch(employeeId, fetchEmployee)
 function onEmployeeSwitch(newId: number | null) {
   if (newId != null && newId !== employeeId.value) {
     const pathSegments = route.path.split('/')
-    const currentTab = pathSegments[pathSegments.length - 1] || 'details'
+    const currentTab = pathSegments[pathSegments.length - 1] || 'allocation'
     router.push(`/employees/${newId}/${currentTab}`)
   }
 }
 
 // Tab navigation
 const tabs = [
-  { title: 'Details', value: 'details', icon: 'mdi-account' },
   { title: 'Allocation', value: 'allocation', icon: 'mdi-chart-pie' },
   { title: 'Utilization', value: 'utilization', icon: 'mdi-chart-bar' },
+  { title: 'Details', value: 'details', icon: 'mdi-account' },
 ]
 
 const currentTab = computed(() => {
   const pathSegments = route.path.split('/')
-  return pathSegments[pathSegments.length - 1] || 'details'
+  return pathSegments[pathSegments.length - 1] || 'allocation'
 })
 
 function navigateTab(tab: string) {

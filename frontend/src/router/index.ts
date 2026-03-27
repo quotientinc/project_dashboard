@@ -108,7 +108,7 @@ const router = createRouter({
           name: 'employee-detail',
           redirect: (to) => {
             const base = to.path.replace(/\/$/, '')
-            return { path: `${base}/details` }
+            return { path: `${base}/allocation` }
           },
         },
         {
