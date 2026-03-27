@@ -39,7 +39,8 @@ interface ProjectOption {
 interface TableRow {
   entity: string
   metric: string
-  [monthKey: string]: string | number
+  rowspan?: number
+  [monthKey: string]: string | number | undefined
 }
 
 // ---- State ----
@@ -108,6 +109,26 @@ function getSortedMonths(section: Record<string, Record<string, EntityData>> | u
   return keys
 }
 
+/**
+ * Build a name lookup from the entity ID.
+ * When filtering by employee → entities are project IDs (strings).
+ * When filtering by project or no filter → entities are employee IDs (numeric strings).
+ */
+function resolveEntityName(id: string): string {
+  if (selectedEmployee.value) {
+    // Entities are project IDs
+    const proj = projects.value.find(p => p.id === id)
+    return proj?.name ?? id
+  }
+  // Entities are employee IDs
+  const emp = employees.value.find(e => String(e.id) === id)
+  return emp?.name ?? id
+}
+
+const entityColumnTitle = computed(() => {
+  return selectedEmployee.value ? 'Project' : 'Employee'
+})
+
 function buildTableData(section: Record<string, Record<string, EntityData>> | undefined): {
   rows: TableRow[]
   headers: { title: string; key: string; sortable: boolean; align?: 'start' | 'end' | 'center'; width?: string }[]
@@ -118,36 +139,67 @@ function buildTableData(section: Record<string, Record<string, EntityData>> | un
   const months = getSortedMonths(section)
   const entityIds = new Set<string>()
   for (const monthData of Object.values(section)) {
-    for (const eid of Object.keys(monthData)) {
-      entityIds.add(eid)
-    }
+    for (const eid of Object.keys(monthData)) entityIds.add(eid)
   }
 
-  const rows: TableRow[] = []
-  const sortedEntities = Array.from(entityIds).sort()
+  // Build entity groups with their 3 metric rows
+  interface GroupData {
+    entityName: string
+    hours: Record<string, number>
+    hoursRow: TableRow
+    revenueRow: TableRow
+    daysRow: TableRow
+  }
 
-  for (const entity of sortedEntities) {
-    const hoursRow: TableRow = { entity, metric: 'Hours' }
-    const revenueRow: TableRow = { entity, metric: 'Revenue' }
-    const daysRow: TableRow = { entity, metric: 'Worked Days' }
+  const groups: GroupData[] = []
+  for (const entityId of entityIds) {
+    const displayName = resolveEntityName(entityId)
+    const hours: Record<string, number> = {}
+    const hoursRow: TableRow = { entity: displayName, metric: 'Hours', rowspan: 3 }
+    const revenueRow: TableRow = { entity: displayName, metric: 'Revenue' }
+    const daysRow: TableRow = { entity: displayName, metric: 'Worked Days' }
 
     for (const month of months) {
-      const data = section[month]?.[entity]
-      hoursRow[month] = data ? data.hours : 0
+      const data = section[month]?.[entityId]
+      const h = data ? data.hours : 0
+      hours[month] = h
+      hoursRow[month] = h
       revenueRow[month] = data ? data.revenue : 0
       daysRow[month] = data ? data.worked_days : 0
     }
 
-    rows.push(hoursRow, revenueRow, daysRow)
+    groups.push({ entityName: displayName, hours, hoursRow, revenueRow, daysRow })
+  }
+
+  // Sort groups alphabetically by entity name
+  groups.sort((a, b) => a.entityName.localeCompare(b.entityName))
+
+  // Flatten groups to rows
+  const rows: TableRow[] = []
+  for (const g of groups) {
+    rows.push(g.hoursRow, g.revenueRow, g.daysRow)
   }
 
   const headers = [
-    { title: 'Entity', key: 'entity', sortable: true, width: '180px' },
-    { title: 'Metric', key: 'metric', sortable: true, width: '120px' },
+    { title: entityColumnTitle.value, key: 'entity', sortable: false, width: '180px' },
+    { title: 'Metric', key: 'metric', sortable: false, width: '100px' },
     ...months.map(m => ({ title: m, key: m, sortable: false, align: 'end' as const, width: '120px' })),
   ]
 
   return { rows, headers, months }
+}
+
+function metricColorClass(metric: string): string {
+  if (metric === 'Hours') return 'hrs-cell'
+  if (metric === 'Revenue') return 'rev-cell'
+  return 'days-cell'
+}
+
+function formatMetricValue(value: unknown, metric: string): string {
+  const num = Number(value) || 0
+  if (metric === 'Revenue') return formatCurrency(num)
+  if (metric === 'Worked Days') return String(Math.round(num))
+  return num.toFixed(1)
 }
 
 function computeKpis(section: Record<string, Record<string, EntityData>> | undefined): {
@@ -182,15 +234,6 @@ const possibleData = computed(() => buildTableData(performanceData.value?.possib
 const actualsKpis = computed(() => computeKpis(performanceData.value?.actuals))
 const projectedKpis = computed(() => computeKpis(performanceData.value?.projected))
 const possibleKpis = computed(() => computeKpis(performanceData.value?.possible))
-
-// ---- Cell formatting ----
-
-function formatCell(value: unknown, metric: string): string {
-  const num = Number(value) || 0
-  if (metric === 'Revenue') return formatCurrency(num)
-  if (metric === 'Worked Days') return String(Math.round(num))
-  return num.toFixed(1)
-}
 
 // ---- Data fetching ----
 
@@ -271,12 +314,10 @@ function handleDownloadCsv(tabName: string) {
 
   const csvRows = rows.map(row => {
     const out: Record<string, unknown> = {
-      Entity: row.entity,
+      [entityColumnTitle.value]: row.entity,
       Metric: row.metric,
     }
-    for (const m of months) {
-      out[m] = row[m]
-    }
+    for (const m of months) { out[m] = row[m] ?? 0 }
     return out
   })
 
@@ -481,10 +522,18 @@ onMounted(() => {
                     :items-per-page="-1"
                     density="compact"
                     fixed-header
-                    class="elevation-1"
+                    class="elevation-1 timesheet-table"
                   >
+                    <template #item.entity="{ item }">
+                      <span v-if="item.rowspan" class="entity-name">{{ item.entity }}</span>
+                    </template>
+                    <template #item.metric="{ item }">
+                      <span class="metric-label">{{ item.metric }}</span>
+                    </template>
                     <template v-for="month in actualsData.months" :key="month" #[`item.${month}`]="{ item }">
-                      {{ formatCell(item[month], item.metric) }}
+                      <span :class="metricColorClass(item.metric)">
+                        {{ formatMetricValue(item[month], item.metric) }}
+                      </span>
                     </template>
                     <template #bottom />
                   </v-data-table>
@@ -545,10 +594,18 @@ onMounted(() => {
                     :items-per-page="-1"
                     density="compact"
                     fixed-header
-                    class="elevation-1"
+                    class="elevation-1 timesheet-table"
                   >
+                    <template #item.entity="{ item }">
+                      <span v-if="item.rowspan" class="entity-name">{{ item.entity }}</span>
+                    </template>
+                    <template #item.metric="{ item }">
+                      <span class="metric-label">{{ item.metric }}</span>
+                    </template>
                     <template v-for="month in projectedData.months" :key="month" #[`item.${month}`]="{ item }">
-                      {{ formatCell(item[month], item.metric) }}
+                      <span :class="metricColorClass(item.metric)">
+                        {{ formatMetricValue(item[month], item.metric) }}
+                      </span>
                     </template>
                     <template #bottom />
                   </v-data-table>
@@ -609,10 +666,18 @@ onMounted(() => {
                     :items-per-page="-1"
                     density="compact"
                     fixed-header
-                    class="elevation-1"
+                    class="elevation-1 timesheet-table"
                   >
+                    <template #item.entity="{ item }">
+                      <span v-if="item.rowspan" class="entity-name">{{ item.entity }}</span>
+                    </template>
+                    <template #item.metric="{ item }">
+                      <span class="metric-label">{{ item.metric }}</span>
+                    </template>
                     <template v-for="month in possibleData.months" :key="month" #[`item.${month}`]="{ item }">
-                      {{ formatCell(item[month], item.metric) }}
+                      <span :class="metricColorClass(item.metric)">
+                        {{ formatMetricValue(item[month], item.metric) }}
+                      </span>
                     </template>
                     <template #bottom />
                   </v-data-table>
@@ -635,3 +700,49 @@ onMounted(() => {
     </template>
   </div>
 </template>
+
+<style scoped>
+:deep(.timesheet-table table) {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.entity-name {
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.metric-label {
+  font-size: 0.8rem;
+  color: rgba(var(--v-theme-on-surface), 0.6);
+}
+
+.hrs-cell {
+  color: #42a5f5;
+}
+
+.rev-cell {
+  color: #66bb6a;
+}
+
+.days-cell {
+  color: #ffb74d;
+}
+
+/*
+ * Entity column border handling:
+ * - 1st row of group (3n+1): no bottom border on entity cell (visually merges with rows below)
+ * - 2nd row of group (3n+2): no bottom border on entity cell
+ * - 3rd row of group (3n+0): thick group separator border on ALL cells including entity
+ */
+:deep(.v-data-table tbody tr:nth-child(3n+1) td:first-child),
+:deep(.v-data-table tbody tr:nth-child(3n+2) td:first-child) {
+  border-bottom: none !important;
+}
+
+/* Group separator: thick border on the last row of each 3-row group */
+:deep(.v-data-table tbody tr:nth-child(3n) td) {
+  border-bottom: 2px solid rgba(var(--v-border-color), 0.3) !important;
+}
+
+</style>
