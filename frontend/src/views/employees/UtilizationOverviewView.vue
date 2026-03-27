@@ -6,7 +6,7 @@ import { useEmployeesStore } from '@/stores/employees'
 import { utilPctColor, utilBandShapes, downloadCsv } from '@/utils/helpers'
 import KpiCard from '@/components/KpiCard.vue'
 import PlotlyChart from '@/components/PlotlyChart.vue'
-import UtilizationFilters from '@/components/UtilizationFilters.vue'
+import TimeFrameFilters from '@/components/TimeFrameFilters.vue'
 import type { DetailedUtilizationEntry, TimeEntry } from '@/types'
 
 const { get } = useApi()
@@ -34,8 +34,8 @@ const utilDialogEmployee = ref<DetailedUtilizationEntry | null>(null)
 const dialogTimeEntries = ref<TimeEntry[]>([])
 const dialogLoading = ref(false)
 
-// Template ref for UtilizationFilters component
-const filtersRef = ref<InstanceType<typeof UtilizationFilters> | null>(null)
+// Template ref for TimeFrameFilters component
+const filtersRef = ref<InstanceType<typeof TimeFrameFilters> | null>(null)
 
 // ---------------------------------------------------------------------------
 // YTD data (parallel fetch, merged into main data)
@@ -612,16 +612,25 @@ function exportUtilCsv() {
 <template>
   <div>
     <!-- Controls -->
-    <UtilizationFilters
+    <TimeFrameFilters
       ref="filtersRef"
       v-model:year="utilYear"
       v-model:time-frame-type="utilTimeFrameType"
       v-model:selected-month="selectedMonth"
       v-model:selected-quarter="selectedQuarter"
       v-model:fy-type="fyType"
-      v-model:include-projected-hours="includeProjectedHours"
       class="mb-4"
-    />
+    >
+      <v-col cols="auto">
+        <v-switch
+          v-model="includeProjectedHours"
+          label="Include projected hours"
+          density="compact"
+          hide-details
+          color="primary"
+        />
+      </v-col>
+    </TimeFrameFilters>
 
     <!-- Utilization Filters -->
     <v-row class="mb-2">

@@ -11,7 +11,7 @@ import { useApi } from '@/composables/useApi'
 import { utilPctColor, utilBandShapes, downloadCsv } from '@/utils/helpers'
 import KpiCard from '@/components/KpiCard.vue'
 import PlotlyChart from '@/components/PlotlyChart.vue'
-import UtilizationFilters from '@/components/UtilizationFilters.vue'
+import TimeFrameFilters from '@/components/TimeFrameFilters.vue'
 import type { DetailedUtilizationEntry, TimeEntry } from '@/types'
 import type Plotly from 'plotly.js-dist-min'
 
@@ -20,7 +20,7 @@ const api = useApi()
 
 // ---- Filter state ----
 
-const filtersRef = ref<InstanceType<typeof UtilizationFilters> | null>(null)
+const filtersRef = ref<InstanceType<typeof TimeFrameFilters> | null>(null)
 
 const filterYear = ref(new Date().getFullYear())
 const filterTimeFrameType = ref<'Monthly' | 'Quarterly' | 'QTD' | 'YTD'>('YTD')
@@ -435,15 +435,24 @@ onMounted(fetchAllData)
     <!-- Filter Section -->
     <v-card class="mb-4">
       <v-card-text>
-        <UtilizationFilters
+        <TimeFrameFilters
           ref="filtersRef"
           v-model:year="filterYear"
           v-model:time-frame-type="filterTimeFrameType"
           v-model:selected-month="filterSelectedMonth"
           v-model:selected-quarter="filterSelectedQuarter"
           v-model:fy-type="filterFyType"
-          v-model:include-projected-hours="filterIncludeProjected"
-        />
+        >
+          <v-col cols="auto">
+            <v-switch
+              v-model="filterIncludeProjected"
+              label="Include projected hours"
+              density="compact"
+              hide-details
+              color="primary"
+            />
+          </v-col>
+        </TimeFrameFilters>
         <v-row align="center" class="mt-2">
           <v-col cols="12" sm="6" md="4">
             <v-autocomplete

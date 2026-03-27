@@ -19,14 +19,12 @@ const props = withDefaults(defineProps<{
   selectedMonth: string
   selectedQuarter: string
   fyType: 'Company' | 'Gov'
-  includeProjectedHours: boolean
 }>(), {
   year: () => new Date().getFullYear(),
   timeFrameType: 'YTD',
   selectedMonth: () => MONTH_NAMES[new Date().getMonth()]!,
   selectedQuarter: () => `Q${Math.ceil((new Date().getMonth() + 1) / 3)}`,
   fyType: 'Company',
-  includeProjectedHours: true,
 })
 
 // ---------------------------------------------------------------------------
@@ -38,7 +36,6 @@ const emit = defineEmits<{
   'update:selectedMonth': [value: string]
   'update:selectedQuarter': [value: string]
   'update:fyType': [value: 'Company' | 'Gov']
-  'update:includeProjectedHours': [value: boolean]
 }>()
 
 // ---------------------------------------------------------------------------
@@ -201,14 +198,6 @@ defineExpose({ timeFrame, dateRange, periodLabel })
         <v-radio label="Gov" value="Gov" />
       </v-radio-group>
     </v-col>
-    <v-col cols="2">
-      <v-checkbox
-        :model-value="includeProjectedHours"
-        @update:model-value="emit('update:includeProjectedHours', $event as boolean)"
-        label="Include projected hours"
-        density="compact"
-        hide-details
-      />
-    </v-col>
+    <slot />
   </v-row>
 </template>

@@ -126,6 +126,11 @@ const router = createRouter({
           name: 'employee-utilization',
           component: () => import('@/views/employees/tabs/EmployeeUtilizationTab.vue'),
         },
+        {
+          path: 'timesheets',
+          name: 'employee-timesheets',
+          component: () => import('@/views/employees/tabs/EmployeeTimesheetsTab.vue'),
+        },
       ],
     },
     {

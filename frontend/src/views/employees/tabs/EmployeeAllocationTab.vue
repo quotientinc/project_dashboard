@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useApi } from '@/composables/useApi'
 import KpiCard from '@/components/KpiCard.vue'
 import PlotlyChart from '@/components/PlotlyChart.vue'
+import TimeFrameFilters from '@/components/TimeFrameFilters.vue'
 import type { Employee, Allocation, Project, AllocationCreate } from '@/types'
 
 const route = useRoute()
@@ -33,11 +34,19 @@ interface MonthRecord {
 }
 
 // -------------------------------------------------------------------
-// Year selector
+// Filter State
 // -------------------------------------------------------------------
-const currentYear = new Date().getFullYear()
-const selectedYear = ref(currentYear)
-const yearOptions = [currentYear - 1, currentYear, currentYear + 1]
+const filtersRef = ref<InstanceType<typeof TimeFrameFilters> | null>(null)
+
+function getMonthName(index: number): string {
+  return ['January','February','March','April','May','June','July','August','September','October','November','December'][index] ?? 'January'
+}
+
+const filterYear = ref(new Date().getFullYear())
+const filterTimeFrameType = ref<'Monthly' | 'Quarterly' | 'QTD' | 'YTD'>('YTD')
+const filterSelectedMonth = ref(getMonthName(new Date().getMonth()))
+const filterSelectedQuarter = ref(`Q${Math.ceil((new Date().getMonth() + 1) / 3)}`)
+const filterFyType = ref<'Company' | 'Gov'>('Company')
 
 // -------------------------------------------------------------------
 // Matrix state
@@ -56,6 +65,22 @@ interface MatrixRow {
 }
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/**
+ * Month numbers (1-12) visible based on the selected date range filter.
+ */
+const visibleMonths = computed<number[]>(() => {
+  const range = filtersRef.value?.dateRange
+  if (!range) return Array.from({ length: 12 }, (_, i) => i + 1)
+  const startMonth = parseInt(range.startDate.slice(5, 7))
+  const endMonth = parseInt(range.endDate.slice(5, 7))
+  // Handle ranges that stay within the selected year
+  const months: number[] = []
+  for (let m = startMonth; m <= endMonth; m++) {
+    months.push(m)
+  }
+  return months.length > 0 ? months : Array.from({ length: 12 }, (_, i) => i + 1)
+})
 
 function getCell(months: Record<number, CellValue>, m: number): CellValue {
   return months[m] ?? { fte: 0, bill_rate: null, allocation_id: null }
@@ -86,7 +111,7 @@ async function fetchData() {
     const [allocData, projectsData, months] = await Promise.all([
       get<Allocation[]>(`/allocations/?employee_id=${employeeId.value}`),
       get<Project[]>('/projects/'),
-      get<MonthRecord[]>(`/months/?year=${selectedYear.value}`),
+      get<MonthRecord[]>(`/months/?year=${filterYear.value}`),
     ])
     allocations.value = allocData
     projects.value = projectsData
@@ -100,8 +125,11 @@ async function fetchData() {
 }
 
 onMounted(fetchData)
-watch(employeeId, fetchData)
-watch(selectedYear, fetchData)
+watch(
+  [employeeId, filterYear, filterTimeFrameType, filterSelectedMonth, filterSelectedQuarter, filterFyType],
+  fetchData,
+  { flush: 'post' },
+)
 
 // -------------------------------------------------------------------
 // Build matrix from raw allocations
@@ -113,7 +141,7 @@ function buildMatrix() {
   // Filter allocations to the selected year
   const yearAllocations = allocations.value.filter((a) => {
     const date = new Date(a.allocation_date)
-    return date.getFullYear() === selectedYear.value
+    return date.getFullYear() === filterYear.value
   })
 
   for (const alloc of yearAllocations) {
@@ -217,7 +245,7 @@ function monthTotalLabel(month: number): string {
 // Row totals
 function rowTotalFte(row: MatrixRow): number {
   let sum = 0
-  for (let m = 1; m <= 12; m++) {
+  for (const m of visibleMonths.value) {
     sum += getCell(row.months, m).fte
   }
   return sum
@@ -231,27 +259,27 @@ function workingDaysForMonth(month: number): number {
   return rec ? rec.working_days - rec.holidays : 22 // default fallback
 }
 
-function totalWorkingDaysInYear(): number {
-  let total = 0
-  for (let m = 1; m <= 12; m++) {
-    total += workingDaysForMonth(m)
-  }
-  return total
-}
-
 // -------------------------------------------------------------------
 // KPI computations
 // -------------------------------------------------------------------
 const targetAllocation = computed(() => employee.value?.target_allocation ?? 1.0)
 
+const totalWorkingDaysInRange = computed(() => {
+  let total = 0
+  for (const m of visibleMonths.value) {
+    total += workingDaysForMonth(m)
+  }
+  return total
+})
+
 const possibleHours = computed(() => {
-  return targetAllocation.value * totalWorkingDaysInYear() * 8
+  return targetAllocation.value * totalWorkingDaysInRange.value * 8
 })
 
 const allocatedHours = computed(() => {
   let total = 0
   for (const row of matrixRows.value) {
-    for (let m = 1; m <= 12; m++) {
+    for (const m of visibleMonths.value) {
       total += getCell(row.months, m).fte * workingDaysForMonth(m) * 8
     }
   }
@@ -279,7 +307,7 @@ const breakdownItems = computed(() => {
     let totalFte = 0
     let totalHours = 0
     let monthsActive = 0
-    for (let m = 1; m <= 12; m++) {
+    for (const m of visibleMonths.value) {
       const fte = getCell(row.months, m).fte
       totalFte += fte
       totalHours += fte * workingDaysForMonth(m) * 8
@@ -303,7 +331,7 @@ const pieData = computed(() => {
   const values: number[] = []
   for (const row of matrixRows.value) {
     let hours = 0
-    for (let m = 1; m <= 12; m++) {
+    for (const m of visibleMonths.value) {
       hours += getCell(row.months, m).fte * workingDaysForMonth(m) * 8
     }
     if (hours > 0) {
@@ -393,7 +421,7 @@ async function saveChanges() {
 
     // 2. Upsert changed cells
     const upsertPromises = changedCells.value.map((change) => {
-      const allocationDate = `${selectedYear.value}-${String(change.month).padStart(2, '0')}-01`
+      const allocationDate = `${filterYear.value}-${String(change.month).padStart(2, '0')}-01`
       const payload: AllocationCreate = {
         project_id: change.project_id,
         employee_id: employeeId.value,
@@ -448,18 +476,29 @@ function formatVariance(val: number): string {
         {{ error }}
       </v-alert>
 
-      <!-- Controls Row -->
-      <v-row class="mb-3 align-center">
+      <!-- Filters -->
+      <TimeFrameFilters
+        ref="filtersRef"
+        v-model:year="filterYear"
+        v-model:time-frame-type="filterTimeFrameType"
+        v-model:selected-month="filterSelectedMonth"
+        v-model:selected-quarter="filterSelectedQuarter"
+        v-model:fy-type="filterFyType"
+        class="mb-3"
+      >
         <v-col cols="auto">
-          <v-select
-            v-model="selectedYear"
-            :items="yearOptions"
-            label="Year"
+          <v-switch
+            v-model="showBillRates"
+            label="Show Bill Rates"
             density="compact"
             hide-details
-            style="min-width: 120px"
+            color="primary"
           />
         </v-col>
+      </TimeFrameFilters>
+
+      <!-- Controls Row -->
+      <v-row class="mb-3 align-center">
         <v-col cols="auto">
           <v-btn
             color="primary"
@@ -469,15 +508,6 @@ function formatVariance(val: number): string {
           >
             Add Project
           </v-btn>
-        </v-col>
-        <v-col cols="auto">
-          <v-switch
-            v-model="showBillRates"
-            label="Show Bill Rates"
-            density="compact"
-            hide-details
-            color="primary"
-          />
         </v-col>
         <v-spacer />
         <v-col cols="auto" class="d-flex align-center ga-2">
@@ -513,7 +543,7 @@ function formatVariance(val: number): string {
       <!-- FTE Matrix -->
       <v-card class="mb-4">
         <v-card-title class="text-subtitle-1 font-weight-bold pb-0">
-          FTE Matrix - {{ selectedYear }}
+          FTE Matrix - {{ filtersRef?.periodLabel ?? filterYear }}
         </v-card-title>
         <v-card-text class="pa-0">
           <div class="fte-matrix-wrapper">
@@ -522,11 +552,11 @@ function formatVariance(val: number): string {
                 <tr>
                   <th class="sticky-col project-col">Project</th>
                   <th
-                    v-for="(label, idx) in MONTH_LABELS"
-                    :key="idx"
+                    v-for="m in visibleMonths"
+                    :key="m"
                     class="month-col text-center"
                   >
-                    {{ label }}
+                    {{ MONTH_LABELS[m - 1] }}
                   </th>
                   <th class="total-col text-center">Total</th>
                   <th class="action-col" />
@@ -535,8 +565,8 @@ function formatVariance(val: number): string {
               <tbody>
                 <!-- No data -->
                 <tr v-if="matrixRows.length === 0">
-                  <td :colspan="15" class="text-center text-medium-emphasis pa-6">
-                    No allocations for {{ selectedYear }}. Click "Add Project" to begin.
+                  <td :colspan="visibleMonths.length + 3" class="text-center text-medium-emphasis pa-6">
+                    No allocations for the selected period. Click "Add Project" to begin.
                   </td>
                 </tr>
 
@@ -556,7 +586,7 @@ function formatVariance(val: number): string {
                     </a>
                   </td>
                   <td
-                    v-for="m in 12"
+                    v-for="m in visibleMonths"
                     :key="m"
                     class="month-cell"
                     :style="{ backgroundColor: cellBgColor(row.months[m]!.fte) }"
@@ -604,7 +634,7 @@ function formatVariance(val: number): string {
                 <tr v-if="matrixRows.length > 0" class="totals-row">
                   <td class="sticky-col project-col font-weight-bold">Total FTE</td>
                   <td
-                    v-for="m in 12"
+                    v-for="m in visibleMonths"
                     :key="'total-' + m"
                     class="month-cell text-center font-weight-bold"
                     :style="{ backgroundColor: totalBgColor(monthTotal(m)) }"
@@ -625,7 +655,7 @@ function formatVariance(val: number): string {
       <!-- Allocation Overview -->
       <v-card class="mb-4">
         <v-card-title class="text-subtitle-1 font-weight-bold">
-          Allocation Overview - {{ selectedYear }}
+          Allocation Overview - {{ filtersRef?.periodLabel ?? filterYear }}
         </v-card-title>
         <v-card-text>
           <!-- KPI Cards -->

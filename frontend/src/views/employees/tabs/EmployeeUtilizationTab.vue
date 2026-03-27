@@ -5,7 +5,7 @@ import { useApi } from '@/composables/useApi'
 import { utilPctColor, utilBandShapes } from '@/utils/helpers'
 import KpiCard from '@/components/KpiCard.vue'
 import PlotlyChart from '@/components/PlotlyChart.vue'
-import UtilizationFilters from '@/components/UtilizationFilters.vue'
+import TimeFrameFilters from '@/components/TimeFrameFilters.vue'
 import type { Employee, DetailedUtilizationEntry, EmployeeMonthUtilization } from '@/types'
 import type Plotly from 'plotly.js-dist-min'
 
@@ -17,7 +17,7 @@ const employeeId = computed(() => Number(route.params.id))
 
 // ---- Filter State ----
 
-const filtersRef = ref<InstanceType<typeof UtilizationFilters> | null>(null)
+const filtersRef = ref<InstanceType<typeof TimeFrameFilters> | null>(null)
 
 function getMonthName(index: number): string {
   return ['January','February','March','April','May','June','July','August','September','October','November','December'][index] ?? 'January'
@@ -195,16 +195,25 @@ function formatNum(val: number | null | undefined, decimals = 1): string {
 <template>
   <div>
     <!-- Utilization Filters -->
-    <UtilizationFilters
+    <TimeFrameFilters
       ref="filtersRef"
       v-model:year="filterYear"
       v-model:time-frame-type="filterTimeFrameType"
       v-model:selected-month="filterSelectedMonth"
       v-model:selected-quarter="filterSelectedQuarter"
       v-model:fy-type="filterFyType"
-      v-model:include-projected-hours="filterIncludeProjected"
       class="mb-4"
-    />
+    >
+      <v-col cols="auto">
+        <v-switch
+          v-model="filterIncludeProjected"
+          label="Include projected hours"
+          density="compact"
+          hide-details
+          color="primary"
+        />
+      </v-col>
+    </TimeFrameFilters>
 
     <!-- Loading -->
     <v-skeleton-loader v-if="dataLoading" type="card, card, image, table" />

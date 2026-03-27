@@ -55,6 +55,7 @@ function onEmployeeSwitch(newId: number | null) {
 const tabs = [
   { title: 'Allocation', value: 'allocation', icon: 'mdi-chart-pie' },
   { title: 'Utilization', value: 'utilization', icon: 'mdi-chart-bar' },
+  { title: 'Timesheets', value: 'timesheets', icon: 'mdi-clipboard-text-clock' },
   { title: 'Details', value: 'details', icon: 'mdi-account' },
 ]
 
