@@ -357,9 +357,9 @@ def _compute_employee_utilizations(
             if emp_id not in emp_accum:
                 emp_accum[emp_id] = {
                     "employee_id": emp_id,
-                    "name": emp.get("name") or "",
-                    "department": emp.get("department") or "",
-                    "role": emp.get("role") or "",
+                    "name": emp.get("name") if pd.notna(emp.get("name")) else "",
+                    "department": emp.get("department") if pd.notna(emp.get("department")) else "",
+                    "role": emp.get("role") if pd.notna(emp.get("role")) else "",
                     "fte": float(emp.get("target_allocation", 1.0) or 1.0),
                     "total_hours": 0.0,
                     "actual_billable_hours": 0.0,
@@ -1204,10 +1204,10 @@ def _build_funding_entry(
 
     return FundingReviewEntry(
         project_id=project_id,
-        project_name=str(project.get("name", project_id)),
-        client=project.get("client"),
-        project_manager=project.get("project_manager"),
-        status=project.get("status"),
+        project_name=project.get("name") if pd.notna(project.get("name")) else str(project_id),
+        client=project.get("client") if pd.notna(project.get("client")) else None,
+        project_manager=project.get("project_manager") if pd.notna(project.get("project_manager")) else None,
+        status=project.get("status") if pd.notna(project.get("status")) else None,
         quoted_value=float(project.get("quoted_value", 0) or 0),
         awarded_value=awarded_value,
         budget_used=budget_used,
@@ -1728,8 +1728,8 @@ def get_detailed_utilization(
 
         results.append(DetailedUtilizationEntry(
             employee_id=eid,
-            employee_name=str(emp.get("name", "")),
-            role=emp.get("role"),
+            employee_name=emp.get("name") if pd.notna(emp.get("name")) else "",
+            role=emp.get("role") if pd.notna(emp.get("role")) else "",
             billable=int(emp.get("billable", 0) or 0),
             possible_hours=round(total_possible, 2),
             actual_hours=round(total_actual, 2),
