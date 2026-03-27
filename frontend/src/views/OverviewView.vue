@@ -817,7 +817,7 @@ watch(timeRange, () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(var(--v-theme-surface), 0.55);
   pointer-events: none;
   z-index: 10;
 }
@@ -826,9 +826,9 @@ watch(timeRange, () => {
   transform: rotate(-25deg);
   font-size: 2.5rem;
   font-weight: 800;
-  color: rgba(180, 83, 9, 0.35);
+  color: rgba(var(--v-theme-on-surface), 0.25);
   white-space: nowrap;
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  text-shadow: none;
   letter-spacing: 2px;
 }
 </style>
