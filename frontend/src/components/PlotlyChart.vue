@@ -80,7 +80,7 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  () => [props.data, props.layout],
+  () => [props.data, props.layout, props.loading],
   () => {
     nextTick(() => {
       renderChart()
